@@ -11718,37 +11718,16 @@
     syncPurgeButtons();
   }
 
+  // 저장 키·카탈로그 정리는 설정 화면과 같은 공용 처리(recordManage.js)에 맡긴다.
+  // ⚠ 본문 삭제 실패는 그쪽에서 던진다(지워지지 않았는데 행만 사라지면 어긋난다).
   async function purgeRecapChannels(ids) {
-    const keys = [];
-    const byAccount = new Map();
-    for (const id of ids) {
-      const entry = purgeChannels.get(id);
-      if (!entry) continue;
-      keys.push(...entry.keys);
-      if (!byAccount.has(entry.accountId)) byAccount.set(entry.accountId, []);
-      byAccount.get(entry.accountId).push(entry.channelId);
-    }
-    if (!keys.length) return;
-    // ⚠ 본문 삭제 실패는 삼키지 않는다. 지워지지 않았는데 행만 사라지면
-    //   화면과 저장소가 어긋난다.
-    await chrome.storage.local.remove(keys);
-    for (const [accountId, channels] of byAccount) {
-      const catalogKey = `chatRecapCatalog:${accountId}`;
-      try {
-        const stored = (await chrome.storage.local.get(catalogKey))?.[
-          catalogKey
-        ];
-        if (!stored || typeof stored !== "object") continue;
-        const next = { ...stored, channels: { ...(stored.channels || {}) } };
-        for (const channelId of channels) delete next.channels[channelId];
-        if (Object.keys(next.channels).length) {
-          await chrome.storage.local.set({ [catalogKey]: next });
-        } else {
-          await chrome.storage.local.remove(catalogKey);
-        }
-      } catch {}
-    }
+    const groups = ids.map((id) => purgeChannels.get(id)).filter(Boolean);
+    await globalThis.CheeseRecordManage.chatRecap.remove(groups);
   }
+
+  const confirmPurge = (options) =>
+    globalThis.CheeseRecordManage?.confirm(options) ??
+    Promise.resolve(confirm(`${options.title}\n${options.message}`));
 
   // ⚠ 선택 삭제는 목록 전체를 다시 그리지 않는다. 고른 행만 먼저 흐리게 하고
   //   끝나면 그 행만 없앤다(나머지 행과 이미 채운 채널명이 그대로 남는다).
@@ -11762,6 +11741,11 @@
         (input) => input.value,
       );
       if (!ids.length) return;
+      const ok = await confirmPurge({
+        title: "채팅 기록 선택 삭제",
+        message: `선택한 ${ids.length.toLocaleString("ko-KR")}개 채널의 채팅 기록을 지웁니다.\n지운 기록은 되돌릴 수 없습니다.`,
+      });
+      if (!ok) return;
       button.disabled = true;
       const rows = ids
         .map((id) =>
@@ -11784,43 +11768,47 @@
       syncPurgeButtons();
     });
 
-    // ⚠ 전체 삭제는 되돌릴 수 없다. 한 번 더 눌러야 실행한다.
+    // ⚠ 전체 삭제는 되돌릴 수 없다. 확인 모달을 거친다.
     $("crcPurgeAll")?.addEventListener("click", async (event) => {
       const button = event.currentTarget;
-      if (button.dataset.armed !== "1") {
-        button.dataset.armed = "1";
-        button.textContent = "정말 전체 삭제할까요?";
-        setTimeout(() => {
-          if (!button.isConnected) return;
-          delete button.dataset.armed;
-          button.textContent = "전체 삭제";
-        }, 3000);
-        return;
-      }
-      delete button.dataset.armed;
-      button.textContent = "전체 삭제";
+      const ok = await confirmPurge({
+        title: "채팅 기록 전체 삭제",
+        message: "저장된 채팅 기록을 모두 지웁니다.\n지운 기록은 되돌릴 수 없으며, 다시보기에서 다시 가져올 수 있습니다.",
+        confirmLabel: "전체 삭제",
+      });
+      if (!ok) return;
       button.disabled = true;
       try {
-        await purgeRecapChannels([...purgeChannels.keys()]);
+        // 가져오기 완료 표식까지 비워 다시보기를 처음부터 다시 모을 수 있게 한다.
+        await globalThis.CheeseRecordManage.chatRecap.clearAll();
       } catch {
         button.disabled = false;
         return;
       }
-      // 가져오기 완료 표식까지 비워야 다시보기를 처음부터 다시 모을 수 있다.
-      try {
-        await chrome.storage.local.remove([
-          "chatRecapImportedVideos",
-          "chatRecapVerifiedVideosV2",
-          "chatRecapVodEventLinksV3",
-          "chatRecapHistoryRevisionV1",
-          "chatRecapNewVideosV1",
-        ]);
-      } catch {}
       purgeChannels = new Map();
       if (list) list.textContent = "저장된 채팅 기록이 없습니다.";
       syncPurgeButtons();
     });
   }
+
+  // 헤더 '기록 관리': 채널별 선택 삭제·전체 삭제(설정·통나무파워 내역과 같은 모달).
+  $("crcManage")?.addEventListener("click", () => {
+    const manage = globalThis.CheeseRecordManage;
+    manage?.openManager({
+      title: "채팅 기록 관리",
+      description: "채널을 골라 저장된 채팅 기록을 지우거나 전체를 비웁니다. 지운 기록은 되돌릴 수 없으며, 다시보기에서 다시 가져올 수 있습니다.",
+      noun: "채팅 기록",
+      emptyText: "저장된 채팅 기록이 없습니다.",
+      load: () => manage.chatRecap.collect(),
+      remove: (groups) => manage.chatRecap.remove(groups),
+      removeAll: () => manage.chatRecap.clearAll(),
+      enrich: async (group) => {
+        const info = await resolveDisplayChannelInfo(group.channelId);
+        return info ? { name: info.name, image: info.imageUrl ? profileThumb(info.imageUrl) : "" } : null;
+      },
+      onChanged: () => void refresh(),
+    });
+  });
 
   function openImportModal() {
     setHidden("crcModal", false);

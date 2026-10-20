@@ -127,6 +127,8 @@ const trackCode = watch.slice(start, end);
         applyGridTemplates(layout, side, inset, false);
         scheduleTrackHandles();
       }
+      // 내 배치의 채팅 2~4 칸(이 시험의 배치에는 없다).
+      const extraChats = new Map();
       ${trackCode}
       window.__t = {
         state, cells, applyLayout,

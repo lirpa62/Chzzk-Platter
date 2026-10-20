@@ -242,7 +242,7 @@ const ok = (c, l) => {
       const withText=meas();
       panel.style.width='320px';
       return {wide,narrow,withText};})()`);
-    ok(r.wide.length === 3, `버튼 3개(다시 수집·검색·닫기) (${r.wide.length})`);
+    ok(r.wide.length === 4, `버튼 4개(캡처·다시 수집·검색·닫기) (${r.wide.length})`);
     ok(
       r.narrow.every((w) => w >= 15),
       `좁은 폭(150px)에서도 아이콘 유지 (${r.narrow.join("/")})`,

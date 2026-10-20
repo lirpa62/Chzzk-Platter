@@ -11,6 +11,13 @@ html,
 body {
   height: 100%;
 }
+/* popup.css 의 html { overflow-y: scroll; scrollbar-gutter: stable } 은 길게 스크롤하는 설정 화면용이다.
+   멀티뷰 두 화면은 페이지 전체가 스크롤되지 않아(고르기는 목록 안에서만, 시청은 body overflow:hidden)
+   빈 스크롤바 자리만 늘 차지했다 → 넘칠 때만 생기게 되돌린다. html:root 로 불러오는 순서와 관계없이 이긴다. */
+html:root {
+  overflow-y: auto;
+  scrollbar-gutter: auto;
+}
 body {
   margin: 0;
   background: var(--popup-bg, #141517);
@@ -1028,6 +1035,671 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
   border-color: rgba(184, 153, 255, 0.32);
   color: #d2c0ff;
 }
+/* ── 카테고리·태그로 찾기(고르기 화면·시청 화면 채널 관리 공용) ── */
+/* 누를 수 있는 칩: 그 카테고리·태그 라이브를 검색 탭에서 본다. */
+.mv-card-category-chip.is-filter,
+.mv-card-tag-chip.is-filter {
+  cursor: pointer;
+}
+.mv-card-category-chip.is-filter:hover {
+  border-color: var(--popup-brand, #00c73c);
+  color: var(--popup-brand, #00c73c);
+}
+.mv-card-tag-chip.is-filter:hover {
+  border-color: #8b6be8;
+}
+/* 검색 종류(채널·태그 / 카테고리) — 다시보기 하위 탭과 같은 모양. */
+.mv-search-mode {
+  display: grid;
+  flex: none;
+  gap: 4px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mv-search-mode[hidden] {
+  display: none;
+}
+.mv-search-mode button {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.2;
+  min-height: 30px;
+  padding: 4px;
+}
+.mv-search-mode button[aria-pressed="true"] {
+  background: #7050c8;
+  border-color: #8b6be8;
+  color: #fff;
+  font-weight: 700;
+}
+.mv-search-mode button:hover:not([aria-pressed="true"]) {
+  background: #49377f;
+  border-color: #8b6be8;
+  color: #fff;
+}
+:root:not([data-theme="dark"]) .mv-search-mode button:hover:not([aria-pressed="true"]) {
+  background: #f1ebff;
+  border-color: #c9b8f2;
+  color: #553c93;
+}
+/* 지금 보고 있는 카테고리·태그(× 로 해제). */
+.mv-search-filter {
+  align-items: center;
+  align-self: flex-start;
+  background: var(--popup-surface, #22252a);
+  border: 1px solid var(--popup-brand, #00c73c);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 4px 2px 10px;
+}
+.mv-search-filter[hidden] {
+  display: none;
+}
+.mv-search-filter-label {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-search-filter-clear {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  width: 22px;
+}
+.mv-search-filter-clear:hover {
+  background: var(--popup-soft-bg, #1b1d20);
+}
+/* 카테고리 카드(세로 포스터 + 이름 + 종류). */
+.mv-cards.is-categories,
+.mv-quick-add.is-categories {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+}
+.mv-category-card {
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  padding: 0;
+  text-align: left;
+}
+.mv-category-card-poster {
+  aspect-ratio: 3 / 4;
+  background: var(--popup-soft-bg, #1b1d20);
+  border-radius: 8px;
+  display: block;
+  overflow: hidden;
+}
+.mv-category-card-poster img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.mv-category-card:hover .mv-category-card-poster,
+.mv-category-card:focus-visible .mv-category-card-poster {
+  outline: 2px solid var(--popup-brand, #00c73c);
+  outline-offset: -2px;
+}
+.mv-category-card-name {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  display: -webkit-box;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow: hidden;
+}
+.mv-category-card-type {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+}
+/* ── 내 배치(사용자 배치) ── */
+.mv-layout-pick-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  justify-content: space-between;
+}
+.mv-layout-pick-head > strong {
+  flex: none;
+  white-space: nowrap;
+}
+.mv-custom-layout-new {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  padding: 3px 8px;
+}
+.mv-custom-layout-new:hover {
+  border-color: var(--popup-brand, #00c73c);
+  color: var(--popup-brand, #00c73c);
+}
+/* 내 배치 카드: 배치 버튼 위 오른쪽 위에 고치기 버튼(버튼 안에 버튼을 둘 수 없어 겹쳐 둔다). */
+.mv-layout-custom {
+  display: grid;
+  min-width: 0;
+  position: relative;
+}
+.mv-layout-edit {
+  align-items: center;
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 5px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 20px;
+}
+.mv-layout-custom:hover .mv-layout-edit,
+.mv-layout-edit:focus-visible {
+  opacity: 1;
+}
+.mv-layout-edit:hover {
+  border-color: var(--popup-brand, #00c73c);
+  color: var(--popup-brand, #00c73c);
+}
+/* ⚠ .mv-dialog(360px)가 뒤에 있어 같은 우선순위로는 진다. */
+.mv-dialog.mv-custom-layout-dialog {
+  overflow-x: hidden;
+  width: 640px;
+}
+.mv-custom-layout-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-bottom: 10px;
+}
+.mv-custom-layout-name {
+  align-items: center;
+  display: flex;
+  flex: 1 1 200px;
+  font-size: 12px;
+  gap: 6px;
+}
+.mv-custom-layout-name input {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: inherit;
+  flex: 1;
+  font: inherit;
+  min-width: 0;
+  padding: 5px 8px;
+}
+.mv-custom-layout-size {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 4px;
+}
+.mv-custom-layout-size span:not(:first-child) {
+  margin-left: 8px;
+}
+.mv-custom-layout-size button {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  height: 24px;
+  line-height: 1;
+  width: 24px;
+}
+.mv-custom-layout-size output {
+  min-width: 14px;
+  text-align: center;
+}
+/* 편집 무대: 격자 + 바깥 채팅 막대(고른 채팅 자리에 그린다). 격자 안 채팅이면 막대는 숨긴다. */
+.mv-custom-stage {
+  align-items: stretch;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 0 auto 10px;
+  max-width: 100%;
+}
+.mv-custom-stage[data-chat="left"] {
+  flex-direction: row-reverse;
+}
+.mv-custom-stage[data-chat="bottom"] {
+  align-items: center;
+  flex-direction: column;
+}
+.mv-custom-stage .mv-custom-grid {
+  margin: 0;
+  min-width: 0;
+}
+/* 채팅 막대: 위에서부터 채팅 위 영상(16:9) → '+ 영상' → 남은 높이가 채팅(기본 '채팅 위' 배치와 같은 모양). */
+.mv-custom-chatbar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  width: 84px;
+}
+.mv-custom-chattop {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mv-custom-chattop:empty {
+  display: none;
+}
+.mv-custom-chattop-video {
+  align-items: center;
+  aspect-ratio: 16 / 9;
+  background: rgba(112, 80, 200, 0.55);
+  border: 2px solid #8b6be8;
+  border-radius: 5px;
+  color: #fff;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: center;
+  position: relative;
+}
+.mv-custom-chattop-remove {
+  background: rgba(0, 0, 0, 0.55);
+  border: 0;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  height: 18px;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 18px;
+}
+.mv-custom-chattop-add {
+  background: transparent;
+  border: 1px dashed var(--popup-border, #34383d);
+  border-radius: 5px;
+  color: var(--popup-muted, #9aa0a6);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 0;
+}
+.mv-custom-chattop-add:hover:not(:disabled) {
+  border-color: #8b6be8;
+  color: inherit;
+}
+.mv-custom-chattop-add:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.mv-custom-chatbar-label {
+  align-items: center;
+  background: rgba(232, 130, 58, 0.25);
+  border: 2px dashed #e8823a;
+  border-radius: 6px;
+  color: #e8823a;
+  display: flex;
+  flex: 1 1 auto;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 34px;
+}
+.mv-custom-stage[data-chat="bottom"] .mv-custom-chatbar {
+  align-self: stretch;
+  width: auto;
+}
+.mv-custom-draw-row {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.mv-custom-draw-mode {
+  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.mv-custom-draw-mode button:disabled,
+.mv-custom-chat-options button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.mv-custom-stage[data-chat="inset"] .mv-custom-chatbar {
+  display: none;
+}
+/* 편집 격자: 칸 하나가 16:9 로 보이게 비율을 잡는다(열 × 16 : 행 × 9). */
+.mv-custom-grid {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  cursor: crosshair;
+  display: grid;
+  gap: 3px;
+  margin: 0 auto 10px;
+  max-height: 340px;
+  max-width: 100%;
+  padding: 3px;
+  touch-action: none;
+  user-select: none;
+}
+.mv-custom-cell {
+  background: var(--popup-bg, #141517);
+  border: 1px dashed var(--popup-border, #34383d);
+  border-radius: 4px;
+}
+.mv-custom-slot {
+  align-items: center;
+  background: rgba(112, 80, 200, 0.55);
+  border: 2px solid #8b6be8;
+  border-radius: 5px;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: center;
+}
+.mv-custom-slot.is-main {
+  background: rgba(0, 199, 60, 0.5);
+  border-color: var(--popup-brand, #00c73c);
+}
+.mv-custom-slot {
+  position: relative;
+}
+.mv-custom-slot.is-selected {
+  box-shadow: 0 0 0 3px #fff inset;
+}
+.mv-custom-slot.is-moving {
+  opacity: 0.35;
+}
+/* 채팅 칸(격자 안 채팅 자리). */
+.mv-custom-slot.is-chat {
+  background: rgba(232, 130, 58, 0.45);
+  border-color: #e8823a;
+}
+/* 고른 칸의 모서리 손잡이: 끌어서 크기를 바꾼다. */
+.mv-custom-handle {
+  background: #fff;
+  border: 2px solid #7050c8;
+  border-radius: 3px;
+  height: 10px;
+  position: absolute;
+  width: 10px;
+}
+.mv-custom-handle.is-nw { cursor: nwse-resize; left: -6px; top: -6px; }
+.mv-custom-handle.is-ne { cursor: nesw-resize; right: -6px; top: -6px; }
+.mv-custom-handle.is-sw { cursor: nesw-resize; bottom: -6px; left: -6px; }
+.mv-custom-handle.is-se { cursor: nwse-resize; bottom: -6px; right: -6px; }
+.mv-custom-pick {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+.mv-custom-pick span {
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 5px;
+}
+.mv-custom-pick {
+  background: rgba(0, 199, 60, 0.25);
+  border: 2px dashed var(--popup-brand, #00c73c);
+  border-radius: 5px;
+  pointer-events: none;
+}
+.mv-custom-pick.is-invalid {
+  background: rgba(255, 91, 91, 0.25);
+  border-color: #ff5b5b;
+}
+.mv-custom-layout-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.mv-custom-layout-tools .mv-dialog-button[hidden] {
+  display: none;
+}
+.mv-custom-layout-tools [data-mv-custom-tool="chat"][aria-pressed="true"] {
+  border-color: #e8823a;
+  color: #e8823a;
+}
+.mv-custom-layout-tools .mv-dialog-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.mv-custom-layout-chat {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.mv-custom-chat-options {
+  flex: 1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mv-custom-layout-status {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+  min-height: 18px;
+}
+.mv-custom-layout-status.is-error {
+  color: #ff6b6b;
+}
+.mv-dialog-spacer {
+  flex: 1;
+}
+.mv-dialog-button.is-danger {
+  border-color: rgba(255, 91, 91, 0.6);
+  color: #ff6b6b;
+}
+.mv-dialog-button.is-danger.is-confirm {
+  background: #ff5b5b;
+  border-color: #ff5b5b;
+  color: #fff;
+}
+/* 버튼이 늘어도 글자가 줄바꿈되지 않게 한다. 폭이 모자라면 버튼 묶음이 다음 줄로 내려간다.
+   '기본 배치 설정'은 톱니 아이콘만(이름은 툴팁). */
+.mv-custom-layout-buttons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+.mv-custom-layout-buttons .mv-custom-layout-new {
+  white-space: nowrap;
+}
+.mv-layout-prefs-open {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  padding: 3px 6px;
+}
+.mv-custom-layout-new[hidden] {
+  display: none;
+}
+.mv-dialog.mv-custom-manage-dialog {
+  width: 560px;
+}
+/* 기본 배치 설정 */
+.mv-dialog.mv-layout-prefs-dialog {
+  width: 720px;
+}
+.mv-layout-prefs-counts {
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  margin-bottom: 10px;
+}
+.mv-layout-prefs-summary {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  min-height: 28px;
+}
+.mv-layout-prefs-summary .mv-dialog-button {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.mv-layout-prefs-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  margin-bottom: 14px;
+  max-height: min(440px, 58vh);
+  overflow-y: auto;
+  padding: 2px;
+}
+.mv-layout-prefs-card {
+  align-content: start;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+.mv-layout-prefs-card.is-off {
+  opacity: 0.45;
+}
+.mv-layout-prefs-card.is-off:hover {
+  opacity: 0.8;
+}
+.mv-layout-prefs-card.is-default {
+  border-color: var(--popup-brand, #00ffa3);
+  box-shadow: 0 0 0 1px var(--popup-brand, #00ffa3) inset;
+}
+.mv-layout-prefs-label {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 4px;
+  min-height: 2.4em;
+}
+.mv-layout-prefs-label em {
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 4px;
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 10px;
+  font-style: normal;
+  padding: 0 4px;
+}
+.mv-layout-prefs-actions {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+}
+.mv-layout-prefs-actions button,
+.mv-layout-prefs-fixed {
+  background: var(--popup-soft-bg, #1b1d20);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  color: var(--popup-muted, #9aa1a9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 0;
+  text-align: center;
+}
+.mv-layout-prefs-fixed {
+  cursor: default;
+}
+.mv-layout-prefs-actions button[aria-pressed="true"] {
+  border-color: var(--popup-brand, #00ffa3);
+  color: var(--popup-brand, #00ffa3);
+}
+.mv-layout-prefs-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.mv-custom-manage-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 14px;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: 0;
+}
+.mv-custom-manage-item {
+  align-items: center;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  padding: 6px 8px;
+}
+.mv-custom-manage-item .mv-layout-preview {
+  width: 72px;
+}
+.mv-custom-manage-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.mv-custom-manage-text b {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mv-custom-manage-text small {
+  color: var(--popup-muted, #9aa1a9);
+  font-size: 11px;
+}
+.mv-custom-manage-actions {
+  display: flex;
+  gap: 4px;
+}
+.mv-custom-manage-actions .mv-dialog-button {
+  font-size: 12px;
+  padding: 4px 8px;
+}
 .mv-live-more {
   align-self: center;
   background: none;
@@ -1428,6 +2100,18 @@ button.mv-live-more {
   line-height: 1.45;
   margin: 0;
 }
+/* 10채널 이상 안내: 부담 경고라 붉은 계열로. */
+.mv-option-note.mv-many-channels-note {
+  background: rgba(255, 91, 91, 0.1);
+  border: 1px solid rgba(255, 91, 91, 0.45);
+  border-radius: 6px;
+  color: #ff6b6b;
+  margin-top: 6px;
+  padding: 6px 8px;
+}
+:root:not([data-theme="dark"]) .mv-option-note.mv-many-channels-note {
+  color: #d63b3b;
+}
 .mv-option-note strong {
   color: inherit;
   display: block;
@@ -1522,8 +2206,17 @@ button.mv-live-more {
 }
 .mv-dialog-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+/* 멀티뷰 탭 추가·겹치는 채널 안내(고르기 화면·채널 관리 공용). */
+.mv-dialog-warn {
+  color: #e8823a;
+  font-weight: 600;
+}
+.mv-dialog-desc + .mv-dialog-desc {
+  margin-top: -10px;
 }
 .mv-dialog-button {
   background: var(--popup-soft-bg, #1b1d20);
@@ -4276,6 +4969,17 @@ html[data-theme="dark"]
   padding-bottom: 4px;
   scrollbar-gutter: stable;
 }
+/* 채널 관리 전용 팔로잉 '전체': 구역 제목(격자 한 줄을 다 쓴다). */
+.mv-quick-section-head {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  grid-column: 1 / -1;
+  padding: 6px 2px 0;
+}
+.mv-quick-section-head:first-child {
+  padding-top: 0;
+}
 .mv-quick-add.is-loading-more::after {
   align-items: center;
   color: var(--popup-muted, #9aa1a9);
@@ -4719,6 +5423,95 @@ html[data-theme="dark"]
   display: none;
 }
 .mv-stage.is-chat-popped-out .mv-chat-head {
+  display: none;
+}
+/* 내 배치의 채팅 2~4(multiviewWatch.js 추가 채팅). 격자 안 채팅 칸(q·r·s)에 놓인다. */
+.mv-extra-chat {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.mv-extra-chat-head {
+  align-items: center;
+  background: var(--popup-soft-bg, #1b1d20);
+  display: flex;
+  flex: none;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 6px;
+}
+.mv-extra-chat-label {
+  color: var(--popup-muted, #9aa1a9);
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+.mv-extra-chat-select {
+  background: var(--popup-bg, #141517);
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 5px;
+  color: inherit;
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  padding: 2px 4px;
+}
+.mv-extra-chat-button {
+  background: none;
+  border: 1px solid var(--popup-border, #34383d);
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.mv-extra-chat-button:hover:not(:disabled) {
+  border-color: var(--popup-brand, #00c73c);
+  color: var(--popup-brand, #00c73c);
+}
+.mv-extra-chat-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.mv-extra-chat-button[hidden] {
+  display: none;
+}
+.mv-extra-chat-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.mv-extra-chat-body iframe {
+  border: 0;
+  flex: 1;
+  height: 100%;
+  width: 100%;
+}
+.mv-extra-chat-body iframe[hidden] {
+  display: none;
+}
+.mv-extra-chat-note {
+  align-items: center;
+  color: var(--popup-muted, #9aa1a9);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 8px;
+  justify-content: center;
+  padding: 8px;
+  text-align: center;
+}
+.mv-extra-chat-note[hidden] {
   display: none;
 }
 .mv-chat-head {

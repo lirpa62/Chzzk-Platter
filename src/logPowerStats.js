@@ -3145,6 +3145,9 @@
 
   // 보정 실패 사유를 사용자 말로 바꾼다.
   function syncFailNote(reason) {
+    if (reason === "recording-off") {
+      return "내역 기록이 꺼져 있어 보유량을 맞추지 않습니다. 설정 › 통나무파워에서 '내역 기록'을 켜면 그때부터 다시 맞춥니다.";
+    }
     if (reason === "account-unknown") {
       return "로그인 상태를 확인하지 못했습니다. 치지직에 로그인한 뒤 다시 시도해 주세요.";
     }
@@ -4403,6 +4406,22 @@
       return;
     }
     if (!e.target.closest?.("[data-date-picker]")) closePickers(null);
+
+    // 기록 관리: 채널별 선택 삭제·전체 삭제(recordManage.js). 지우면 배경이 저장하고,
+    // 아래 storage 변경 감지가 화면을 다시 그린다.
+    if (e.target.closest?.("#lpsManage")) {
+      const manage = globalThis.CheeseRecordManage;
+      manage?.openManager({
+        title: "통나무파워 내역 관리",
+        description: "채널을 골라 내역을 지우거나 전체를 비웁니다. 이 브라우저에 저장된 모든 계정의 내역이 대상입니다. 지운 내역은 되돌릴 수 없습니다.",
+        noun: "통나무파워 내역",
+        emptyText: "저장된 통나무파워 내역이 없습니다.",
+        load: () => manage.logPower.collect(),
+        remove: (groups) => manage.logPower.remove(groups),
+        removeAll: () => manage.logPower.clearAll(),
+      });
+      return;
+    }
 
     if (e.target.closest?.("#lpsRefresh")) {
       const btn = e.target.closest("#lpsRefresh");

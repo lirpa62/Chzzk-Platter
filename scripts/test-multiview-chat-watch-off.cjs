@@ -28,8 +28,8 @@ check(/function anyChatTweakOn\(\) \{\s*if \(CHAT_DOM_WATCH_OFF\) return false;/
   "영상 칸에서는 채팅 정리 감시(너비 측정 포함)를 붙이지 않는다");
 check(/function ensureChatMsgObserver\(\) \{\s*if \(\s*CHAT_DOM_WATCH_OFF \|\|/.test(content),
   "영상 칸에서는 채팅 차단 감시를 붙이지 않는다");
-check(/function ensureChatBlockObserver\(\) \{\s*if \(!chatProfileBlockButtonOn \|\| CHAT_DOM_WATCH_OFF\)/.test(content),
-  "영상 칸에서는 프로필 차단 버튼 감시를 붙이지 않는다");
+check(/function ensureChatBlockObserver\(\) \{\s*if \(\(!chatProfileBlockButtonOn && !chatProfileEnhanceActive\(\)\) \|\| CHAT_DOM_WATCH_OFF\)/.test(content),
+  "영상 칸에서는 프로필 팝업 감시(차단 버튼·팝업 다듬기)를 붙이지 않는다");
 // 영상 칸이 계속 해야 하는 채팅창 일은 그대로 남는다.
 check(/function ensureMultiviewChatFold\((?:force = false)?\) \{[\s\S]*?getLiveChatAside\(\)/.test(content),
   "채팅 접기 유지는 영상 칸에서 계속 동작한다");

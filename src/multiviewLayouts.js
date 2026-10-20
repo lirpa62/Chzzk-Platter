@@ -254,8 +254,11 @@
     },
   ];
 
-  // 메인 + 보조 최대 8(9채널). x·y·z 는 채팅·손잡이 자리라 슬롯으로 쓰지 않는다.
-  const SLOTS = ["m", "a", "b", "c", "d", "e", "f", "g", "h"];
+  // 메인 + 보조. 기본 배치는 9채널(m·a~h)까지, 내 배치는 16채널(… i~l·n~p)까지.
+  // x·y·z 는 채팅·손잡이 자리라 슬롯으로 쓰지 않는다.
+  const SLOTS = ["m", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "n", "o", "p"];
+  const MAX_CHANNELS_BUILTIN = 9;
+  const MAX_CHANNELS_CUSTOM = 16;
   const POSITIONS = ["왼쪽", "가운데", "오른쪽"];
   const VERTICAL_POSITIONS = ["위", "가운데", "아래"];
   const SIDES = { right: "오른쪽", left: "왼쪽", top: "위", bottom: "아래" };
@@ -546,7 +549,8 @@
   // videos: 채팅 열 위에 쌓는 영상 수(1 또는 2).
   // 영상이 둘이면 미리보기용 격자(areas/rows)는 격자 줄에 1/4·1/2 경계를 더해 채팅 열을
   // [영상 1/4][영상 1/4][채팅 1/2]로 그린다. 실제 화면은 chatTopStageGrid 가 따로 짠다.
-  function addChatTop(base, id = null, videos = 1) {
+  // 채팅 열 위에 영상을 얹은 배치 정의(기본 배치·내 배치 공용). 목록에 넣는 건 addChatTop.
+  function buildChatTop(base, id = null, videos = 1) {
     id ||= `${base.id}-chat-top${videos > 1 ? `-${videos}` : ""}`;
     const videoSlots = SLOTS.slice(base.aux + 1, base.aux + 1 + videos);
     let rows = base.areas.length === 1 ? [base.areas[0], base.areas[0]] : base.areas;
@@ -561,7 +565,7 @@
         areaRow([...part.cells, part.end <= 0.25 ? videoSlots[0] : part.end <= 0.5 ? videoSlots[1] : "x"]));
       tracks = parts.map((part) => fraction(part.end - part.start)).join(" ");
     }
-    LAYOUTS.push({
+    return {
       id,
       label: `${base.label} + 채팅 위 ${videos}`,
       aux: base.aux + videos,
@@ -575,7 +579,10 @@
       // 격자 줄을 채팅 열 위 영상 높이와 함께 쓰지 않는 배치(chatTopStageGrid 참고).
       ...(base.split ? { chatTopSplit: true } : {}),
       flexible: true,
-    });
+    };
+  }
+  function addChatTop(base, id = null, videos = 1) {
+    LAYOUTS.push(buildChatTop(base, id, videos));
   }
 
   addChatTop({ id: "main", label: "메인", aux: 0, columns: "1fr", rows: "1fr", areas: ['"m"'] });
@@ -673,6 +680,223 @@
     LAYOUTS.sort((a, b) => (rank.get(a.id) ?? fallback) - (rank.get(b.id) ?? fallback));
   }
 
+
+  // ── 내 배치(사용자가 만든 배치) ──
+  // 저장값(cheeseMultiviewCustomLayouts): [{ id, name, rows, cols, cells: [[칸 이름…]…], chat }]
+  //   cells: 'm'(메인)·'a'~(보조, 만든 순서)·채팅 칸('x'·'q'·'r'·'s' = 채팅 1~4, 격자 안 채팅일 때만)
+  //   또는 '.'(빈 칸). 칸마다 직사각형 하나. 채팅 2~4 는 시청 화면이 채팅 칸마다 따로 띄운다.
+  //   chat: 'right'|'left'|'bottom'|'inset'(격자 안 채팅 칸 x 에). 격자는 12×12 까지.
+  //   예전 저장값('inset' + 빈 칸이 직사각형 하나)은 그 빈 칸을 채팅 칸으로 읽는다.
+  // 기본 배치와 같은 모양(columns·rows·areas·chat)으로 바꿔 LAYOUTS 에 더한다 → 시청 화면·미리보기·
+  // 16:9 트랙 계산(solveTracks)·경계 크기 조절을 그대로 쓴다. 16:9 가 풀리지 않는 모양은 균등 칸이다.
+  const CUSTOM_ID_RE = /^custom-[a-z0-9]{4,24}$/;
+  // 12 는 2·3·4·6 으로 나뉘어 메인 2/3 폭·위 2 + 아래 3 같은 비율을 정확히 만든다.
+  const CUSTOM_GRID_MAX = 12;
+  const CUSTOM_MAX = 30;
+  const CUSTOM_CHATS = ["right", "left", "bottom", CHAT_INSET_SIDE];
+  // 격자 안 채팅 칸 이름(채팅 1~4). x 는 기존 채팅 하나(스테이지 격자의 채팅 자리), q·r·s 는 추가 채팅.
+  const CHAT_CELLS = ["x", "q", "r", "s"];
+  const isChatCell = (cell) => CHAT_CELLS.includes(cell);
+
+  // 빈 칸(.)이 직사각형 하나로 모였는가(빈 칸 채팅을 쓸 수 있는가).
+  function emptyIsRectangle(cells) {
+    let r0 = Infinity, r1 = -1, c0 = Infinity, c1 = -1, count = 0;
+    cells.forEach((row, r) => row.forEach((cell, c) => {
+      if (cell !== ".") return;
+      count += 1;
+      r0 = Math.min(r0, r); r1 = Math.max(r1, r); c0 = Math.min(c0, c); c1 = Math.max(c1, c);
+    }));
+    return count > 0 && count === (r1 - r0 + 1) * (c1 - c0 + 1);
+  }
+
+  // 칸 배치표 검사. { ok, slots(개수), reason }
+  // minSlots: 격자 칸 최소 수(채팅 위 영상이 있으면 메인 하나여도 된다).
+  function checkCustomCells(cells, { minSlots = 2 } = {}) {
+    if (!Array.isArray(cells) || !cells.length || cells.length > CUSTOM_GRID_MAX) return { ok: false, reason: "격자 크기가 맞지 않습니다." };
+    const cols = Array.isArray(cells[0]) ? cells[0].length : 0;
+    if (!cols || cols > CUSTOM_GRID_MAX || cells.some((row) => !Array.isArray(row) || row.length !== cols))
+      return { ok: false, reason: "격자 크기가 맞지 않습니다." };
+    const boxes = new Map();
+    const chats = new Map();
+    for (let r = 0; r < cells.length; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        const cell = cells[r][c];
+        if (cell === ".") continue;
+        if (isChatCell(cell)) {
+          const chat = chats.get(cell);
+          chats.set(cell, chat
+            ? { r0: Math.min(chat.r0, r), r1: Math.max(chat.r1, r), c0: Math.min(chat.c0, c), c1: Math.max(chat.c1, c), count: chat.count + 1 }
+            : { r0: r, r1: r, c0: c, c1: c, count: 1 });
+          continue;
+        }
+        if (!SLOTS.includes(cell)) return { ok: false, reason: "알 수 없는 칸이 있습니다." };
+        const box = boxes.get(cell) || { r0: r, r1: r, c0: c, c1: c, count: 0 };
+        box.r0 = Math.min(box.r0, r); box.r1 = Math.max(box.r1, r);
+        box.c0 = Math.min(box.c0, c); box.c1 = Math.max(box.c1, c);
+        box.count += 1;
+        boxes.set(cell, box);
+      }
+    }
+    const slots = boxes.size;
+    if (slots < minSlots) return { ok: false, slots, reason: minSlots > 1 ? "화면 칸을 2개 이상 만드세요." : "메인 화면 칸을 만드세요." };
+    if (!boxes.has("m")) return { ok: false, slots, reason: "메인 화면 칸을 만드세요." };
+    if (!SLOTS.slice(0, slots).every((slot) => boxes.has(slot))) return { ok: false, slots, reason: "칸 이름이 차례대로가 아닙니다." };
+    for (const box of [...boxes.values(), ...chats.values()]) {
+      if (box.count !== (box.r1 - box.r0 + 1) * (box.c1 - box.c0 + 1)) return { ok: false, slots, reason: "칸은 직사각형이어야 합니다." };
+    }
+    if (!CHAT_CELLS.slice(0, chats.size).every((name) => chats.has(name))) return { ok: false, slots, reason: "채팅 칸 이름이 차례대로가 아닙니다." };
+    return { ok: true, slots, chatCell: chats.has("x"), chatCells: CHAT_CELLS.slice(0, chats.size) };
+  }
+
+  // 저장값 정리. 맞지 않으면 null.
+  function normalizeCustomLayout(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const id = String(raw.id || "");
+    if (!CUSTOM_ID_RE.test(id)) return null;
+    let cells = Array.isArray(raw.cells) ? raw.cells.map((row) => (Array.isArray(row) ? row.map((cell) => String(cell)) : [])) : [];
+    let chat = CUSTOM_CHATS.includes(raw.chat) ? raw.chat : "right";
+    const hasChatCell = cells.some((row) => row.some(isChatCell));
+    if (chat === CHAT_INSET_SIDE && !hasChatCell && emptyIsRectangle(cells)) {
+      cells = cells.map((row) => row.map((cell) => (cell === "." ? "x" : cell))); // 예전 저장값
+    } else if (chat !== CHAT_INSET_SIDE && hasChatCell) {
+      cells = cells.map((row) => row.map((cell) => (isChatCell(cell) ? "." : cell))); // 바깥 채팅이면 채팅 칸은 빈 칸
+    }
+    // 채팅 위 영상(0~2): 바깥 채팅이 오른쪽·왼쪽일 때만(아래 normalize 에서 다시 확인).
+    const wantTop = Math.max(0, Math.min(2, Math.floor(Number(raw.chatTopVideos) || 0)));
+    const check = checkCustomCells(cells, { minSlots: wantTop && (chat === "right" || chat === "left") ? 1 : 2 });
+    if (!check.ok) return null;
+    if (chat === CHAT_INSET_SIDE && !check.chatCell) chat = "right";
+    const name = String(raw.name || "").replace(/\s+/g, " ").trim().slice(0, 30) || "내 배치";
+    // 채팅 열 위 영상(0~2): 바깥 채팅이 오른쪽·왼쪽일 때만. 칸 수와 합쳐 16채널을 넘지 않는다.
+    let chatTopVideos = wantTop;
+    if (chat !== "right" && chat !== "left") chatTopVideos = 0;
+    if (check.slots + chatTopVideos > SLOTS.length || check.slots + chatTopVideos < 2) return null;
+    return { id, name, rows: cells.length, cols: cells[0].length, cells, chat, ...(chatTopVideos ? { chatTopVideos } : {}) };
+  }
+
+  // 같은 줄·같은 열이 이어지면 하나로 합친다(채팅 위 배치는 첫 줄 높이가 위 영상의 한계라, 12×12 처럼
+  // 잘게 나눈 격자도 실제 칸 경계만 남겨야 영상이 작아지지 않는다).
+  function compactCells(cells) {
+    const rows = [];
+    const rowFr = [];
+    for (const row of cells) {
+      if (rows.length && rows[rows.length - 1].join(" ") === row.join(" ")) rowFr[rowFr.length - 1] += 1;
+      else {
+        rows.push(row);
+        rowFr.push(1);
+      }
+    }
+    const keep = [];
+    const colFr = [];
+    for (let c = 0; c < rows[0].length; c += 1) {
+      const prev = keep[keep.length - 1];
+      if (keep.length && rows.every((row) => row[c] === row[prev])) colFr[colFr.length - 1] += 1;
+      else {
+        keep.push(c);
+        colFr.push(1);
+      }
+    }
+    // 비율은 가장 작은 정수로(2fr 2fr → 1fr 1fr).
+    const gcd = (x, y) => (y ? gcd(y, x % y) : x);
+    const reduce = (list) => {
+      const g = list.reduce(gcd);
+      return list.map((n) => n / g);
+    };
+    return { cells: rows.map((row) => keep.map((c) => row[c])), rowFr: reduce(rowFr), colFr: reduce(colFr) };
+  }
+
+  // 저장값 → 배치(LAYOUTS 항목 모양).
+  function customLayoutDef(custom) {
+    if (custom.chatTopVideos && (custom.chat === "right" || custom.chat === "left")) {
+      // 채팅 열 위 영상: 기본 '채팅 위' 배치와 같은 정의(채팅 폭·위 영상 높이 손잡이가 그대로 동작한다).
+      // 1개면 격자 줄 비율을 그대로 두고 첫 줄 안에서 나눈다(chatTopSplit), 2개는 일반화된 경계 계산.
+      const core = compactCells(custom.cells);
+      const base = {
+        id: custom.id,
+        label: custom.name,
+        aux: checkCustomCells(custom.cells, { minSlots: 1 }).slots - 1,
+        columns: core.colFr.map((n) => `${n}fr`).join(" "),
+        rows: core.rowFr.map((n) => `${n}fr`).join(" "),
+        areas: core.cells.map(areaRow),
+        split: custom.chatTopVideos === 1,
+      };
+      const def = buildChatTop(base, custom.id, custom.chatTopVideos);
+      return {
+        ...def,
+        label: custom.name,
+        chat: custom.chat === "left" ? ["left", "right"] : ["right", "left"],
+        extraChats: [],
+        custom: true,
+        source: custom,
+      };
+    }
+    const inset = custom.chat === CHAT_INSET_SIDE && custom.cells.some((row) => row.includes("x"));
+    const chatCells = inset ? CHAT_CELLS.filter((name) => custom.cells.some((row) => row.includes(name))) : [];
+    const outside = ["right", "left", "bottom"];
+    const first = inset ? CHAT_INSET_SIDE : custom.chat === CHAT_INSET_SIDE ? "right" : custom.chat;
+    return {
+      id: custom.id,
+      label: custom.name,
+      aux: checkCustomCells(custom.cells).slots - 1,
+      columns: `repeat(${custom.cols}, 1fr)`,
+      rows: `repeat(${custom.rows}, 1fr)`,
+      areas: custom.cells.map(areaRow),
+      chat: [first, ...outside.filter((side) => side !== first)],
+      ...(inset ? { chatInsetOption: true } : {}),
+      // 채팅 2~4 칸(시청 화면이 칸마다 채팅을 따로 띄운다).
+      extraChats: chatCells.slice(1),
+      custom: true,
+      flexible: true,
+      // 시작 구성에 함께 담아 시청 화면이 같은 모양을 그리게 한다(registerCustomLayout).
+      source: custom,
+    };
+  }
+
+  // 내 배치 목록을 LAYOUTS 에 다시 건다(기본 배치 뒤). keepId: 목록에서 지워졌어도 지금 쓰는 배치는
+  // 남긴다(시청 중인 화면이 기본 배치로 튀지 않게). 돌려주는 값: 건 배치들.
+  function setCustomLayouts(list, { keepId = "" } = {}) {
+    const kept = keepId ? LAYOUTS.find((l) => l.custom && l.id === keepId) : null;
+    for (let i = LAYOUTS.length - 1; i >= 0; i -= 1) if (LAYOUTS[i].custom) LAYOUTS.splice(i, 1);
+    const seen = new Set();
+    const defs = [];
+    for (const raw of (Array.isArray(list) ? list : []).slice(0, CUSTOM_MAX)) {
+      const custom = normalizeCustomLayout(raw);
+      if (!custom || seen.has(custom.id)) continue;
+      seen.add(custom.id);
+      defs.push(customLayoutDef(custom));
+    }
+    if (kept && !seen.has(kept.id)) defs.push(kept);
+    LAYOUTS.push(...defs);
+    return defs;
+  }
+
+  // 시작 구성에 담겨 온 내 배치 하나를 건다(저장값이 그사이 바뀌어도 그 멀티뷰는 그 모양으로 연다).
+  function registerCustomLayout(raw) {
+    const custom = normalizeCustomLayout(raw);
+    if (!custom) return null;
+    const def = customLayoutDef(custom);
+    const at = LAYOUTS.findIndex((l) => l.id === def.id);
+    if (at >= 0) LAYOUTS.splice(at, 1, def);
+    else LAYOUTS.push(def);
+    return def;
+  }
+
+  // 지금 고를 수 있는 최대 채널 수: 기본 9, 10칸 이상 내 배치가 있으면 그 칸 수까지(16 한도).
+  function maxChannels() {
+    let max = MAX_CHANNELS_BUILTIN;
+    for (const layout of LAYOUTS) if (layout.custom) max = Math.max(max, layout.aux + 1);
+    return Math.min(max, MAX_CHANNELS_CUSTOM);
+  }
+
+  // 이 채널 수를 담을 배치가 있는가(10개 이상은 그 칸 수의 내 배치가 있어야 한다).
+  function hasLayoutFor(count) {
+    return count >= 1 && count <= MAX_CHANNELS_CUSTOM && LAYOUTS.some((layout) => layout.aux === count - 1);
+  }
+
+  function newCustomLayoutId() {
+    return `custom-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  }
+
   // 이 배치에서 고를 수 있는 채팅 자리. 앞의 것이 기본값이다.
   function chatSidesFor(layout) {
     // 채팅 위 영상 배치는 영상이 채팅 열 위에 있어야 하므로 좌/우만.
@@ -696,14 +920,64 @@
     return sides.includes(current) ? current : sides[0] || "right";
   }
 
+  // 사용자가 마지막으로 고른 채팅 자리(cheeseMultiviewChatSide)를 새 멀티뷰에도 쓴다.
+  // 그 배치에서 쓸 수 없는 자리이거나, 빈 칸(inset)이 기본인 배치(빈 칸이 남지 않게)면 지금 자리를 둔다.
+  function preferredChatSide(layout, preferred, current) {
+    const sides = chatSidesFor(layout);
+    if (!preferred || !sides.includes(preferred)) return current;
+    if (sides[0] === CHAT_INSET_SIDE && preferred !== CHAT_INSET_SIDE) return current;
+    return preferred;
+  }
+
+  // ── 배치 설정(고르기 화면 '기본 배치 설정', 저장 키 cheeseMultiviewLayoutPrefs) ──
+  // hidden: 목록에서 숨긴 기본 제공 배치 id(내 배치는 숨기지 않고 지운다).
+  // defaults: { 채널 수: 배치 id } — 그 채널 수가 되면 '비슷한 배치' 대신 먼저 고른다.
+  //   내 배치 id 도 된다(내 배치는 나중에 등록되므로 쓸 때 확인한다).
+  const LAYOUT_PREFS_KEY = "cheeseMultiviewLayoutPrefs";
+  let layoutPrefs = { hidden: new Set(), defaults: {} };
+  function normalizeLayoutPrefs(raw) {
+    const builtin = new Set(LAYOUTS.filter((l) => !l.custom).map((l) => l.id));
+    const hidden = [...new Set((Array.isArray(raw?.hidden) ? raw.hidden : [])
+      .filter((id) => typeof id === "string" && builtin.has(id)))];
+    const defaults = {};
+    if (raw?.defaults && typeof raw.defaults === "object" && !Array.isArray(raw.defaults)) {
+      for (const [key, id] of Object.entries(raw.defaults)) {
+        const count = Number(key);
+        if (Number.isInteger(count) && count >= 2 && count <= SLOTS.length &&
+            typeof id === "string" && /^[a-z0-9-]{1,60}$/i.test(id) && !hidden.includes(id)) {
+          defaults[count] = id;
+        }
+      }
+    }
+    return { hidden, defaults };
+  }
+  function setLayoutPrefs(raw) {
+    const prefs = normalizeLayoutPrefs(raw);
+    layoutPrefs = { hidden: new Set(prefs.hidden), defaults: prefs.defaults };
+    return prefs;
+  }
+  function getLayoutPrefs() {
+    return { hidden: [...layoutPrefs.hidden], defaults: { ...layoutPrefs.defaults } };
+  }
+  const isLayoutHidden = (id) => layoutPrefs.hidden.has(id);
+  // 이 채널 수의 기본 배치(정해 두었고, 지금 있고, 숨기지 않았을 때만).
+  function defaultLayoutFor(count) {
+    const id = layoutPrefs.defaults[count];
+    const layout = id ? LAYOUTS.find((l) => l.id === id) : null;
+    return layout && layout.aux === count - 1 && !layoutPrefs.hidden.has(layout.id) ? layout : null;
+  }
+
   // 고른 채널 수(메인 포함)에 맞는 배치만 돌려준다.
   // portrait: 세로 화면이면 '세로 화면' 묶음(PORTRAIT_ORDER 순)을 맨 앞에 두고 나머지를 잇는다.
   //   가로 화면에서는 세로 전용 배치를 뺀다(지금 쓰는 배치 keepId 는 남긴다).
   // all: 방향과 상관없이 그 채널 수의 모든 배치(저장값 복원·채널 수 변경에 쓴다).
   function layoutsFor(count, { portrait = false, keepId = "", all = false } = {}) {
     const aux = Math.max(0, Number(count) - 1);
-    const list = LAYOUTS.filter((l) => l.aux === aux);
-    if (all) return list;
+    const every = LAYOUTS.filter((l) => l.aux === aux);
+    if (all) return every;
+    // 숨긴 배치는 뺀다(지금 쓰는 배치는 남긴다). 다 숨겨졌으면 그대로 둔다.
+    const shown = every.filter((l) => !layoutPrefs.hidden.has(l.id) || l.id === keepId);
+    const list = shown.length ? shown : every;
     if (!portrait) return list.filter((l) => !l.portrait || l.id === keepId);
     const rank = new Map(PORTRAIT_ORDER.map((id, index) => [id, index]));
     const group = list.filter((l) => rank.has(l.id)).sort((a, b) => rank.get(a.id) - rank.get(b.id));
@@ -861,17 +1135,26 @@
   //   되돌리면 원래 배치·채팅 자리로 돌아간다. 그 밖에는 COUNT_NEIGHBORS 를 한 칸씩 따라간다.
   function layoutForCount(currentId, count, chatSide, back = null, { portrait = false } = {}) {
     // 세로 전용 배치도 갈 수 있다(쓰던 배치가 세로 전용이면 방향과 상관없이 잇는다).
-    const allowed = layoutsFor(count, { all: true });
-    if (!allowed.length) return null;
+    const every = layoutsFor(count, { all: true });
+    if (!every.length) return null;
     const from = layoutById(currentId);
-    if (from && from.aux === allowed[0].aux) return null;
+    if (from && from.aux === every[0].aux) return null;
+    // 숨긴 배치로는 가지 않는다(다 숨겨졌으면 전부).
+    const visible = every.filter((l) => !layoutPrefs.hidden.has(l.id));
+    const allowed = visible.length ? visible : every;
     let target = null;
     let side = null;
     const memo = from ? back?.get(`${from.id}>${count}`) : null;
     const remembered = memo && allowed.find((l) => l.id === memo.layoutId);
+    // 이 채널 수의 기본 배치를 정해 두었으면 '비슷한 배치' 보다 먼저 쓴다.
+    // ⚠ 자동으로 바꾼 기록(되돌리면 원래 배치로)은 그보다 앞선다 — 채널 하나 넣었다 뺐을 때
+    //   쓰던 배치로 돌아오는 게 자연스럽다.
+    const preferred = remembered ? null : defaultLayoutFor(count);
     if (remembered) {
       target = remembered;
       side = chatSidesFor(target).includes(memo.chatSide) ? memo.chatSide : null;
+    } else if (preferred) {
+      target = preferred;
     } else if (from) {
       // 세로 화면이거나 세로 전용 배치를 쓰는 중이면 세로 배치끼리 잇는다.
       const portraitWalk = portrait || from.portrait === true;
@@ -1057,8 +1340,10 @@
   function chatInsetStageGrid(layout, hideChat = false) {
     if (!layout?.chatInsetOption) return null;
     const slot = hideChat ? "." : "x";
+    // 내 배치는 채팅 칸(x)이 따로 있다 — 다른 빈 칸(.)까지 채팅으로 바꾸면 떨어진 x 들로 격자가 깨진다.
+    const target = layout.custom ? /(?<=["\s])x(?=["\s])/g : /(?<=["\s])[.x](?=["\s])/g;
     return {
-      areas: layout.areas.map((row) => row.replace(/(?<=["\s])[.x](?=["\s])/g, slot)).join(" "),
+      areas: layout.areas.map((row) => row.replace(target, slot)).join(" "),
       columns: layout.columns,
       rows: layout.rows,
     };
@@ -1107,7 +1392,15 @@
       }
       widths[span.c0] = need;
     }
-    if (widths.some((w) => w === null)) return null;
+    if (widths.some((w) => w === null)) {
+      // 내 배치: 한 열짜리 칸이 없는 열(대칭 모양의 빈 칸 열 등)이 있으면, 열을 모두 같은 너비로 두고
+      // 모든 칸이 16:9 가 되는지 본다(칸마다 너비 = 16/9 × 행 수 ÷ 열 수 가 같아야 한다).
+      if (!layout.custom) return null;
+      const spansList = Object.values(spans);
+      const unit = R * (spansList[0].r1 - spansList[0].r0 + 1) / (spansList[0].c1 - spansList[0].c0 + 1);
+      if (!spansList.every((span) => Math.abs(R * (span.r1 - span.r0 + 1) / (span.c1 - span.c0 + 1) - unit) < 1e-6)) return null;
+      widths.fill(unit);
+    }
     // 여러 열을 병합한 칸도 16:9 인지 확인한다.
     for (const span of Object.values(spans)) {
       if (span.c0 === span.c1) continue;
@@ -1162,6 +1455,7 @@
     chatSidesFor,
     usesChatInset,
     chatSideForSwitch,
+    preferredChatSide,
     previewGrid,
     layoutsFor,
     isPortraitGroup,
@@ -1179,6 +1473,28 @@
     trackTemplate,
     slotSpans,
     solveTracks,
+    CUSTOM_GRID_MAX,
+    CUSTOM_MAX,
+    CHAT_CELLS,
+    isChatCell,
+    MAX_CHANNELS_BUILTIN,
+    MAX_CHANNELS_CUSTOM,
+    maxChannels,
+    hasLayoutFor,
+    emptyIsRectangle,
+    checkCustomCells,
+    normalizeCustomLayout,
+    compactCells,
+    LAYOUT_PREFS_KEY,
+    normalizeLayoutPrefs,
+    setLayoutPrefs,
+    getLayoutPrefs,
+    isLayoutHidden,
+    defaultLayoutFor,
+    customLayoutDef,
+    setCustomLayouts,
+    registerCustomLayout,
+    newCustomLayoutId,
   };
   if (typeof module === "object" && module.exports) module.exports = api;
   else globalThis.CheeseMultiviewLayouts = api;

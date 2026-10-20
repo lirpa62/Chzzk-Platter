@@ -42,6 +42,31 @@
           </button>
           <button
             type="button"
+            class="popup-icon-button settings-playlist-button"
+            id="openPlaylistButton"
+            aria-label="나만의 재생목록 열기"
+            title="나만의 재생목록 열기"
+          >
+            <!-- lucide list-video -->
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 12H3"></path>
+              <path d="M16 6H3"></path>
+              <path d="M12 18H3"></path>
+              <path d="m16 12 5 3-5 3v-6Z"></path>
+            </svg>
+          </button>
+          <button
+            type="button"
             class="popup-icon-button settings-open-tab-button"
             id="openSettingsTabButton"
             aria-label="새 탭에서 설정 열기"
@@ -193,6 +218,15 @@
           <button
             type="button"
             class="settings-tab"
+            data-tab="catchup"
+            role="tab"
+            aria-selected="false"
+          >
+            실시간 따라잡기
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
             data-tab="mixer"
             role="tab"
             aria-selected="false"
@@ -216,6 +250,15 @@
             aria-selected="false"
           >
             다시보기
+          </button>
+          <button
+            type="button"
+            class="settings-tab"
+            data-tab="playlist"
+            role="tab"
+            aria-selected="false"
+          >
+            재생목록
           </button>
           <button
             type="button"
@@ -1528,6 +1571,38 @@
                 </label>
               </li>
 
+              <li class="settings-item" data-new-feature="quality-button">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="화질 해상도 빠르게 바꾸기 화질 버튼"
+                    >화질 바꾸기 버튼 표시</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="플레이어에서 화질을 바로 바꾸는 버튼을 둡니다(기본 꺼짐)."
+                    ><span
+                      >플레이어 하단에 지금 화질(1080p·자동)을 보여 주는 버튼을
+                      둡니다. 누르면 화질 목록이 바로 떠서 톱니바퀴 &gt; 해상도를
+                      거치지 않고 바꿀 수 있습니다.</span
+                    >
+                    <span
+                      >바꾼 화질은 직접 고른 것으로 다룹니다(최대 화질 자동 고정의
+                      '수동 변경 존중'과 같은 기준).</span
+                    >
+                    <span>라이브·다시보기 모두에 나타나며 기본은 꺼져 있습니다.</span>
+                  </span>
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="qualityButton"
+                    data-feature-inverted
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+
               <li class="settings-item">
                 <label>
                   <span
@@ -2109,7 +2184,7 @@
                   <div class="settings-osd-row">
                     <input
                       type="range"
-                      min="50"
+                      min="10"
                       max="200"
                       step="1"
                       value="100"
@@ -2119,7 +2194,7 @@
                     <span class="settings-custom-input">
                       <input
                         type="number"
-                        min="50"
+                        min="10"
                         max="200"
                         step="5"
                         value="100"
@@ -2327,7 +2402,7 @@
                     class="settings-segmented-btn"
                     data-gain-min-value="0.5"
                     role="radio"
-                    aria-checked="true"
+                    aria-checked="false"
                   >
                     50%
                   </button>
@@ -2345,7 +2420,7 @@
                     class="settings-segmented-btn"
                     data-gain-min-value="0.1"
                     role="radio"
-                    aria-checked="false"
+                    aria-checked="true"
                   >
                     10%
                   </button>
@@ -2596,7 +2671,7 @@
 
           <section
             class="settings-group"
-            data-panel="player"
+            data-panel="catchup"
             aria-label="실시간 따라잡기"
           >
             <h2 class="settings-group-title">실시간 따라잡기</h2>
@@ -2618,6 +2693,23 @@
                   <input type="checkbox" data-live-auto-sync />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="채널별 자동 따라잡기 실시간 따라잡기 방송별"
+                    >채널별 자동 따라잡기</span
+                  >
+                  <span class="settings-item-desc"
+                    >플레이어의 실시간 따라잡기 버튼을 우클릭해 채널마다 '항상
+                    켜기·항상 끄기'를 정할 수 있습니다. 채널 설정이 위 설정보다
+                    먼저 적용됩니다.</span
+                  >
+                </div>
+                <div class="settings-exclude-list" data-auto-sync-channels-list>
+                  <p class="settings-exclude-empty">채널별 설정이 없습니다.</p>
+                </div>
               </li>
             </ul>
             <h2 class="settings-group-title" style="margin-top: 14px">
@@ -2699,6 +2791,8 @@
               지연이 '시작' 값을 넘으면 자동으로 따라잡아 '목표' 값까지
               줄입니다. 값이 작을수록 라이브에 바짝 붙지만 끊김이 잦을 수
               있습니다. 커스텀은 시작 2~30초, 목표 1~10초(시작 &gt; 목표).
+              따라잡은 직후 버퍼링이 생기면 그 방송에서는 시작·목표를 0.5초씩
+              (최대 2초) 늦춰 되풀이를 줄입니다.
             </p>
 
             <h2
@@ -3549,6 +3643,352 @@
                 </div>
               </li>
             </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="playlist"
+            aria-label="재생목록"
+          >
+            <h2 class="settings-group-title">재생목록</h2>
+            <ul class="settings-list">
+              <li class="settings-item" data-new-feature="chzzk-playlist-preview">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 미리보기 채널 재생목록 세부 목록 팝오버 playlist"
+                    >채널 재생목록 미리보기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="채널 재생목록 탭에서 재생목록에 마우스를 올리면 들어 있는 다시보기 목록을 보입니다."
+                    >채널의 재생목록 탭에서 재생목록에 마우스를 올리면 들어 있는
+                    다시보기 목록을 팝오버로 보입니다. 원하는 영상부터 재생하거나
+                    나만의 재생목록으로 복사할 수 있습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chzzkPlaylistPreview" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="chzzk-playlist-panel">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 패널 채팅창 재생목록 분리 플로팅"
+                    >다시보기 재생목록 패널</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="재생목록으로 다시보기를 볼 때 채팅창 안의 재생목록을 떠 있는 패널로 분리합니다."
+                    >재생목록으로 다시보기를 볼 때 채팅창 안에 있던 재생목록을
+                    나만의 재생목록 패널과 같은 모양의 떠 있는 패널로 분리합니다.
+                    옮기고 크기를 바꿀 수 있으며, 연속 재생·랜덤 재생은 치지직
+                    설정을 그대로 씁니다. ×로 채팅창 안에 되돌린 뒤에는 재생목록
+                    제목 옆 버튼으로 다시 패널로 띄웁니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="chzzkPlaylistPanel" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="chzzk-playlist-mini-player">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 재생바 미니 플레이어 패널 접기"
+                    >└ 접은 패널을 재생바로 보기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="다시보기 재생목록 패널을 접으면 음악 앱처럼 재생바로 보입니다."
+                    >다시보기 재생목록 패널을 접으면 썸네일·제목과 재생
+                    위치·재생/일시정지가 있는 재생바로 보입니다. 끄면 제목과 조작
+                    버튼만 보입니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chzzk-playlist-mini-player />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="chzzk-playlist-minimize-target"
+              >
+                <div style="width: 100%">
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 최소화 패널 숨기기 패널 최소화 위치"
+                    >└ 패널 최소화 버튼 위치</span
+                  >
+                  <span class="settings-item-desc"
+                    >다시보기 재생목록 패널을 최소화하면 다시 여는 버튼(마우스를
+                    올리면 재생바)을 둘 곳입니다. 사이드바를 숨겨 두었으면 헤더에
+                    둡니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-chzzk-playlist-minimize-target
+                  role="radiogroup"
+                  aria-label="다시보기 재생목록 패널 최소화 버튼 위치"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-chzzk-playlist-minimize-target-value="header"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    헤더
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-chzzk-playlist-minimize-target-value="sidebar"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    사이드바
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="playlist"
+            aria-label="나만의 재생목록"
+          >
+            <h2 class="settings-group-title">나만의 재생목록</h2>
+            <ul class="settings-list">
+              <li class="settings-item" data-new-feature="playlist">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 플레이리스트 playlist 담기"
+                    >재생목록 담기 버튼</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="다시보기·클립을 나만의 재생목록에 담는 버튼을 보입니다."
+                    >다시보기 화면·카드와 클립 화면·카드에 재생목록에 담는 버튼을
+                    추가합니다. 재생하면 치지직 화면에 목록 패널이 뜨고, 영상이
+                    끝나면 다음 항목으로 넘어갑니다. 목록은 이 브라우저에만
+                    저장됩니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="playlist" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="playlist-mini-player">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 재생바 미니 플레이어 패널"
+                    >접은 패널을 재생바로 보기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="재생목록 패널을 접으면 음악 앱처럼 재생바로 보입니다."
+                    >재생목록 패널을 접으면 음악 앱처럼 썸네일·제목과 재생
+                    위치·재생/일시정지가 있는 재생바로 보입니다. 끄면 제목과 조작
+                    버튼만 보입니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-playlist-mini-player />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="playlist-library-button">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 버튼 나만의 재생목록 목록 고르기"
+                    >재생목록 버튼</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="재생 중이 아닐 때 헤더·사이드바에서 내 재생목록을 골라 재생합니다."
+                    >재생 중이 아닐 때 헤더(또는 사이드바)에 '나만의 재생목록'
+                    버튼을 둡니다. 마우스를 올리면 내 재생목록을 보고 골라 바로
+                    재생할 수 있습니다. 재생목록이 하나도 없으면 보이지 않습니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-playlist-library-button />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="playlist-library-target"
+              >
+                <div style="width: 100%">
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 버튼 위치"
+                    >└ 위치</span
+                  >
+                  <span class="settings-item-desc"
+                    >'나만의 재생목록' 버튼을 둘 곳입니다. 사이드바를 숨겨
+                    두었으면 헤더에 둡니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-playlist-library-target
+                  role="radiogroup"
+                  aria-label="재생목록 버튼 위치"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-playlist-library-target-value="header"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    헤더
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-playlist-library-target-value="sidebar"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    사이드바
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="playlist-library-open"
+              >
+                <div style="width: 100%">
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 버튼 호버 클릭 카드 열기"
+                    >└ 카드 열기</span
+                  >
+                  <span class="settings-item-desc"
+                    >'나만의 재생목록' 버튼에서 목록 카드를 여는 방법입니다. 호버는
+                    버튼 위에 잠깐 머물면 열고, 클릭은 누를 때 열고 바깥을 누르거나
+                    Esc로 닫습니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-playlist-library-open
+                  role="radiogroup"
+                  aria-label="재생목록 버튼 카드 열기"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-playlist-library-open-value="hover"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    호버
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-playlist-library-open-value="click"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    클릭
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="playlist-minimize-target"
+              >
+                <div style="width: 100%">
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="재생목록 최소화 패널 숨기기 패널 최소화 위치"
+                    >패널 최소화 버튼 위치</span
+                  >
+                  <span class="settings-item-desc"
+                    >재생 중에 패널을 최소화하면 다시 여는 버튼(마우스를 올리면
+                    재생바)을 둘 곳입니다. 재생목록 버튼 설정과 따로 정합니다.
+                    사이드바를 숨겨 두었으면 헤더에 둡니다.</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-playlist-minimize-target
+                  role="radiogroup"
+                  aria-label="패널 최소화 버튼 위치"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-playlist-minimize-target-value="header"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    헤더
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-playlist-minimize-target-value="sidebar"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    사이드바
+                  </button>
+                </div>
+              </li>
+            </ul>
+            <p class="settings-group-desc">
+              재생목록을 만들고 순서·시작 시간을 고치거나, 공유 코드·파일로
+              내보내고 불러올 수 있습니다.
+            </p>
+            <button
+              type="button"
+              class="settings-open-stats"
+              id="openPlaylist"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M15 3h6v6" />
+                <path d="M10 14 21 3" />
+                <path
+                  d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
+                />
+              </svg>
+              재생목록 열기
+            </button>
           </section>
 
           <section
@@ -4896,6 +5336,69 @@
                   <i aria-hidden="true"></i>
                 </label>
               </li>
+              <li class="settings-item" data-new-feature="following-group-filter">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="팔로잉 화면 그룹 필터 그룹화 즐겨찾기"
+                    >팔로잉 화면 그룹 필터</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="팔로잉 화면에서 전용 팔로잉 그룹으로 방송·채널을 거릅니다."
+                    ><span
+                      >팔로잉 화면 탭 아래에 전용 팔로잉 그룹·즐겨찾기 칩을 둡니다.
+                      칩을 고르면 그 그룹 채널의 카드만 보입니다(라이브·동영상·채널
+                      등 모든 탭).</span
+                    >
+                    <span
+                      >전용 팔로잉 목록에서 그룹이나 즐겨찾기를 만들어 두었을 때만
+                      나타납니다. 고른 칩은 다음에 와도 그대로입니다.</span
+                    ></span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-following-group-filter />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="cards-per-row"
+                data-settings-search-aliases="한 줄 방송 개수 카드 개수 열 그리드 크기"
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">한 줄당 방송 개수</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="전체 방송·팔로잉 탭에서 한 줄에 보일 방송 수를 고릅니다."
+                    ><span
+                      >전체 방송, 팔로잉 라이브·동영상 등의 탭, 카테고리 라이브·동영상에서
+                      한 줄에 보일 방송 수를 정합니다. 화면 확대·축소 없이 카드 크기만
+                      바뀝니다.</span
+                    >
+                    <span
+                      >자동은 치지직이 화면 폭에 맞춰 정하는 그대로입니다. 팔로잉 '전체'
+                      탭은 치지직이 칸 수에 맞춰 개수를 정해 두어 바꾸지 않습니다.</span
+                    ></span
+                  >
+                </div>
+                <div
+                  class="settings-segmented"
+                  data-cards-per-row
+                  role="radiogroup"
+                  aria-label="한 줄당 방송 개수"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button type="button" class="settings-segmented-btn is-active" data-cards-per-row-value="0" role="radio" aria-checked="true">자동</button>
+                  <button type="button" class="settings-segmented-btn" data-cards-per-row-value="2" role="radio" aria-checked="false">2</button>
+                  <button type="button" class="settings-segmented-btn" data-cards-per-row-value="3" role="radio" aria-checked="false">3</button>
+                  <button type="button" class="settings-segmented-btn" data-cards-per-row-value="4" role="radio" aria-checked="false">4</button>
+                  <button type="button" class="settings-segmented-btn" data-cards-per-row-value="5" role="radio" aria-checked="false">5</button>
+                  <button type="button" class="settings-segmented-btn" data-cards-per-row-value="6" role="radio" aria-checked="false">6</button>
+                  <button type="button" class="settings-segmented-btn" data-cards-per-row-value="7" role="radio" aria-checked="false">7</button>
+                </div>
+              </li>
               <li
                 class="settings-item settings-item-stacked"
                 data-new-feature="live-viewer-count-position"
@@ -4976,8 +5479,9 @@
                     class="settings-item-desc"
                     data-settings-summary="입력한 태그·카테고리와 일치하는 방송을 목록에서 숨깁니다."
                     >전체 방송과 팔로잉의 전체·라이브 탭에서 입력한 태그 또는
-                    카테고리와 일치하는 방송을 숨깁니다. 쉼표나 줄바꿈으로 여러
-                    항목을 한 번에 추가할 수 있습니다.</span
+                    카테고리와 일치하는 방송을 숨깁니다. 항목마다 전체 방송·팔로잉에
+                    따로 켜고 끌 수 있습니다. 쉼표나 줄바꿈으로 여러 항목을 한 번에
+                    추가할 수 있습니다.</span
                   >
                 </div>
                 <div class="settings-live-tag-manager">
@@ -5010,6 +5514,35 @@
                     <button type="button" data-live-tag-remove-all>
                       전체 삭제
                     </button>
+                  </div>
+                  <div class="settings-live-tag-columns" data-live-tag-columns>
+                    <span class="settings-live-tag-spacer"></span>
+                    <label class="settings-live-tag-column">
+                      <span>전체 방송</span>
+                      <span class="settings-live-tag-toggle">
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          data-live-tag-scope-all="lives"
+                        />
+                        <i aria-hidden="true"></i>
+                      </span>
+                    </label>
+                    <label class="settings-live-tag-column">
+                      <span>팔로잉</span>
+                      <span class="settings-live-tag-toggle">
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          data-live-tag-scope-all="following"
+                        />
+                        <i aria-hidden="true"></i>
+                      </span>
+                    </label>
+                    <span
+                      class="settings-live-tag-column-gap"
+                      aria-hidden="true"
+                    ></span>
                   </div>
                   <ul
                     class="settings-live-tag-list"
@@ -6558,6 +7091,69 @@
                   />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="following-group-style"
+                data-settings-search-aliases="그룹 구분 모양 상자 박스 폴더 구분선 수평선 세로줄"
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">그룹 구분 모양</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="사이드바에서 그룹을 나누는 모양을 고릅니다."
+                    ><span
+                      ><b>세로줄</b>은 그룹 왼쪽에 강조색 선을 긋고</span
+                    >
+                    <span
+                      ><b>상자</b>는 그룹마다 테두리 상자로 감싸며, 펼친
+                      사이드바에서는 접힌 그룹을 2열 폴더 카드로 보여 줍니다.</span
+                    >
+                    <span
+                      ><b>구분선</b>은 그룹 사이에 가로선을 긋고 그룹 이름을
+                      강조색으로 표시합니다. 접힌 사이드바에도 같은 모양이
+                      적용됩니다.</span
+                    >
+                  </span>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-cf-group-style
+                  role="radiogroup"
+                  aria-label="그룹 구분 모양"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn is-active"
+                    data-cf-group-style-value="line"
+                    role="radio"
+                    aria-checked="true"
+                    title="그룹 왼쪽에 강조색 세로줄을 긋습니다."
+                  >
+                    세로줄
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-group-style-value="box"
+                    role="radio"
+                    aria-checked="false"
+                    title="그룹마다 테두리 상자로 감싸고, 접힌 그룹은 폴더 카드로 보여 줍니다."
+                  >
+                    상자
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-cf-group-style-value="divider"
+                    role="radio"
+                    aria-checked="false"
+                    title="그룹 사이에 가로선을 긋고 그룹 이름을 강조색으로 표시합니다."
+                  >
+                    구분선
+                  </button>
+                </div>
               </li>
               <li
                 class="settings-item"
@@ -9563,6 +10159,75 @@
           <section
             class="settings-group"
             data-panel="chat"
+            aria-label="채팅 프로필 팝업"
+          >
+            <h2 class="settings-group-title">채팅 프로필 팝업</h2>
+            <ul class="settings-list">
+              <li class="settings-item" data-new-feature="chat-profile-follow-days">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="유저 팝업 팔로우 기간 일수"
+                    >팔로우 날짜에 며칠 전인지 표시</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="팔로우 시작 날짜 옆에 며칠 전인지 함께 표시합니다."
+                    >채팅 닉네임을 눌러 연 프로필 팝업의 '…부터 팔로우' 날짜 옆에
+                    '(N일 전)'을 함께 표시합니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-profile-follow-days />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="chat-profile-menu-fold">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="유저 팝업 기타 기능 메뉴 숨김"
+                    >자주 쓰지 않는 메뉴 접기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="구독권 선물하기·메시지 신고·차단 항목을 '기타 기능' 아래로 접습니다."
+                    >프로필 팝업의 구독권 선물하기·메시지 신고·사용자 차단·치즈 플래터
+                    차단을 '기타 기능' 아래로 접습니다. 메시지 상단 고정 같은 관리
+                    기능은 접지 않고 위에 둡니다. 펼치거나 접은 상태는 기억합니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-profile-menu-fold />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item" data-new-feature="chat-profile-side">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="유저 팝업 조작 패널 채팅창 밖"
+                    >프로필 팝업을 채팅창 옆에 띄우기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="프로필 팝업이 채팅을 가리지 않도록 채팅창 바깥 옆에 띄웁니다."
+                    >일반 라이브 화면에서 프로필 팝업을 채팅창 바깥 옆(플레이어 쪽)에
+                    띄워 채팅을 가리지 않게 합니다. 옆에 자리가 없거나 멀티뷰·독립
+                    채팅 팝업에서는 원래 자리에 뜹니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-chat-profile-side />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            class="settings-group"
+            data-panel="chat"
             aria-label="채팅 표시"
           >
             <h2 class="settings-group-title">채팅 표시</h2>
@@ -10850,6 +11515,24 @@
               획득 내역
             </h2>
             <ul class="settings-list">
+              <li class="settings-item" data-new-feature="log-power-log-enabled">
+                <label>
+                  <span class="settings-item-name">내역 기록</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="통나무파워를 얻거나 쓸 때마다 이 브라우저에 내역을 남깁니다."
+                    >통나무파워를 얻거나 쓸 때마다 이 브라우저에 내역을 남깁니다.
+                    끄면 새 내역을 남기지 않고 보유량 비교(기타 적립 자동
+                    감지)도 멈춥니다. 이미 남은 내역은 그대로이며, 다시 켜면
+                    꺼 둔 동안의 적립은 기록하지 않고 그때부터 다시
+                    남깁니다(기본 켜짐)</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-log-power-log-enabled />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
               <li class="settings-item" data-new-feature="log-power-history">
                 <label for="logDaysInput">
                   <span class="settings-item-name">내역 보관 기간</span>
@@ -10883,6 +11566,33 @@
                   <input type="checkbox" data-log-days-off />
                   <i aria-hidden="true"></i>
                 </label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="log-power-log-manage"
+                style="flex-direction: column; gap: 0"
+                data-lp-manage-row
+              >
+                <div style="width: 100%">
+                  <span class="settings-item-name">저장된 내역</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="채널별로 저장된 통나무파워 내역을 지웁니다."
+                    >채널별로 저장된 통나무파워 내역입니다. 필요 없는 채널을
+                    골라 지우거나 전체를 비울 수 있습니다. 이 브라우저에 저장된
+                    모든 계정의 내역이 대상이며, 지운 내역은 되돌릴 수
+                    없습니다.</span
+                  >
+                </div>
+                <div class="settings-memo-list" data-lp-manage-list></div>
+                <div class="settings-memo-actions">
+                  <button type="button" data-lp-manage-delete disabled>
+                    선택 삭제
+                  </button>
+                  <button type="button" data-lp-manage-clear>
+                    전체 삭제
+                  </button>
+                </div>
               </li>
             </ul>
             <p class="settings-group-desc">
@@ -11653,7 +12363,7 @@
                 >
                   <input
                     type="range"
-                    min="50"
+                    min="10"
                     max="200"
                     step="1"
                     value="108"
@@ -11663,7 +12373,7 @@
                   <span class="settings-custom-input">
                     <input
                       type="number"
-                      min="50"
+                      min="10"
                       max="200"
                       step="5"
                       value="108"
@@ -11775,7 +12485,7 @@
                     class="settings-segmented-btn"
                     data-embed-clip-gain-min-value="0.5"
                     role="radio"
-                    aria-checked="true"
+                    aria-checked="false"
                   >
                     50%
                   </button>
@@ -11793,7 +12503,7 @@
                     class="settings-segmented-btn"
                     data-embed-clip-gain-min-value="0.1"
                     role="radio"
-                    aria-checked="false"
+                    aria-checked="true"
                   >
                     10%
                   </button>
@@ -12038,9 +12748,11 @@
       title="드래그해서 너비 조절 (더블클릭: 기본값)"
     ></div>
     <script src="src/coloris.min.js"></script>
+    <script src="src/recordManage.js"></script>
     <script src="src/settingsUi.js"></script>
     <script src="src/categoryAutocomplete.js"></script>
     <script src="src/screenshotName.js"></script>
+    <script src="src/playlistStore.js"></script>
     <script src="src/settings.js"></script>
   </body>
 </html>

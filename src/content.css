@@ -3894,6 +3894,181 @@ html.cheese-cf-on
   border-left: 2px solid var(--cheese-cf-group-color);
 }
 
+/* 그룹 구분 모양(설정 '그룹 구분 모양'). 모두 그룹 강조색을 쓴다.
+   펼친 사이드바: 상자 = 접힌 그룹은 2열 폴더 카드, 펼친 그룹은 한 줄을 다 쓰는 상자 /
+                 구분선 = 그룹 사이 가로선 + 그룹 이름을 그룹 색으로.
+   접힌 사이드바: 같은 모양을 좁은 폭에 맞춰 그린다(상자 = 테두리 상자, 구분선 = 가로선). */
+html[data-cheese-cf-group-style="box"] #cheese-custom-follow .cheese-cf-group {
+  border: 1px solid
+    color-mix(in srgb, var(--cheese-cf-group-color) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cheese-cf-group-color) 6%, transparent);
+}
+html[data-cheese-cf-group-style="divider"] #cheese-custom-follow .cheese-cf-group {
+  border-left: 0;
+  border-top: 1px solid
+    color-mix(in srgb, var(--cheese-cf-group-color) 60%, transparent);
+}
+
+/* ── 펼친 사이드바: 상자 = 폴더 격자 ── */
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 4px 2px;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group {
+  min-width: 0;
+  padding: 2px 0 4px;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group:not(.is-collapsed) {
+  grid-column: 1 / -1;
+}
+/* 접힌 그룹 = 폴더 카드: 큰 아이콘, 이름, 채널 수를 가운데 세로로. */
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed {
+  position: relative;
+  padding: 0;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed
+  .cheese-cf-group-header {
+  grid-template-columns: minmax(0, 1fr);
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed
+  .cheese-cf-group-toggle {
+  grid-column: 1;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 3px;
+  min-height: 72px;
+  padding: 12px 8px 9px;
+  border-radius: 9px;
+  text-align: center;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed
+  .cheese-cf-group-symbol
+  :is(svg, img) {
+  width: 24px;
+  height: 24px;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed
+  .cheese-cf-group-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed
+  .cheese-cf-group-chevron {
+  display: none;
+}
+/* 카드 모서리의 손잡이·메뉴는 호버·포커스 때만. */
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed
+  .cheese-cf-group-drag-handle {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  z-index: 1;
+  width: 18px;
+  height: 22px;
+  opacity: 0;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed
+  .cheese-cf-group-actions-compact {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  padding: 0;
+  opacity: 0;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group.is-collapsed:is(:hover, :focus-within)
+  :is(.cheese-cf-group-drag-handle, .cheese-cf-group-actions-compact) {
+  opacity: 1;
+}
+
+/* ── 펼친 사이드바: 구분선 ── */
+html[data-cheese-cf-group-style="divider"]
+  #sidebar[class*="_is_expanded_"]
+  #cheese-custom-follow
+  .cheese-cf-group {
+  margin-top: 4px;
+  padding-top: 4px;
+}
+html[data-cheese-cf-group-style="divider"]
+  #cheese-custom-follow
+  .cheese-cf-group
+  .cheese-cf-group-name {
+  color: var(--cheese-cf-group-color);
+}
+
+/* ── 접힌 사이드바: 좁은 폭(42px)에 맞춘 상자·가로선 ── */
+html[data-cheese-cf-group-style="box"]
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-group {
+  margin-bottom: 4px;
+  border-radius: 8px;
+}
+html[data-cheese-cf-group-style="box"]
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-group-list {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+html[data-cheese-cf-group-style="divider"]
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-group {
+  margin-top: 3px;
+  padding-top: 2px;
+}
+html[data-cheese-cf-group-style="divider"]
+  #sidebar:not([class*="_is_expanded_"])
+  #cheese-custom-follow
+  .cheese-cf-group-list {
+  padding-left: 4px;
+  padding-right: 3px;
+}
+
 .cheese-cf-group-header {
   position: relative;
   display: grid;
@@ -4999,7 +5174,8 @@ body > .clr-picker {
 
 .cheese-cf-group-modal-icons {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* 기본 아이콘 27개 = 9칸 × 3줄 */
+  grid-template-columns: repeat(9, minmax(0, 1fr));
   gap: 6px;
   margin: 0;
   padding: 0;
@@ -5294,7 +5470,7 @@ body > .clr-picker {
 
 .cheese-cf-group-modal-custom-icon-add {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: stretch;
   gap: 6px;
 }
@@ -5380,6 +5556,19 @@ body > .clr-picker {
   display: block;
   max-width: 100%;
   max-height: 100%;
+}
+
+/* 이미지 아이콘: 사진·로고가 칸 안에 비율 그대로 들어가게. */
+.cheese-cf-user-image {
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+.cheese-cf-group-modal-custom-icon-add .cheese-cf-group-modal-image-button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+  padding: 0 8px;
 }
 
 .cheese-cf-group-modal-channel-tools {
@@ -5586,9 +5775,154 @@ body > .clr-picker {
   color: #fff;
 }
 
+/* 그룹 편집: 오른쪽 '선택한 채널' 칸(넓은 화면에서만). 좁으면 숨기고 예전 한 칸 배치. */
+.cheese-cf-group-modal-picked {
+  display: none;
+}
+@media (min-width: 900px) {
+  .cheese-cf-group-modal-dialog.is-editor {
+    width: min(920px, calc(100vw - 36px));
+  }
+  .cheese-cf-group-modal-editor-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 270px;
+    gap: 16px;
+    min-height: 0;
+  }
+  .cheese-cf-group-modal-picked-list {
+    max-height: 420px;
+  }
+  .cheese-cf-group-modal-picked {
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    gap: 6px;
+    min-height: 0;
+    padding-left: 16px;
+    border-left: 1px solid
+      var(
+        --sem-color-border-neutral-weak,
+        var(--cheese-platter-border-neutral-base, #35383d)
+      );
+  }
+}
+.cheese-cf-group-modal-picked-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+.cheese-cf-group-modal-picked-head small,
+.cheese-cf-group-modal-picked-help {
+  margin: 0;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  font-size: 11px;
+}
+.cheese-cf-group-modal-picked-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.cheese-cf-group-modal-picked-mode button {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base, #35383d)
+    );
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cheese-cf-group-modal-picked-list {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.cheese-cf-group-modal-picked-item {
+  display: grid;
+  grid-template-columns: 14px 20px 32px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 0 2px 0 4px;
+  border-radius: 5px;
+  cursor: grab;
+  user-select: none;
+}
+.cheese-cf-group-modal-picked-item:hover,
+.cheese-cf-group-modal-picked-item:focus-visible {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
+  outline: 0;
+}
+.cheese-cf-group-modal-picked-item.is-dragging {
+  opacity: 0.45;
+}
+.cheese-cf-group-modal-picked-item.is-missing {
+  opacity: 0.6;
+}
+.cheese-cf-group-modal-picked-grip,
+.cheese-cf-group-modal-picked-num {
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+/* 프로필은 왼쪽 채널 목록과 같은 32px 링(사진 28px). 작게 줄이면 사진 크기(28px !important)가
+   링보다 커져 잘린다. */
+.cheese-cf-group-modal-picked-name {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-cf-group-modal-picked-item button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.cheese-cf-group-modal-picked-item button:hover {
+  opacity: 1;
+}
+
 @media (min-width: 561px) and (min-height: 680px) {
   .cheese-cf-group-modal-dialog.is-editor .cheese-cf-group-modal-body {
     overflow: hidden;
+  }
+  .cheese-cf-group-modal-editor-wrap {
+    height: 100%;
+  }
+  .cheese-cf-group-modal-picked-list {
+    max-height: none;
   }
 
   .cheese-cf-group-modal-dialog.is-editor .cheese-cf-group-modal-editor {
@@ -6238,6 +6572,124 @@ html.cheese-cf-favstar
   color: var(--cheese-platter-content-neutral-primary-static) !important;
 }
 
+/* 한 줄당 방송 개수(설정). 치지직 목록 ul(flex-wrap, 가로 간격 14px)의 카드 li 폭만 바꾼다.
+   ⚠ 제외·그룹 필터가 남겨 둔 1px 관찰 지점(숨긴 카드)은 건드리지 않는다. */
+/* ⚠ 목록 고르기에 :has() 를 쓰지 않는다. 카드가 수백 개인 목록에서 카드가 붙을 때마다 다시
+   따져 화면이 잠깐 멈췄다. 라이브·동영상 카드 목록은 content.js 가 data-cheese-cards-list 로 표시한다. */
+html[data-cheese-cards-per-row]
+  ul[data-cheese-cards-list]
+  > li[class*="_item_"]:not(.cheese-live-tag-filter-hidden) {
+  flex: 0 0
+    calc(
+      (100% - (var(--cheese-cards-per-row) - 1) * 14px) /
+        var(--cheese-cards-per-row)
+    ) !important;
+  width: calc(
+    (100% - (var(--cheese-cards-per-row) - 1) * 14px) /
+      var(--cheese-cards-per-row)
+  ) !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+/* 화면 밖 카드는 배치 계산을 건너뛴다. 2026-10-20 실측: 카드가 붙을 때마다 치지직 코드가 강제
+   배치를 2~4번 하고, 한 번에 카드 120개 ~90ms → 330개 ~210ms 로 카드 수에 비례해 늘어 붙을 때마다
+   0.3~0.5초 멈췄다(한 줄 7개면 같은 거리에서 3개보다 두 배 넘게 자주 붙는다). 화면 밖 카드를
+   건너뛰면 화면 근처 카드만 계산한다. 높이는 한 번 그린 값을 기억(auto)한다.
+   ⚠ 끝쪽 12개(data-cheese-card-tail, content.js 가 표시)는 늘 그린다 — 다음 묶음 감지 지점(끝에서
+   10번째·마지막 카드 안)이 있어 건너뛰면 화면 앞으로 올린 감지 지점이 계산되지 않는다.
+   ⚠ :nth-last-child 로 고르지 않는다 — 카드가 붙을 때마다 모든 카드 스타일을 다시 계산한다. */
+html[data-cheese-cards-per-row]
+  ul[data-cheese-cards-list]
+  > li[class*="_item_"]:not(.cheese-live-tag-filter-hidden):not([data-cheese-card-tail]) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 260px;
+}
+
+/* 한 줄 개수를 늘리면 다음 묶음 감지 지점을 화면 두 개 앞으로 올린다(보이는 위치만).
+   대상 요소와 거리는 content.js leadCardsPerRowSentinels 가 정한다. */
+html[data-cheese-cards-per-row] [data-cheese-sentinel-lead] {
+  transform: translateY(calc(-1 * var(--cheese-sentinel-lead, 0px))) !important;
+}
+
+/* 팔로잉 화면 그룹 필터 칩(탭 아래). 고른 칩은 그룹 강조색. */
+.cheese-following-group-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+.cheese-following-group-bar-label {
+  margin-right: 2px;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  font-size: 12px;
+  font-weight: 700;
+}
+.cheese-following-group-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base, rgb(255 255 255 / 14%))
+    );
+  border-radius: 15px;
+  background: transparent;
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary)
+  );
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cheese-following-group-bar button > span:not(.cheese-following-group-bar-icon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-following-group-bar button small {
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #888)
+  );
+  font-size: 11px;
+}
+.cheese-following-group-bar-icon {
+  display: inline-flex;
+  color: var(--cheese-cf-group-color);
+}
+.cheese-following-group-bar-icon :is(svg, img) {
+  width: 14px;
+  height: 14px;
+}
+.cheese-following-group-bar button:hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered)
+  );
+}
+.cheese-following-group-bar button[aria-pressed="true"] {
+  border-color: var(
+    --cheese-cf-group-color,
+    var(--sem-color-content-brand-base, #00ffa3)
+  );
+  background: color-mix(
+    in srgb,
+    var(--cheese-cf-group-color, #00ffa3) 14%,
+    transparent
+  );
+  font-weight: 700;
+}
+
 /* 전체 방송·팔로잉 라이브 제외 태그 */
 .cheese-live-tag-filter-hidden,
 [data-cheese-live-tag-filter-hidden="1"] {
@@ -6636,8 +7088,51 @@ html.cheese-fcln-lock .cheese-modal-scroll-shift {
 }
 .cheese-live-tag-filter-row > label.cheese-live-tag-filter-toggle {
   flex: none;
+  justify-content: center;
+  width: 56px;
   gap: 0;
   position: relative;
+}
+/* 열 머리(전체 방송 · 팔로잉): 아래 줄의 스위치 열과 같은 폭·간격. 스위치는 그 열을 모두 켜고 끈다. */
+.cheese-live-tag-filter-columns {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 0 18px;
+  padding-bottom: 6px;
+  /* 아래 목록에 스크롤 막대가 생기면 그 폭만큼 오른쪽을 비운다(JS 가 재서 padding-right 로 넣는다). */
+  border-bottom: 1px solid
+    var(
+      --sem-color-surface-neutral-base,
+      var(--cheese-platter-surface-neutral-base)
+    );
+}
+.cheese-live-tag-filter-columns[hidden] {
+  display: none;
+}
+.cheese-live-tag-filter-column {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 56px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cheese-live-tag-filter-column .cheese-live-tag-filter-toggle {
+  position: relative;
+  display: inline-flex;
+}
+.cheese-live-tag-filter-column-gap {
+  flex: none;
+  width: 32px;
 }
 .cheese-live-tag-filter-toggle input {
   opacity: 0;
@@ -6777,7 +7272,7 @@ html.cheese-cf-favstyle #cheese-custom-follow .cheese-cf-fav + .cheese-cf-fav {
 }
 /* 전용 목록 사용 시 네이티브 팔로우 헤더의 새로고침/접기 버튼 숨김(클릭 시 원본 재출현 방지).
    우리 새로고침 컨트롤(.cheese-cf-header-ctrl)이 대신한다. */
-#sidebar [data-cf-native-btn] {
+#sidebar [data-cf-native-btn]:not(#cheese-custom-follow *) {
   display: none !important;
 }
 /* 우리 헤더 아이콘 컨트롤 — 헤더 우측 인라인(펼침), 헤더 아래 세로 중앙(접힘). */
@@ -8682,10 +9177,14 @@ img.cheese-blind-emoji {
 }
 
 /* 다시보기 채팅 시간 클릭 이동(설정 시). 누를 수 있는 시간만(영상 위치가 있는 것). */
-html.cheese-chat-time-seek aside#vod-aside .cheese-chat-time[data-chat-player-ms] {
+html.cheese-chat-time-seek
+  aside#vod-aside
+  .cheese-chat-time[data-chat-player-ms] {
   cursor: pointer;
 }
-html.cheese-chat-time-seek aside#vod-aside .cheese-chat-time[data-chat-player-ms]:hover {
+html.cheese-chat-time-seek
+  aside#vod-aside
+  .cheese-chat-time[data-chat-player-ms]:hover {
   text-decoration: underline;
 }
 
@@ -8800,6 +9299,67 @@ html.cheese-chat-fold-restoring-instant:not(.cheese-chat-stacked):not(
   )
   aside#aside-chatting {
   transition: none !important;
+}
+
+/* 채팅 프로필 팝오버 다듬기(content.js enhanceChatProfilePopover). */
+/* 팔로우 날짜 뒤 '(N일 전)'. 치지직 글자는 그대로 두고 속성으로만 덧붙인다. */
+[role="alertdialog"] [data-cheese-follow-days]::after {
+  content: " (" attr(data-cheese-follow-days) ")";
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 우선도 낮은 메뉴 접기: 관리 기능 → '기타 기능 N개' 머리 → 접히는 항목 순서. */
+[role="alertdialog"] [data-cheese-profile-fold] {
+  display: flex !important;
+  flex-direction: column !important;
+}
+[role="alertdialog"] [data-cheese-profile-fold] > * {
+  order: 0;
+}
+[role="alertdialog"] [data-cheese-profile-fold] > .cheese-chat-profile-fold-toggle {
+  order: 1;
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  color: var(
+    --sem-color-content-neutral-cool-medium,
+    var(--cheese-platter-content-neutral-cool-strong)
+  );
+  font-size: 13px;
+}
+[role="alertdialog"] [data-cheese-profile-fold] > [data-cheese-profile-low] {
+  order: 2;
+}
+[role="alertdialog"] [data-cheese-profile-fold="folded"] > [data-cheese-profile-low] {
+  display: none !important;
+}
+.cheese-chat-profile-fold-chevron {
+  flex: none;
+  transition: transform 0.15s ease;
+}
+.cheese-chat-profile-fold-toggle[aria-expanded="true"] .cheese-chat-profile-fold-chevron {
+  transform: rotate(180deg);
+}
+
+/* 채팅창 옆에 띄우기: 치지직 팝오버는 채팅창 안에 있어 그대로는 채팅창 밖이 잘린다 — fixed 로
+   바꿔 채팅창 바깥에 둔다. 위쪽 조상의 transform 때문에 fixed 기준이 화면이 아닐 수 있어
+   좌표는 content.js(placeChatProfileSide)가 기준 상자만큼 보정한 값이다.
+   왼쪽 배치 규칙(left:8px !important)보다 구체적이어야 한다. */
+aside#aside-chatting [role="alertdialog"][aria-modal][data-cheese-profile-side] {
+  position: fixed !important;
+  left: var(--cheese-chat-profile-side-left, 8px) !important;
+  top: var(--cheese-chat-profile-side-top, 8px) !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
+  transform: none !important;
+  /* 위치 전환 효과가 있으면 원래 자리에서 미끄러져 오는 모습이 보인다 — 나타나는 효과(투명도)만 남긴다. */
+  transition-property: opacity !important;
+  /* 플레이어 위로 나가므로 플레이어 조작 화면보다 위에 둔다. */
+  z-index: 2147483000 !important;
 }
 
 /* 채팅 너비 조절 또는 왼쪽 배치 시: 프로필·클린봇·이모티콘 다이얼로그가 채팅 너비에
@@ -12564,12 +13124,15 @@ html.theme_dark #cheese-lounge-modal .cheese-lounge-sk-line::after,
 }
 
 /* 라운지 소식 버튼이 헤더 우측에 하나 더 들어가면 검색창과 버튼들이 붙어 보인다.
-   1200~1265px 구간에서만 검색창 컨테이너 우측 여백을 늘려 자리를 만든다 — 이보다
-   넓으면 원래도 여유가 있고, 더 좁으면 치지직이 레이아웃을 따로 줄인다.
+   1200~1265px 구간에서만 검색창을 왼쪽으로 옮겨 자리를 만든다 — 이보다 넓으면 원래도
+   여유가 있고, 더 좁으면 치지직이 레이아웃을 따로 줄인다.
+   ⚠ 옮기는 거리는 content.js(fitHeaderSearchShift)가 검색창 왼쪽 여유(주제 탭 끝까지)를
+   재서 정한다(최대 40px). 40px 고정이면 폭이 딱 1200px(1200px 폭 피벗 모니터 전체화면)일 때
+   주제 탭('엔터+')과 검색창이 겹쳤다 — 그 폭에서 둘 사이 여백은 23px 남짓뿐이다.
    (클래스 해시가 바뀌어도 되도록 form[role="search"] 를 품은 요소로 찾는다.) */
 @media (min-width: 1200px) and (max-width: 1265px) {
   html.cheese-lounge-on header#header :has(> form[role="search"]) {
-    left: calc(50% - 40px);
+    left: calc(50% - var(--cheese-header-search-shift, 0px));
   }
 }
 
@@ -13801,6 +14364,1310 @@ a[data-cheese-clip-vault]:hover .cheese-clip-vault-star,
   color: #ffcc33 !important;
 }
 
+/* ── 나만의 재생목록: 담기 버튼·팝오버(content.js ensurePlaylistButtons) ───────── */
+/* 다시보기 상세: 보관함 버튼과 같은 모양(치지직 버튼 클래스를 물려받는다). */
+.cheese-playlist-page-button {
+  flex: 0 0 auto;
+  line-height: 0;
+  background: var(--cheese-platter-border-neutral-strong-static) !important;
+  color: var(--cheese-platter-content-neutral-primary-static) !important;
+}
+.cheese-playlist-page-button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+.cheese-playlist-page-button:hover,
+.cheese-playlist-page-button.is-on {
+  color: #25df97 !important;
+}
+
+/* 카드: 보관함 버튼과 같은 자리·모양. 보관함 버튼이 있으면 그 왼쪽에 선다. */
+.cheese-playlist-card-anchor {
+  position: relative;
+}
+.cheese-playlist-card-add {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.48);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.14s ease,
+    transform 0.14s ease;
+}
+a:has(> .cheese-video-vault-archive, > .cheese-clip-vault-star)
+  > .cheese-playlist-card-add {
+  right: 44px;
+}
+a[data-cheese-playlist-card]:hover > .cheese-playlist-card-add,
+.cheese-playlist-card-add:focus-visible,
+.cheese-playlist-card-add.is-on {
+  opacity: 1;
+}
+.cheese-playlist-card-add.is-on {
+  color: #25df97;
+}
+.cheese-playlist-card-add:hover,
+.cheese-playlist-card-add:focus-visible {
+  background: rgba(0, 0, 0, 0.78);
+  transform: scale(1.08);
+}
+.cheese-playlist-card-add:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.cheese-playlist-card-add svg {
+  display: block;
+  flex: none;
+  pointer-events: none;
+}
+
+#cheese-playlist-popover {
+  position: fixed;
+  z-index: 2147483600;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 280px;
+  max-height: min(440px, calc(100vh - 16px));
+  padding: 12px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 12px;
+  background: var(
+    --sem-color-background-neutral-base,
+    var(--cheese-platter-background-neutral-base)
+  );
+  box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary)
+  );
+  font-size: 13px;
+}
+.cheese-playlist-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cheese-playlist-pop-head strong {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 700;
+}
+.cheese-playlist-pop-head button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.cheese-playlist-pop-head button:hover {
+  background: var(--cheese-platter-surface-interaction-lighten-hovered);
+  opacity: 1;
+}
+.cheese-playlist-pop-head svg {
+  width: 16px;
+  height: 16px;
+}
+.cheese-playlist-pop-item {
+  margin: 0;
+  overflow: hidden;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-playlist-pop-start {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--cheese-platter-surface-brand-weakest);
+  color: var(--cheese-platter-content-brand-strong);
+  font-weight: 600;
+  cursor: pointer;
+}
+.cheese-playlist-pop-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.cheese-playlist-pop-lists label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cheese-playlist-pop-lists label:hover {
+  background: var(--cheese-platter-surface-interaction-lighten-hovered);
+}
+.cheese-playlist-pop-lists span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-playlist-pop-lists small,
+.cheese-playlist-pop-lists .is-empty {
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-size: 12px;
+}
+.cheese-playlist-pop-lists .is-empty {
+  padding: 6px 4px;
+}
+.cheese-playlist-pop-lists input,
+.cheese-playlist-pop-start input {
+  accent-color: #25df97;
+}
+.cheese-playlist-pop-new {
+  display: flex;
+  gap: 6px;
+}
+.cheese-playlist-pop-new input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.cheese-playlist-pop-new input:focus {
+  border-color: #25df97;
+  outline: none;
+}
+.cheese-playlist-pop-new button,
+.cheese-playlist-pop-manage {
+  padding: 6px 10px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base)
+    );
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cheese-playlist-pop-new button:hover,
+.cheese-playlist-pop-manage:hover {
+  background: var(--cheese-platter-surface-interaction-lighten-hovered);
+}
+.cheese-playlist-pop-manage {
+  align-self: flex-start;
+  border: 0;
+  padding: 4px 6px;
+  color: var(
+    --sem-color-content-neutral-cool-base,
+    var(--cheese-platter-content-neutral-cool-base)
+  );
+  font-weight: 500;
+}
+#cheese-playlist-popover :focus-visible {
+  outline: 2px solid #25df97;
+  outline-offset: 1px;
+}
+
+/* 재생 패널(content.js renderPlaylistPanel). 머리를 끌어 옮기고 아래 양쪽 모서리로 크기를 바꾼다.
+   위치·크기를 저장하지 않았으면 화면 오른쪽 위·헤더 아래(positionPlaylistPanel). 색은 치지직 라이트/다크를
+   따른다(.is-dark 는 content.js 가 isChzzkDarkTheme 으로 붙인다 — .theme_dark 가 body 의 조상이 아닐 수 있다). */
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel) {
+  --pl-bg: rgba(255, 255, 255, 0.97);
+  --pl-border: rgba(0, 0, 0, 0.12);
+  --pl-text: #17191c;
+  --pl-muted: rgba(23, 25, 28, 0.58);
+  --pl-hover: rgba(0, 0, 0, 0.06);
+  --pl-current: rgba(0, 199, 60, 0.12);
+  --pl-accent: #00a63a;
+  --pl-thumb: #e8e9eb;
+  --pl-notice-bg: rgba(255, 170, 0, 0.14);
+  --pl-notice-text: #8a5a00;
+
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: 2147483400;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: min(60vh, 560px);
+  overflow: hidden;
+  border: 1px solid var(--pl-border);
+  border-radius: 12px;
+  background: var(--pl-bg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+  color: var(--pl-text);
+  font-size: 13px;
+  backdrop-filter: blur(6px);
+  /* 접힌 재생바는 패널 폭에 따라 배치를 바꾼다(아래 @container). */
+  container-name: cheese-playlist-panel;
+  container-type: inline-size;
+}
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel).is-dark {
+  --pl-bg: rgba(20, 21, 23, 0.95);
+  --pl-border: rgba(255, 255, 255, 0.12);
+  --pl-text: #fff;
+  --pl-muted: rgba(255, 255, 255, 0.58);
+  --pl-hover: rgba(255, 255, 255, 0.1);
+  --pl-current: rgba(37, 223, 151, 0.16);
+  --pl-accent: #25df97;
+  --pl-thumb: rgba(255, 255, 255, 0.08);
+  --pl-notice-bg: rgba(255, 204, 51, 0.14);
+  --pl-notice-text: #ffdf80;
+}
+/* 크기를 직접 정했으면 그 높이를 쓴다(인라인 height). */
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel)[style*="height"] {
+  max-height: none;
+}
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel).is-collapsed {
+  max-height: none;
+}
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel).is-dragging {
+  user-select: none;
+}
+.cheese-playlist-panel-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.cheese-playlist-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px;
+  cursor: grab;
+}
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel).is-dragging
+  .cheese-playlist-panel-head {
+  cursor: grabbing;
+}
+.cheese-playlist-panel-head button,
+.cheese-playlist-panel-controls button,
+.cheese-playlist-mini button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--pl-muted);
+  cursor: pointer;
+}
+.cheese-playlist-panel-head button:hover:not(:disabled),
+.cheese-playlist-panel-controls button:hover:not(:disabled),
+.cheese-playlist-mini button:hover:not(:disabled) {
+  background: var(--pl-hover);
+  color: var(--pl-text);
+}
+.cheese-playlist-panel-head button:disabled,
+.cheese-playlist-panel-controls button:disabled,
+.cheese-playlist-mini button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.cheese-playlist-panel-controls button[aria-pressed="true"],
+.cheese-playlist-mini button[aria-pressed="true"] {
+  color: var(--pl-accent);
+}
+/* 조작 줄(펼쳤을 때): 제목 줄과 나눠 좁아져도 겹치지 않는다. */
+.cheese-playlist-panel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 6px 6px;
+}
+.cheese-playlist-panel-controls .cheese-playlist-panel-play,
+.cheese-playlist-mini .cheese-playlist-panel-play {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+.cheese-playlist-panel-controls
+  .cheese-playlist-panel-play:hover:not(:disabled),
+.cheese-playlist-mini .cheese-playlist-panel-play:hover:not(:disabled) {
+  background: var(--pl-text);
+  color: var(--pl-bg);
+  transform: scale(1.06);
+}
+.cheese-playlist-panel-head .cheese-playlist-panel-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  min-width: 0;
+  /* 좁을 때 글자가 버튼 밖(옆 버튼 위)으로 나가지 않게 이 안에서 줄인다. */
+  overflow: hidden;
+  padding: 0 6px;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: grab;
+}
+.cheese-playlist-panel-title strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-playlist-panel-title span {
+  flex: none;
+  color: var(--pl-accent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.cheese-playlist-panel-title small {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pl-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.cheese-playlist-panel-notice {
+  margin: 0 8px 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--pl-notice-bg);
+  color: var(--pl-notice-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cheese-playlist-panel-notice button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.cheese-playlist-panel-items {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 6px 10px;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-color: rgba(37, 223, 151, 0.6) transparent;
+  scrollbar-width: thin;
+}
+.cheese-playlist-panel-items button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cheese-playlist-panel-items button:hover {
+  background: var(--pl-hover);
+}
+.cheese-playlist-panel-items .is-current button {
+  background: var(--pl-current);
+}
+.cheese-playlist-panel-index {
+  flex: none;
+  width: 18px;
+  color: var(--pl-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.cheese-playlist-panel-items .is-current .cheese-playlist-panel-index {
+  color: var(--pl-accent);
+}
+/* 썸네일은 패널 폭을 따라 키운다(기본 320px 패널에서 약 108px, 넓히면 136px 까지 — 치지직 재생목록 124px 와 비슷). */
+/* 19세 영상: 썸네일 위에 치지직 연령 제한 표시(검색 결과·보관함 카드와 같은 그림). */
+.cheese-playlist-panel-thumb.is-adult::before,
+.cheese-playlist-mini-art.is-adult::before {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.2) url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png) 50% / contain no-repeat;
+  content: "";
+  pointer-events: none;
+}
+.cheese-playlist-panel-thumb {
+  position: relative;
+  flex: none;
+  width: clamp(96px, 34cqi, 136px);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--pl-thumb);
+}
+.cheese-playlist-panel-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cheese-playlist-panel-duration {
+  position: absolute;
+  z-index: 2; /* 19세 표시 위 */
+  right: 3px;
+  bottom: 3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.76);
+  color: #fff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.cheese-playlist-panel-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+/* 썸네일이 커진 만큼 제목은 두 줄까지(치지직 재생목록과 같다). */
+.cheese-playlist-panel-text b {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: break-all;
+}
+.cheese-playlist-panel-text small {
+  overflow: hidden;
+  color: var(--pl-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 아래 양쪽 모서리 크기 손잡이(접혀 있으면 폭만 바뀐다). 아이콘은 미리보기 창 손잡이와 같은 호 모양이고,
+   그 자리에 마우스를 올렸을 때·크기를 바꾸는 동안만 보인다. */
+.cheese-playlist-panel-resize {
+  position: absolute;
+  bottom: 2px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--pl-muted);
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 0.12s ease;
+}
+.cheese-playlist-panel-resize svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.cheese-playlist-panel-resize.is-right {
+  right: 2px;
+  cursor: nwse-resize;
+}
+.cheese-playlist-panel-resize.is-left {
+  left: 2px;
+  cursor: nesw-resize;
+  transform: scaleX(-1);
+}
+.cheese-playlist-panel-resize:hover,
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel).is-resizing
+  .cheese-playlist-panel-resize {
+  opacity: 1;
+}
+/* 끄는 동안 치지직 페이지 글자가 선택되지 않게. */
+html.cheese-playlist-panel-dragging,
+html.cheese-playlist-panel-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* 접힌 패널: 음악 앱 같은 재생바. 폭이 넓으면 한 줄(표지·제목 | 조작+재생 위치 | 펼치기·닫기),
+   중간이면 두 줄, 좁으면 제목과 조작만. 재생 위치는 이 화면의 다시보기에서만(.has-media). */
+.cheese-playlist-mini {
+  display: grid;
+  grid-template-areas:
+    "text actions"
+    "center center";
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 8px 10px;
+  cursor: grab;
+}
+.cheese-playlist-mini-art {
+  position: relative;
+  display: none;
+  grid-area: art;
+  aspect-ratio: 1 / 1;
+  width: 48px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--pl-thumb);
+}
+.cheese-playlist-mini-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cheese-playlist-mini-text {
+  display: grid;
+  grid-area: text;
+  gap: 2px;
+  min-width: 0;
+}
+.cheese-playlist-mini-text b,
+.cheese-playlist-mini-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-playlist-mini-text b {
+  font-size: 13px;
+  font-weight: 700;
+}
+.cheese-playlist-mini-text small {
+  color: var(--pl-muted);
+  font-size: 11px;
+}
+.cheese-playlist-mini-actions {
+  display: flex;
+  grid-area: actions;
+  gap: 2px;
+}
+.cheese-playlist-mini-center {
+  display: grid;
+  grid-area: center;
+  gap: 4px;
+  min-width: 0;
+}
+.cheese-playlist-mini-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.cheese-playlist-mini-progress {
+  display: none;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--pl-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel).has-media
+  .cheese-playlist-mini-progress {
+  display: grid;
+}
+.cheese-playlist-mini-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--pl-hover);
+  cursor: pointer;
+}
+.cheese-playlist-mini-bar::before {
+  position: absolute;
+  inset: -6px 0;
+  content: "";
+}
+.cheese-playlist-mini-bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--pl-text);
+}
+.cheese-playlist-mini-bar:hover i {
+  background: var(--pl-accent);
+}
+@container cheese-playlist-panel (min-width: 360px) {
+  .cheese-playlist-mini {
+    grid-template-areas:
+      "art text actions"
+      "center center center";
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+  }
+  .cheese-playlist-mini-art {
+    display: block;
+  }
+}
+@container cheese-playlist-panel (min-width: 600px) {
+  .cheese-playlist-mini {
+    grid-template-areas: "art text center actions";
+    grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1.6fr) auto;
+  }
+  .cheese-playlist-mini-art {
+    width: 52px;
+  }
+}
+@container cheese-playlist-panel (max-width: 300px) {
+  .cheese-playlist-mini [data-pl-panel="shuffle"],
+  .cheese-playlist-mini [data-pl-panel="repeat"] {
+    display: none;
+  }
+}
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel).is-dragging
+  .cheese-playlist-mini {
+  cursor: grabbing;
+}
+
+:is(#cheese-playlist-panel, #cheese-chzzk-playlist-panel) :focus-visible {
+  outline: 2px solid var(--pl-accent);
+  outline-offset: 1px;
+}
+
+/* 접은 패널(재생바 설정 끔): 제목과 조작 버튼을 한 줄에. 좁으면 재생/일시정지, 더 좁으면 섞기·반복도 숨긴다. */
+.cheese-playlist-panel-controls.is-inline {
+  flex: none;
+  gap: 2px;
+  padding: 0;
+}
+.cheese-playlist-panel-controls.is-inline .cheese-playlist-panel-play {
+  width: 28px;
+  height: 28px;
+}
+@container cheese-playlist-panel (max-width: 460px) {
+  .cheese-playlist-panel-controls.is-inline [data-pl-panel="play"] {
+    display: none;
+  }
+}
+@container cheese-playlist-panel (max-width: 400px) {
+  .cheese-playlist-panel-controls.is-inline [data-pl-panel="shuffle"],
+  .cheese-playlist-panel-controls.is-inline [data-pl-panel="repeat"] {
+    display: none;
+  }
+}
+
+/* 최소화 버튼에 마우스를 올리면 뜨는 재생바 카드(재생바 모양·색은 패널과 같다). */
+#cheese-playlist-hover-card {
+  --pl-bg: rgba(255, 255, 255, 0.98);
+  --pl-border: rgba(0, 0, 0, 0.12);
+  --pl-text: #17191c;
+  --pl-muted: rgba(23, 25, 28, 0.58);
+  --pl-hover: rgba(0, 0, 0, 0.06);
+  --pl-accent: #00a63a;
+  --pl-thumb: #e8e9eb;
+
+  position: fixed;
+  z-index: 2147483450;
+  box-sizing: border-box;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  border: 1px solid var(--pl-border);
+  border-radius: 12px;
+  background: var(--pl-bg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+  color: var(--pl-text);
+  font-size: 13px;
+  container-name: cheese-playlist-panel;
+  container-type: inline-size;
+}
+#cheese-playlist-hover-card.is-dark {
+  --pl-bg: rgba(24, 25, 28, 0.98);
+  --pl-border: rgba(255, 255, 255, 0.12);
+  --pl-text: #fff;
+  --pl-muted: rgba(255, 255, 255, 0.58);
+  --pl-hover: rgba(255, 255, 255, 0.1);
+  --pl-accent: #25df97;
+  --pl-thumb: rgba(255, 255, 255, 0.08);
+}
+#cheese-playlist-hover-card .cheese-playlist-mini {
+  cursor: default;
+}
+#cheese-playlist-hover-card {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+}
+#cheese-playlist-hover-card [data-pl-panel="hover-list"][aria-expanded="true"] {
+  color: var(--pl-accent);
+}
+/* 카드 안 목록: grid 행을 0fr ↔ 1fr 로 바꿔 펼치고 접는다(높이를 몰라도 부드럽게). */
+.cheese-playlist-hover-list {
+  display: grid;
+  grid-template-rows: 0fr;
+  min-height: 0;
+  border-top: 1px solid transparent;
+  transition:
+    grid-template-rows 0.22s ease,
+    border-color 0.22s ease;
+}
+.cheese-playlist-hover-list.is-open {
+  grid-template-rows: 1fr;
+  border-top-color: var(--pl-border);
+}
+.cheese-playlist-hover-list > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.cheese-playlist-hover-list .cheese-playlist-panel-items {
+  max-height: min(300px, calc(100vh - 220px));
+  padding-top: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cheese-playlist-hover-list {
+    transition: none;
+  }
+}
+#cheese-playlist-hover-card :focus-visible {
+  outline: 2px solid var(--pl-accent);
+  outline-offset: 1px;
+}
+
+/* 재생 중이 아닐 때 카드: 내 재생목록 고르기. */
+.cheese-playlist-library {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.cheese-playlist-library-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 6px 12px;
+}
+.cheese-playlist-library-head strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+.cheese-playlist-library-head small {
+  flex: 1;
+  color: var(--pl-muted);
+  font-size: 12px;
+}
+.cheese-playlist-library-head button {
+  padding: 4px 10px;
+  border: 1px solid var(--pl-border);
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cheese-playlist-library-head button:hover {
+  background: var(--pl-hover);
+}
+.cheese-playlist-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  max-height: min(380px, calc(100vh - 140px));
+  margin: 0;
+  padding: 0 6px 8px;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.cheese-playlist-library-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cheese-playlist-library-actions {
+  display: flex;
+  flex: none;
+  gap: 1px;
+}
+.cheese-playlist-library-gap {
+  width: 28px;
+}
+.cheese-playlist-library-actions button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--pl-muted);
+  cursor: pointer;
+}
+.cheese-playlist-library-actions button:hover:not(:disabled) {
+  background: var(--pl-hover);
+  color: var(--pl-accent);
+}
+.cheese-playlist-library-actions button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.cheese-playlist-library-actions [data-pl-panel="library-toggle"] svg {
+  transition: transform 0.2s ease;
+}
+.cheese-playlist-library-entry.is-open [data-pl-panel="library-toggle"] svg {
+  transform: rotate(180deg);
+}
+/* 목록 항목: grid 행 0fr ↔ 1fr 로 펼치고 접는다(재생바 카드 목록과 같은 방식). */
+.cheese-playlist-library-items {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+.cheese-playlist-library-entry.is-open .cheese-playlist-library-items {
+  grid-template-rows: 1fr;
+}
+.cheese-playlist-library-items > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.cheese-playlist-library-items .cheese-playlist-panel-items {
+  margin: 2px 0 4px 18px;
+  padding: 0 0 0 8px;
+  overflow: visible;
+  border-left: 2px solid var(--pl-border);
+}
+.cheese-playlist-library-index {
+  flex: none;
+  width: 18px;
+  color: var(--pl-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cheese-playlist-library-items,
+  .cheese-playlist-library-actions [data-pl-panel="library-toggle"] svg {
+    transition: none;
+  }
+}
+.cheese-playlist-library-play {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cheese-playlist-library-play:hover:not(:disabled) {
+  background: var(--pl-hover);
+}
+.cheese-playlist-library-play:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.cheese-playlist-library-thumb {
+  position: relative;
+  flex: none;
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  background: var(--pl-thumb);
+}
+/* 겹친 판 한 장(편집 화면 재생목록 카드와 같은 모양을 작게). */
+.cheese-playlist-library-thumb::before {
+  position: absolute;
+  top: -4px;
+  right: 8%;
+  left: 8%;
+  height: 4px;
+  border-radius: 4px 4px 0 0;
+  background: var(--pl-muted);
+  content: "";
+  opacity: 0.45;
+}
+.cheese-playlist-library-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+/* 19세 표지: 연령 제한 표시(::before 는 겹친 판이라 따로 둔다). */
+.cheese-playlist-library-adult {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.2) url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png) 50% / contain no-repeat;
+  pointer-events: none;
+}
+.cheese-playlist-library-thumb span {
+  position: absolute;
+  z-index: 2;
+  right: 3px;
+  bottom: 3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.76);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+.cheese-playlist-library-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.cheese-playlist-library-text b,
+.cheese-playlist-library-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-playlist-library-text b {
+  font-size: 13px;
+  font-weight: 700;
+}
+.cheese-playlist-library-text small {
+  color: var(--pl-muted);
+  font-size: 11px;
+}
+/* 재생 중이 아닐 때 버튼은 기본 색(재생 중·최소화일 때만 초록). */
+#cheese-playlist-header-button.is-library {
+  color: inherit;
+}
+
+/* 사이드바에 둔 다시 열기 항목(원본 항목 클래스를 물려받는다). */
+#cheese-playlist-sidebar-item svg,
+#cheese-chzzk-playlist-sidebar-item svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  color: #00c73c;
+}
+
+/* 최소화한 동안 헤더(수신함 왼쪽)의 다시 열기 버튼(수신함 버튼 클래스를 물려받는다). */
+.cheese-playlist-header-item {
+  flex: none;
+}
+#cheese-playlist-header-button,
+#cheese-chzzk-playlist-header-button {
+  color: #00c73c;
+}
+#cheese-playlist-header-button svg,
+#cheese-chzzk-playlist-header-button svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+/* 재생목록으로 보는 다시보기: 채팅창 안 재생목록(원본)은 숨기고 떠 있는 패널로 보인다(content.js ensureChzzkPlaylistPanel).
+   원본은 지우지 않는다 — 패널의 누르기를 원본이 받는다. */
+html.cheese-chzzk-playlist-detached
+  aside#vod-aside
+  section[aria-labelledby="vod-play-list-title"] {
+  display: none !important;
+}
+/* ×로 채팅창 안에 되돌린 재생목록: 제목 줄 펼치기 버튼 왼쪽 '패널로 보기' 버튼(content.js ensureChzzkPlaylistReopenButton). */
+.cheese-chzzk-playlist-reopen {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: -5px -15px 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.72;
+}
+.cheese-chzzk-playlist-reopen:hover,
+.cheese-chzzk-playlist-reopen:focus-visible {
+  background: rgba(127, 127, 127, 0.16);
+  opacity: 1;
+}
+.cheese-chzzk-playlist-reopen.is-floating {
+  position: absolute;
+  margin: 0;
+}
+.cheese-chzzk-playlist-reopen svg {
+  display: block;
+}
+/* '다음:' 안내(치지직 패널) */
+.cheese-playlist-panel-next {
+  margin: -2px 12px 4px;
+  overflow: hidden;
+  color: var(--pl-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-playlist-panel-thumb .cheese-playlist-panel-watched {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--pl-accent);
+}
+
+/* 채널 재생목록 미리보기(채널 재생목록 탭 카드에 마우스를 올리면). 색은 치지직 라이트/다크(.is-dark). */
+#cheese-chzzk-playlist-popover {
+  --cp-bg: #fff;
+  --cp-border: rgba(0, 0, 0, 0.12);
+  --cp-text: #17191c;
+  --cp-muted: rgba(23, 25, 28, 0.58);
+  --cp-hover: rgba(0, 0, 0, 0.06);
+  --cp-thumb: #e8e9eb;
+  --cp-accent: #00a63a;
+
+  position: fixed;
+  z-index: 2147483450;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  max-height: min(70vh, 560px);
+  overflow: hidden;
+  border: 1px solid var(--cp-border);
+  border-radius: 12px;
+  background: var(--cp-bg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 22%);
+  color: var(--cp-text);
+  font-size: 13px;
+}
+#cheese-chzzk-playlist-popover.is-dark {
+  --cp-bg: #1e2023;
+  --cp-border: rgba(255, 255, 255, 0.12);
+  --cp-text: #fff;
+  --cp-muted: rgba(255, 255, 255, 0.58);
+  --cp-hover: rgba(255, 255, 255, 0.08);
+  --cp-thumb: rgba(255, 255, 255, 0.08);
+  --cp-accent: #25df97;
+}
+.cheese-chzzk-playlist-status {
+  margin: 0;
+  padding: 14px;
+  color: var(--cp-muted);
+}
+.cheese-chzzk-playlist-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--cp-border);
+}
+.cheese-chzzk-playlist-head > div {
+  display: grid;
+  flex: 1 1 100%;
+  gap: 2px;
+  min-width: 0;
+}
+.cheese-chzzk-playlist-head strong {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-chzzk-playlist-head small {
+  color: var(--cp-muted);
+  font-size: 12px;
+}
+.cheese-chzzk-playlist-head button {
+  padding: 5px 12px;
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cheese-chzzk-playlist-head button:hover:not(:disabled) {
+  background: var(--cp-hover);
+}
+.cheese-chzzk-playlist-head [data-chzzk-playlist="play"] {
+  border-color: var(--cp-accent);
+  color: var(--cp-accent);
+}
+.cheese-chzzk-playlist-head button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.cheese-chzzk-playlist-list {
+  min-height: 0;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.cheese-chzzk-playlist-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cheese-chzzk-playlist-list button:hover,
+.cheese-chzzk-playlist-list button:focus-visible {
+  background: var(--cp-hover);
+  outline: none;
+}
+.cheese-chzzk-playlist-index {
+  flex: none;
+  width: 18px;
+  color: var(--cp-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.cheese-chzzk-playlist-thumb {
+  position: relative;
+  flex: none;
+  width: 104px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--cp-thumb);
+}
+.cheese-chzzk-playlist-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cheese-chzzk-playlist-thumb span {
+  position: absolute;
+  right: 3px;
+  bottom: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.76);
+  color: #fff;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.cheese-chzzk-playlist-thumb i {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--cp-accent);
+}
+.cheese-chzzk-playlist-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.cheese-chzzk-playlist-text b {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.cheese-chzzk-playlist-text small {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+#cheese-playlist-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  z-index: 2147483601;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(20, 21, 23, 0.92);
+  color: #fff;
+  font-size: 13px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+#cheese-playlist-toast[hidden] {
+  display: none;
+}
+
 #cheese-video-vault-btn {
   display: inline-flex;
   align-items: center;
@@ -14921,19 +16788,47 @@ img.cheese-recap-emoji {
 }
 
 /* '사용 중인 프로필' 팝업 안 시청 시간 화면(내 채팅 기록 화면과 같은 틀). */
+.cheese-watch-time-view {
+  container-type: inline-size;
+}
 .cheese-watch-time-table {
   border-collapse: collapse;
   font-size: 12px;
   margin: 4px 0 10px;
   width: 100%;
 }
+/* ⚠ 칸마다 한 줄로 고정하면 표가 276px 아래로 줄지 않아, 채팅창이 좁을 때 오른쪽 칸이
+   팝업 밖으로 잘린다. 자리가 모자랄 때만 '12시간 / 34분'처럼 단위 사이에서 줄을 바꾼다
+   (keep-all: '시간'·'비로그인' 같은 낱말은 쪼개지 않는다). */
 .cheese-watch-time-table th,
 .cheese-watch-time-table td {
   border-bottom: 1px solid
     var(--sem-color-border-neutral-weaker, rgba(127, 127, 127, 0.2));
   padding: 6px 4px;
   text-align: right;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: keep-all;
+}
+@container (max-width: 290px) {
+  .cheese-watch-time-table {
+    font-size: 11px;
+  }
+  .cheese-watch-time-table th,
+  .cheese-watch-time-table td {
+    padding: 5px 2px;
+  }
+}
+/* 채팅창 최소 폭(220px)이면 팝업 안쪽이 160px 까지 준다. 이때만 '1,246시간' 같은 큰 값도
+   줄을 바꿔 칸 밖으로 넘치지 않게 한다. ⚠ 값 칸(td)에만 준다 — 머리(th)까지 주면
+   '비로그/인'·'다시보/기'처럼 이름이 먼저 쪼개진다. */
+@container (max-width: 200px) {
+  .cheese-watch-time-table th,
+  .cheese-watch-time-table td {
+    padding: 4px 1px;
+  }
+  .cheese-watch-time-table td {
+    overflow-wrap: anywhere;
+  }
 }
 .cheese-watch-time-table th[scope="row"],
 .cheese-watch-time-table thead th:first-child {
@@ -17155,4 +19050,330 @@ html.cheese-chat-hide-input-placeholder
   textarea:not([data-cheese-latency-placeholder])::placeholder {
   color: transparent !important;
   opacity: 0 !important;
+}
+
+/* ── 다시보기 '내 채팅 기록' PNG 캡처(content.js captureRecapSelection) ───────── */
+/* 선택 모드: 줄을 누르면 장면 이동 대신 선택된다. */
+/* 방장·매니저·파트너 채팅 패널도 같은 줄 선택을 쓴다. */
+:is(.cheese-chat-recap-panel, .cheese-role-chat-panel).is-capture-selecting
+  .cheese-search-comment-panel-list
+  button {
+  cursor: copy;
+}
+:is(.cheese-chat-recap-panel, .cheese-role-chat-panel)
+  .cheese-search-comment-panel-list
+  button.is-capture-selected {
+  background: rgba(37, 223, 151, 0.22);
+  border: 1px dashed rgb(37, 223, 151);
+}
+:is(
+  .cheese-chat-recap-panel [data-recap-capture],
+  .cheese-role-chat-panel [data-role-capture],
+  .cheese-chat-peak-popover [data-peak-capture]
+)[aria-pressed="true"] {
+  background: rgba(37, 223, 151, 0.2);
+  color: #25df97;
+  border-radius: 8px;
+}
+/* 구간 요약은 카드 단위(영상 전체 항목 덩어리·구간 카드)로 고른다. */
+.cheese-chat-peak-popover.is-capture-selecting
+  :is(.cheese-peak-overall, .cheese-peak-section > ul > li),
+.cheese-chat-peak-popover.is-capture-selecting
+  :is(.cheese-peak-overall, .cheese-peak-section > ul > li)
+  button {
+  cursor: copy;
+}
+.cheese-chat-peak-popover
+  :is(
+    .cheese-peak-overall,
+    .cheese-peak-section > ul > li
+  ).is-capture-selected {
+  background: rgba(37, 223, 151, 0.16);
+  border-radius: 6px;
+  outline: 1px dashed rgb(37, 223, 151);
+  outline-offset: -1px;
+}
+.cheese-search-comment-panel-head [data-peak-capture]:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+}
+.cheese-recap-capture-bar {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 6px;
+  padding: 8px 13px;
+}
+.cheese-recap-capture-count {
+  color: rgba(255, 255, 255, 0.78);
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+}
+.cheese-recap-capture-bar button,
+.cheese-recap-capture-dialog-foot button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
+.cheese-recap-capture-bar button.is-primary,
+.cheese-recap-capture-dialog-foot button.is-primary {
+  background: #25df97;
+  border-color: #25df97;
+  color: #0b1a12;
+}
+.cheese-recap-capture-bar button:disabled,
+.cheese-recap-capture-dialog-foot button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* 촬영대: 화면 밖에 두고, 그릴 상자(surface)는 패널 모양 그대로 펼친다(스크롤·높이 제한 없음). */
+.cheese-recap-capture-stage {
+  left: -100000px !important;
+  pointer-events: none !important;
+  position: fixed !important;
+  top: 0 !important;
+}
+.cheese-search-comment-timestamp-panel.cheese-recap-capture-surface {
+  background: #1f2738 !important;
+  box-shadow: none !important;
+  inset: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  position: relative !important;
+  transform: none !important;
+}
+.cheese-recap-capture-surface .cheese-search-comment-panel-list,
+.cheese-recap-capture-surface .cheese-peak-body {
+  max-height: none !important;
+  overflow: visible !important;
+  scrollbar-gutter: auto !important;
+}
+.cheese-recap-capture-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: grid;
+  gap: 3px;
+  padding: 13px 14px 11px;
+}
+.cheese-recap-capture-head strong {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+}
+.cheese-recap-capture-head span {
+  color: #25df97;
+  font-size: 12px;
+  font-weight: 800;
+}
+.cheese-recap-capture-head p {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  margin: 2px 0 0;
+  word-break: break-word;
+}
+.cheese-recap-capture-head small {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 미리보기 */
+.cheese-recap-capture-preview {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 2147483647;
+}
+.cheese-recap-capture-dialog {
+  background: #1f2738;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 32px);
+  max-width: 100%;
+  outline: none;
+  width: 560px;
+}
+.cheese-recap-capture-dialog-head {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+.cheese-recap-capture-dialog-head strong {
+  font-size: 14px;
+  font-weight: 800;
+}
+.cheese-recap-capture-dialog-head button {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-grid;
+  height: 28px;
+  place-items: center;
+  width: 28px;
+}
+.cheese-recap-capture-dialog-head button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+/* ⚠ flex 로 두면 이미지가 창 높이에 맞춰 늘어나·줄어 비율이 깨진다. 비율을 지키고 넘치면 스크롤. */
+.cheese-recap-capture-dialog-body {
+  display: block;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  scrollbar-color: rgba(37, 223, 151, 0.72) rgba(255, 255, 255, 0.08);
+  scrollbar-width: thin;
+  text-align: center;
+}
+.cheese-recap-capture-dialog-body img {
+  border-radius: 8px;
+  display: inline-block;
+  height: auto;
+  max-width: 100%;
+  vertical-align: top;
+}
+.cheese-recap-capture-dialog-nav {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding: 0 14px 8px;
+}
+.cheese-recap-capture-dialog-nav[hidden] {
+  display: none;
+}
+.cheese-recap-capture-dialog-nav button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 16px;
+  height: 28px;
+  line-height: 1;
+  width: 28px;
+}
+.cheese-recap-capture-dialog-nav button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.cheese-recap-capture-dialog-nav span {
+  font-size: 12px;
+  font-weight: 700;
+}
+.cheese-recap-capture-dialog-foot {
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+}
+.cheese-recap-capture-dialog-foot span {
+  color: rgba(255, 255, 255, 0.6);
+  flex: 1;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 내 채팅 기록 검색 창 캡처: 창은 치지직 테마(라이트/다크)를 따른다. */
+.cheese-recap-search-window.is-capture-selecting
+  .cheese-recap-search-window-row {
+  border-radius: 6px;
+  cursor: copy;
+}
+.cheese-recap-search-window
+  .cheese-recap-search-window-row.is-capture-selected {
+  background: rgba(0, 199, 60, 0.14);
+  border: 1px dashed rgb(37, 223, 151);
+}
+.cheese-recap-search-window [data-recap-search-capture][aria-pressed="true"] {
+  color: #00a650;
+}
+/* 선택 막대는 창 머리(제목 자리) 안에 둔다. 선택 중에는 제목을 숨겨 자리를 낸다. */
+.cheese-recap-search-window.is-capture-selecting
+  .cheese-recap-search-window-head
+  > strong {
+  display: none;
+}
+.cheese-recap-search-window-head > .cheese-recap-capture-bar {
+  border: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+}
+.cheese-recap-search-window .cheese-recap-capture-count {
+  color: inherit;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 머리의 32x32 아이콘 버튼 규칙을 풀고 글자 버튼으로 그린다. */
+.cheese-recap-search-window-head > .cheese-recap-capture-bar button {
+  background: transparent;
+  border: 1px solid var(--sem-color-border-neutral-weak, #d8dadd);
+  border-radius: 999px;
+  color: inherit;
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  width: auto;
+}
+.cheese-recap-search-window-head > .cheese-recap-capture-bar button.is-primary {
+  background: #00c73c;
+  border-color: #00c73c;
+  color: #fff;
+}
+/* 그릴 상자: 창과 같은 색·글자, 결과는 펼쳐(스크롤·sticky 없이) 그린다. */
+.cheese-recap-capture-surface.is-search {
+  background: var(--sem-color-background-neutral-base, #fff);
+  border: 1px solid var(--sem-color-border-neutral-weak, #d8dadd);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: var(--sem-color-content-neutral-primary, #17191c);
+}
+.cheese-recap-capture-surface.is-search .cheese-recap-capture-head {
+  border-bottom-color: var(--sem-color-border-neutral-weak, #d8dadd);
+}
+.cheese-recap-capture-surface.is-search .cheese-recap-capture-head strong,
+.cheese-recap-capture-surface.is-search .cheese-recap-capture-head p {
+  color: inherit;
+}
+.cheese-recap-capture-surface.is-search .cheese-recap-capture-head span {
+  color: #00a650;
+}
+.cheese-recap-capture-surface.is-search .cheese-recap-capture-head small {
+  color: inherit;
+  opacity: 0.6;
+}
+.cheese-recap-capture-surface.is-search .cheese-recap-search-window-results {
+  max-height: none;
+  overflow: visible;
+}
+.cheese-recap-capture-surface.is-search .cheese-recap-search-window-date {
+  position: static;
 }

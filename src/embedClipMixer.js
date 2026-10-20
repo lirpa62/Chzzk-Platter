@@ -293,7 +293,7 @@
   let panelTab = "builtin";
   let panelInfoMode = "";
   let gainStep = 5; // %
-  let gainMin = 0.5;
+  let gainMin = 0.1; // 게인 슬라이더 최소 기본 10%
   let gainMax = 2;
   // 사용자가 슬라이더로 조절한 게인. 프리셋의 gain 위에 곱해지는 게 아니라
   // 프리셋 gain 을 대체한다(네이티브 믹서와 같은 규약).
@@ -581,7 +581,7 @@
     gainStep = clampGainStep(data?.[GAIN_STEP_KEY]);
     gainMin = GAIN_MIN_ALLOWED.includes(Number(data?.[GAIN_MIN_KEY]))
       ? Number(data[GAIN_MIN_KEY])
-      : 0.5;
+      : 0.1;
     gainMax = GAIN_MAX_ALLOWED.includes(Number(data?.[GAIN_MAX_KEY]))
       ? Number(data[GAIN_MAX_KEY])
       : 2;

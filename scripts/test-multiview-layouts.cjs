@@ -66,9 +66,9 @@ for (let n = 2; n <= 9; n += 1) {
   const list = L.layoutsFor(n);
   ok(list.length > 0, `${n}개: ${list.map((x) => x.label).join(", ")}`);
 }
-ok(L.layoutsFor(10).length === 0, "10개는 지원하지 않는다(보조 최대 8개)");
-ok(L.SLOTS.length === 9 && !L.SLOTS.some((slot) => ["x", "y", "z"].includes(slot)),
-  "슬롯 9개, 채팅·손잡이 자리(x·y·z)와 겹치지 않는다");
+ok(L.layoutsFor(10).length === 0, "기본 배치는 10개를 지원하지 않는다(보조 최대 8개, 10개 이상은 내 배치만)");
+ok(L.SLOTS.length === 16 && !L.SLOTS.some((slot) => ["x", "y", "z"].includes(slot)),
+  "슬롯 16개(기본 배치는 앞 9개), 채팅·손잡이 자리(x·y·z)와 겹치지 않는다");
 ok(L.layoutsFor(1).length === 0, "1개는 멀티뷰가 아니다");
 
 console.log("\n[stageStyle] 채팅 위치에 따라 방향이 바뀐다");
@@ -554,6 +554,169 @@ console.log("[채팅 위 영상 높이] 저장·복원");
   ok(/var\(--mv-chat-top-h, calc\(min\(var\(--mv-chat-w, 370px\), 60vw\) \* 9 \/ 16\)\)/.test(grid.rows) &&
     /calc\(100% - 160px\)/.test(grid.rows),
     "자동 높이는 채팅 폭의 16:9, 아래 영역에 160px 를 남긴다");
+}
+
+// 마지막으로 고른 채팅 자리 기억(cheeseMultiviewChatSide): 그 배치에서 되면 쓰고, 빈 칸이 기본인 배치는 빈 칸을 둔다.
+{
+  const outside = L.LAYOUTS.find((l) => !l.chatTop && !l.chatInsetOption && L.chatSidesFor(l).includes("right") && L.chatSidesFor(l)[0] === "left") ||
+    L.LAYOUTS.find((l) => !l.chatTop && !l.chatInsetOption && L.chatSidesFor(l).includes("right"));
+  const def = L.stageStyle(outside, "").side;
+  ok(L.preferredChatSide(outside, "right", def) === "right" && L.preferredChatSide(outside, "", def) === def,
+    `${outside.id}: 기억한 자리(오른쪽)를 쓰고, 기억이 없으면 기본 자리(${def})`);
+  ok(L.preferredChatSide(outside, "inset", def) === def, `${outside.id}: 이 배치에서 못 쓰는 자리면 기본 자리`);
+  const chatTop = L.LAYOUTS.find((l) => l.chatTop);
+  ok(L.preferredChatSide(chatTop, "bottom", "right") === "right", `${chatTop.id}: 채팅 위 배치는 좌/우만`);
+  const inset = L.LAYOUTS.find((l) => L.chatSidesFor(l)[0] === L.CHAT_INSET_SIDE);
+  ok(L.preferredChatSide(inset, "right", L.CHAT_INSET_SIDE) === L.CHAT_INSET_SIDE &&
+    L.preferredChatSide(inset, L.CHAT_INSET_SIDE, "right") === L.CHAT_INSET_SIDE,
+    `${inset.id}: 빈 칸이 기본인 배치는 빈 칸을 둔다(빈 칸이 남지 않게)`);
+  const fsx = require("node:fs");
+  const watchSrc = fsx.readFileSync(path.join(__dirname, "..", "src", "multiviewWatch.js"), "utf8");
+  const setupSrc = fsx.readFileSync(path.join(__dirname, "..", "src", "multiview.js"), "utf8");
+  ok(/state\.chatSide = side;\s*applyLayout\(\);\s*try \{\s*void chrome\.storage\?\.local\?\.set\(\{ \[CHAT_SIDE_PREF_KEY\]: side \}\)/.test(watchSrc) &&
+    /LAYOUTS\.stageStyle\(layout, LAYOUTS\.preferredChatSide\(layout, chatSidePref, state\.chatSide\)\)/.test(setupSrc),
+    "시청 화면에서 고른 자리를 저장하고, 고르기 화면이 시작할 때 쓴다");
+}
+
+// 내 배치(cheeseMultiviewCustomLayouts): 모양 검사 → 기본 배치와 같은 모양으로 LAYOUTS 에 건다.
+{
+  const sym = { id: "custom-sym3x", name: "  대칭 3  ", cells: [[".", "m", "m", "."], ["a", "a", "b", "b"]], chat: "inset" };
+  const n = L.normalizeCustomLayout(sym);
+  ok(n && n.name === "대칭 3" && n.rows === 2 && n.cols === 4 && n.chat === "right",
+    "내 배치: 이름 정리, 빈 칸이 직사각형 하나가 아니면 '빈 칸' 채팅은 오른쪽으로");
+  ok(L.normalizeCustomLayout({ ...sym, cells: [["m", "a"], ["a", "m"]] }) === null, "내 배치: 직사각형이 아닌 칸은 버린다");
+  ok(L.normalizeCustomLayout({ ...sym, cells: [["m", "b"]] }) === null, "내 배치: 칸 이름이 차례(m,a,b…)가 아니면 버린다");
+  ok(L.normalizeCustomLayout({ ...sym, cells: [["m", "."]] }) === null, "내 배치: 화면 칸이 2개 미만이면 버린다");
+  ok(L.normalizeCustomLayout({ ...sym, cells: Array.from({ length: 13 }, () => ["m", "a"]) }) === null &&
+    L.normalizeCustomLayout({ ...sym, cells: Array.from({ length: 12 }, (_, i) => Array.from({ length: 12 }, (_, j) => (i < 6 ? "m" : "a"))) }) !== null &&
+    L.normalizeCustomLayout({ ...sym, id: "bad id" }) === null && L.normalizeCustomLayout({ ...sym, cells: [["m", "z"]] }) === null,
+    "내 배치: 12줄 넘는 격자·잘못된 id·모르는 칸 이름은 버린다(12×12 까지 된다)");
+  const insetRaw = { id: "custom-inset1", name: "빈칸", cells: [["m", "a"], ["b", "."]], chat: "inset" };
+  const defs = L.setCustomLayouts([sym, insetRaw, { id: "custom-sym3x", name: "중복", cells: [["m", "a"]] }]);
+  ok(defs.length === 2 && defs.every((d) => d.custom && d.flexible), "내 배치: 같은 id 는 한 번만 건다");
+  const symDef = L.layoutById("custom-sym3x");
+  ok(symDef.aux === 2 && symDef.columns === "repeat(4, 1fr)" && symDef.areas.join("|") === '". m m ."|"a a b b"' &&
+    symDef.chat[0] === "right" && !symDef.chatInsetOption && symDef.source.id === "custom-sym3x",
+    "내 배치 → 배치: 칸 수·열·areas·채팅 자리·원래 저장값(source)");
+  const insetDef = L.layoutById("custom-inset1");
+  ok(insetDef.chatInsetOption && L.chatSidesFor(insetDef)[0] === L.CHAT_INSET_SIDE && L.stageStyle(insetDef, "").side === L.CHAT_INSET_SIDE,
+    "내 배치: 빈 칸이 직사각형 하나면 '빈 칸' 채팅을 쓸 수 있고, 고른 대로 기본이 된다");
+  ok(L.layoutsFor(3).some((l) => l.id === "custom-sym3x") && L.layoutsFor(3).at(-1).custom,
+    "내 배치는 그 채널 수의 배치 목록 끝에 나온다");
+  const tracks = L.solveTracks(symDef);
+  ok(tracks && tracks.columns.split(" ").every((w) => w === tracks.columns.split(" ")[0]) && Math.abs(tracks.ratio - 16 / 9) < 1e-6,
+    "내 배치: 한 열짜리 칸이 없는 대칭 모양도 열을 같게 두어 모든 칸을 16:9 로 푼다");
+  const odd = L.setCustomLayouts([{ id: "custom-odd01", name: "x", cells: [["m", "m", "a"], ["b", "c", "c"]], chat: "right" }])[0];
+  ok(L.solveTracks(odd) === null, "내 배치: 16:9 로 풀리지 않는 모양은 null(균등 칸으로 그린다)");
+  ok(L.solveTracks({ ...L.layoutById("right-1"), id: "x" }) !== null, "기본 배치의 16:9 계산은 그대로");
+  // keepId: 지금 쓰는 배치는 목록에서 지워져도 남긴다
+  L.setCustomLayouts([{ id: "custom-keep1", name: "k", cells: [["m", "a"]], chat: "right" }]);
+  L.setCustomLayouts([], { keepId: "custom-keep1" });
+  ok(L.layoutById("custom-keep1") && !L.layoutById("custom-odd01"), "내 배치: 지운 배치도 지금 쓰는 중이면 남기고 나머지는 뺀다");
+  L.setCustomLayouts([]);
+  ok(!L.LAYOUTS.some((l) => l.custom), "내 배치: 목록을 비우면 모두 뺀다");
+  const reg = L.registerCustomLayout({ id: "custom-reg01", name: "구성", cells: [["m"], ["a"]], chat: "bottom" });
+  ok(reg && L.layoutById("custom-reg01") === reg && L.registerCustomLayout({ id: "custom-reg01", name: "새", cells: [["m", "a"]] }).label === "새" &&
+    L.LAYOUTS.filter((l) => l.id === "custom-reg01").length === 1, "구성에 담겨 온 내 배치를 건다(같은 id 면 바꾼다)");
+  L.setCustomLayouts([]);
+  ok(/^custom-[a-z0-9]{4,24}$/.test(L.newCustomLayoutId()), "새 내 배치 id 모양");
+  // 16채널: 기본 배치는 9까지, 내 배치는 16까지(그 칸 수의 내 배치가 있어야 한다).
+  ok(L.SLOTS.length === 16 && !L.SLOTS.some((slot) => ["x", "y", "z"].includes(slot)) && new Set(L.SLOTS).size === 16,
+    "칸 이름표 16개(x·y·z 는 채팅·손잡이 자리라 빼고)");
+  ok(L.maxChannels() === 9 && !L.hasLayoutFor(10) && L.hasLayoutFor(9) && !L.LAYOUTS.some((l) => !l.custom && l.aux > 8),
+    "내 배치가 없으면 최대 9채널(기본 배치는 9채널까지)");
+  const big = Array.from({ length: 4 }, (_, r) => Array.from({ length: 4 }, (_, c) => L.SLOTS[r * 4 + c]));
+  L.setCustomLayouts([{ id: "custom-big16", name: "4×4", cells: big, chat: "right" }]);
+  ok(L.maxChannels() === 16 && L.hasLayoutFor(16) && !L.hasLayoutFor(12) && L.layoutsFor(16).map((l) => l.id).join() === "custom-big16" &&
+    L.solveTracks(L.layoutById("custom-big16")) !== null, "16칸 내 배치가 있으면 16채널까지(그 칸 수만), 4×4 는 16:9 로 풀린다");
+  const over = Array.from({ length: 1 }, () => Array.from({ length: 12 }, (_, c) => c));
+  ok(L.normalizeCustomLayout({ id: "custom-over1", name: "x", cells: [[...L.SLOTS, "q"]], chat: "right" }) === null,
+    "17칸 이상(모르는 칸 이름)은 버린다");
+  L.setCustomLayouts([]);
+  // 격자 안 채팅 칸(x): 그 칸만 채팅이 되고, 다른 빈 칸은 빈 칸 그대로(떨어진 빈 칸까지 채팅으로 바꾸면 격자가 깨진다).
+  const chatDef = L.customLayoutDef(L.normalizeCustomLayout({ id: "custom-chat01", name: "c", cells: [[".", "m", "x"], ["a", "b", "x"]], chat: "inset" }));
+  ok(chatDef.chatInsetOption && chatDef.chat[0] === L.CHAT_INSET_SIDE && L.chatInsetStageGrid(chatDef).areas === '". m x" "a b x"' &&
+    L.chatInsetStageGrid(chatDef, true).areas === '". m ." "a b ."', "내 배치 채팅 칸: 그 칸만 채팅, 접으면 빈 칸");
+  ok(JSON.stringify(L.normalizeCustomLayout({ id: "custom-chat02", name: "c", cells: [["m", "x"], ["a", "x"]], chat: "right" }).cells) === '[["m","."],["a","."]]' &&
+    L.normalizeCustomLayout({ id: "custom-chat03", name: "c", cells: [["m", "a"], ["b", "c"]], chat: "inset" }).chat === "right" &&
+    L.normalizeCustomLayout({ id: "custom-chat04", name: "c", cells: [["m", "x"], ["x", "a"]], chat: "inset" }) === null &&
+    JSON.stringify(L.normalizeCustomLayout({ id: "custom-old01", name: "o", cells: [["m", "a"], ["b", "."]], chat: "inset" }).cells) === '[["m","a"],["b","x"]]',
+    "내 배치 채팅 칸: 바깥 채팅이면 비우고, 채팅 칸이 없으면 오른쪽, 직사각형이 아니면 버리고, 예전 '빈 칸' 저장값은 채팅 칸으로");
+  const fs2 = require("node:fs");
+  const watchSrc2 = fs2.readFileSync(path.join(__dirname, "..", "src", "multiviewWatch.js"), "utf8");
+  const setupSrc2 = fs2.readFileSync(path.join(__dirname, "..", "src", "multiview.js"), "utf8");
+  ok(/if \(raw\.customLayout\) LAYOUTS\.registerCustomLayout\(raw\.customLayout\);\s*\/\/[^\n]*\n[^\n]*\n\s*const allowed = LAYOUTS\.layoutsFor/.test(watchSrc2) &&
+    /\.\.\.\(layout\?\.custom && layout\.source \? \{ customLayout: layout\.source \} : \{\}\)/.test(watchSrc2) &&
+    /\.\.\.\(layout\.custom && layout\.source \? \{ customLayout: layout\.source \} : \{\}\)/.test(setupSrc2),
+    "시작 구성·시청 화면 저장 구성에 내 배치 모양을 담고, 시청 화면은 배치를 고르기 전에 그 모양을 건다");
+}
+
+// 채팅 칸 여러 개(채팅 1~4 = x·q·r·s): 차례대로, 직사각형, 격자 안 채팅일 때만. 채팅 1 을 접어도 2~4 는 남는다.
+{
+  const two = L.customLayoutDef(L.normalizeCustomLayout({ id: "custom-mc001", name: "m", cells: [["m", "m", "x"], ["a", "b", "q"]], chat: "inset" }));
+  ok(JSON.stringify(two.extraChats) === '["q"]' && L.chatInsetStageGrid(two).areas === '"m m x" "a b q"' &&
+    L.chatInsetStageGrid(two, true).areas === '"m m ." "a b q"', "채팅 2 칸: 이름은 그대로 두고, 채팅 1 을 접어도 남는다");
+  ok(L.normalizeCustomLayout({ id: "custom-mc002", name: "m", cells: [["m", "m", "q"], ["a", "b", "."]], chat: "inset" }) === null &&
+    L.normalizeCustomLayout({ id: "custom-mc003", name: "m", cells: [["m", "q", "x"], ["a", "x", "q"]], chat: "inset" }) === null,
+    "채팅 칸은 채팅 1 부터 차례대로, 직사각형이어야 한다");
+  const four = L.normalizeCustomLayout({ id: "custom-mc004", name: "m", cells: [["m", "a", "x", "q"], ["b", "c", "r", "s"]], chat: "inset" });
+  ok(four && JSON.stringify(L.customLayoutDef(four).extraChats) === '["q","r","s"]' && L.customLayoutDef(four).aux === 3,
+    "채팅 4개까지(채팅 칸은 채널 수에 들어가지 않는다)");
+  ok(JSON.stringify(L.normalizeCustomLayout({ id: "custom-mc005", name: "m", cells: [["m", "x", "q"], ["a", "x", "q"]], chat: "right" }).cells) ===
+    '[["m",".","."],["a",".","."]]' && JSON.stringify(L.customLayoutDef(L.normalizeCustomLayout({ id: "custom-mc006", name: "m", cells: [["m", "a"]], chat: "right" })).extraChats) === "[]",
+    "바깥 채팅이면 채팅 칸을 모두 비우고 추가 채팅은 없다");
+}
+// 채팅 위 영상(chatTopVideos 1~2): 바깥 채팅 막대 위에 영상을 얹는다 — 기본 '채팅 위' 배치와 같은 모양.
+{
+  const pick = (d) => JSON.stringify({ areas: d.areas, columns: d.columns, rows: d.rows, chatTop: d.chatTop, chatTopVideos: d.chatTopVideos, chatTopSplit: d.chatTopSplit, coreColumns: d.coreColumns });
+  const builtin = L.LAYOUTS.find((d) => d.id === "main-top-chat-top");
+  const one = L.customLayoutDef(L.normalizeCustomLayout({ id: "custom-ct001", name: "t", cells: [["m", "m"], ["a", "a"]], chat: "right", chatTopVideos: 1 }));
+  ok(one.chatTop && one.custom && pick(one) === pick(builtin),
+    "채팅 위 1: 같은 행·열을 줄여 기본 '메인 위 + 채팅 위 1' 과 같은 모양: " + pick(one));
+  const two = L.normalizeCustomLayout({ id: "custom-ct002", name: "t", cells: [["m"]], chat: "left", chatTopVideos: 2 });
+  ok(two && two.chatTopVideos === 2 && L.customLayoutDef(two).chatTop && L.customLayoutDef(two).aux === 2 &&
+    JSON.stringify(L.customLayoutDef(two).chat) === '["left","right"]',
+    "채팅 위 2: 격자는 메인 하나여도 되고(채널 3개), 왼쪽 채팅");
+  ok(!("chatTopVideos" in L.normalizeCustomLayout({ id: "custom-ct003", name: "t", cells: [["m", "a"]], chat: "bottom", chatTopVideos: 2 })) &&
+    L.normalizeCustomLayout({ id: "custom-ct004", name: "t", cells: [["m"]], chat: "bottom", chatTopVideos: 2 }) === null &&
+    L.normalizeCustomLayout({ id: "custom-ct005", name: "t", cells: [[...L.SLOTS]], chat: "right", chatTopVideos: 1 }) === null,
+    "아래 채팅이면 채팅 위 영상은 버리고, 합쳐 16을 넘으면 버린다");
+  const c = L.compactCells([["m", "m", "a"], ["m", "m", "a"], ["b", "b", "b"]]);
+  ok(JSON.stringify(c.cells) === '[["m","a"],["b","b"]]' && c.rowFr.join() === "2,1" && c.colFr.join() === "2,1",
+    "compactCells: 같은 행·열을 합치고 비율로 남긴다: " + JSON.stringify(c));
+}
+{
+  const w = require("node:fs").readFileSync(path.join(__dirname, "..", "src", "multiviewWatch.js"), "utf8");
+  ok(/const canAddChannel = \(\) => state\.chosen\.length < MAX_CHANNELS && LAYOUTS\.hasLayoutFor\(state\.chosen\.length \+ 1\);/.test(w) &&
+    (w.match(/!canAddChannel\(\)/g) || []).length === 3 && /const MAX_CHANNELS = 16;/.test(w),
+    "시청 화면: 채널 추가는 다음 채널 수의 배치가 있을 때만(10개 이상은 그 칸 수의 내 배치), 16 한도");
+}
+
+// 기본 배치 설정: 숨긴 기본 배치는 목록·자동 전환에서 빠지고(쓰는 중이면 남김), 채널 수별 기본 배치가 먼저.
+{
+  const n = L.normalizeLayoutPrefs({ hidden: ["right-2", "right-2", "nope", 3], defaults: { 4: "grid-2x2", 1: "x", 3: "right-2", 20: "a", 5: "bad id" } });
+  ok(JSON.stringify(n) === '{"hidden":["right-2"],"defaults":{"4":"grid-2x2"}}', "배치 설정 정리: 없는 id·숨긴 기본·범위 밖 채널 수는 버린다 " + JSON.stringify(n));
+  L.setLayoutPrefs({ hidden: ["right-2"], defaults: { 4: "grid-2x2" } });
+  ok(!L.layoutsFor(3).some((l) => l.id === "right-2") && L.layoutsFor(3, { keepId: "right-2" }).some((l) => l.id === "right-2") &&
+    L.layoutsFor(3, { all: true }).some((l) => l.id === "right-2"), "숨긴 배치는 목록에서 빠지되, 쓰는 중이면 남고 all 에는 있다");
+  const toThree = L.layoutForCount("right-1", 3, "right");
+  ok(toThree && toThree.layoutId !== "right-2" && L.layoutsFor(3).some((l) => l.id === toThree.layoutId), "비슷한 배치가 숨겨져 있으면 보이는 배치로: " + toThree?.layoutId);
+  ok(L.layoutForCount("right-2", 4, "right").layoutId === "grid-2x2" && L.layoutForCount(null, 4, "right").layoutId === "grid-2x2",
+    "채널 수별 기본 배치가 '비슷한 배치' 보다 먼저");
+  const back = new Map();
+  L.setLayoutPrefs({ defaults: { 3: "left-2" } });
+  L.layoutForCount("right-2", 4, "right", back);
+  ok(L.layoutForCount("right-3", 3, "right", back).layoutId === "right-2", "넣었다 뺀 채널은 쓰던 배치로 돌아온다(기본 배치보다 앞)");
+  ok(L.layoutForCount("bottom-3", 3, "right").layoutId === "left-2", "그 밖에는 기본 배치");
+  L.setCustomLayouts([]);
+  const every3 = L.layoutsFor(3, { all: true }).filter((l) => !l.custom).map((l) => l.id);
+  L.setLayoutPrefs(null);
+  const shownBefore = L.layoutsFor(3).length;
+  L.setLayoutPrefs({ hidden: every3 });
+  ok(L.layoutsFor(3).length === shownBefore, "다 숨겨졌으면 모두 보인다(빈 목록이 되지 않게)");
+  L.setLayoutPrefs({ defaults: { 3: "custom-zzz" } });
+  ok(L.defaultLayoutFor(3) === null, "없는 내 배치 id 는 기본으로 쓰지 않는다");
+  L.setLayoutPrefs(null);
 }
 
 console.log(fails ? `\n실패 ${fails}건` : "\n전부 통과");

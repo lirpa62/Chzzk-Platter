@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="src/coloris.min.css" />
     <link rel="stylesheet" href="src/popup.css" />
     <link rel="stylesheet" href="src/logPowerStats.css" />
+    <link rel="stylesheet" href="src/recordManage.css" />
   </head>
   <body>
     <main class="lps-shell">
@@ -26,6 +27,15 @@
         <div class="lps-header-actions">
           <button type="button" class="lps-refresh" id="lpsRefresh">
             새로고침
+          </button>
+          <button
+            type="button"
+            class="lps-refresh"
+            id="lpsManage"
+            aria-haspopup="dialog"
+            title="채널별로 골라 지우거나 전체 내역을 지웁니다"
+          >
+            기록 관리
           </button>
           <button
             type="button"
@@ -1591,6 +1601,7 @@
 
     <script src="src/coloris.min.js"></script>
     <script src="src/chart.min.js"></script>
+    <script src="src/recordManage.js"></script>
     <script src="src/logPowerStats.js"></script>
   </body>
 </html>

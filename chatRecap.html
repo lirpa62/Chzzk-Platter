@@ -7,10 +7,12 @@
     <script src="src/themeInit.js"></script>
     <script src="src/chart.min.js"></script>
     <script src="src/chatRecapStore.js"></script>
+    <script src="src/recordManage.js"></script>
     <link rel="stylesheet" href="src/coloris.min.css" />
     <link rel="stylesheet" href="src/popup.css" />
     <link rel="stylesheet" href="src/logPowerStats.css" />
     <link rel="stylesheet" href="src/chatRecap.css" />
+    <link rel="stylesheet" href="src/recordManage.css" />
   </head>
   <body>
     <main class="lps-shell">
@@ -213,6 +215,15 @@
               />
             </svg>
             AI 분석 프롬프트
+          </button>
+          <button
+            type="button"
+            class="lps-refresh"
+            id="crcManage"
+            aria-haspopup="dialog"
+            title="채널별로 골라 지우거나 전체 채팅 기록을 지웁니다"
+          >
+            기록 관리
           </button>
           <button
             type="button"

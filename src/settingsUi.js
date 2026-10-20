@@ -59,6 +59,8 @@
     ['[data-feature="screenshotButton"]', "[data-screenshot-action], [data-screenshot-name-format]"],
     ["[data-multiview-live-catch-up]", "[data-multiview-live-catch-up-limit]"],
     ["[data-wheel-volume]", "[data-wheel-volume-scope], [data-wheel-volume-rightclick], [data-wheel-volume-step]"],
+    ["[data-playlist-library-button]", "[data-playlist-library-target], [data-playlist-library-open]"],
+    ['[data-feature="chzzkPlaylistPanel"]', "[data-chzzk-playlist-mini-player], [data-chzzk-playlist-minimize-target]"],
     ["[data-action-overlay]", "[data-osd-group]"],
     ["[data-ad-mini-unmute]", "[data-ad-mini-keep-muted]"],
     ["[data-auto-reload-on-relive]", "#autoReliveMaxHours"],
@@ -507,6 +509,7 @@
     ["chat", "#openChatRecap"],
     ["logpower", "#openLogStats"],
     ["player", "#openWatchTime"],
+    ["playlist", "#openPlaylist"],
   ];
 
   // ⚠ 그룹 제목이 '섹션마다 하나'인 탭과 '한 섹션 안에 여러 개'인 탭이 섞여 있다

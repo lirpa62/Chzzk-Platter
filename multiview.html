@@ -91,6 +91,12 @@
           <!-- 전용 팔로잉을 골랐을 때만 구역(즐겨찾기·그룹·친밀도·팔로잉)을 보여 준다.
                통나무파워 탐색기의 폴더 카드와 같은 모양을 쓴다. -->
           <div class="mv-folders" id="mvFolders" hidden></div>
+          <!-- 검색 종류: 채널·태그(기존) / 카테고리(이름이 맞는 카테고리를 카드로 → 누르면 그 라이브). -->
+          <div class="mv-search-mode" id="mvSearchMode" role="group" aria-label="검색 종류" hidden>
+            <button type="button" data-mv-search-mode="channel" aria-pressed="true">채널·태그</button>
+            <button type="button" data-mv-search-mode="title" aria-pressed="false">방제</button>
+            <button type="button" data-mv-search-mode="category" aria-pressed="false">카테고리</button>
+          </div>
           <input
             type="search"
             class="mv-search"
@@ -98,6 +104,8 @@
             placeholder="채널 이름 또는 태그로 찾기"
             hidden
           />
+          <!-- 카드의 카테고리·태그 칩이나 카테고리 카드를 누르면 그 필터로 본다(× 로 해제). -->
+          <div class="mv-search-filter" id="mvSearchFilter" hidden></div>
           <div class="mv-video-search-wrap" id="mvVideoChannelSearch" hidden>
             <input type="search" class="mv-search" id="mvVideoChannelSearchInput" placeholder="채널명을 입력하세요" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="mvVideoChannelPopover" aria-expanded="false" />
             <div class="mv-video-channel-popover" id="mvVideoChannelPopover" role="listbox" aria-label="채널 검색 결과" hidden></div>
@@ -164,9 +172,24 @@
             맨 위가 메인 채널입니다. 끌어서 순서를 바꿀 수 있습니다.
           </p>
           <ol class="mv-chosen-list" id="mvChosenList"></ol>
+          <p class="mv-option-note mv-many-channels-note" id="mvManyChannelsNote" hidden>
+            채널 10개 이상은 내 배치로만 볼 수 있습니다. 채널이 많을수록 PC·네트워크 부담이 크게 늘어나 버벅일 수 있습니다.
+            메인 외 채널은 낮은 화질(480p)로 시작합니다.
+          </p>
 
           <div class="mv-layout-pick">
-            <strong>배치</strong>
+            <div class="mv-layout-pick-head">
+              <strong>배치</strong>
+              <span class="mv-custom-layout-buttons">
+                <button type="button" class="mv-custom-layout-new mv-layout-prefs-open" id="mvLayoutPrefsOpen"
+                  aria-label="기본 배치 설정" data-tooltip="기본 배치 설정"><svg width="14" height="14" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                  <circle cx="12" cy="12" r="3"/></svg></button>
+                <button type="button" class="mv-custom-layout-new" id="mvCustomLayoutManage" hidden>내 배치 관리</button>
+                <button type="button" class="mv-custom-layout-new" id="mvCustomLayoutNew">+ 내 배치 만들기</button>
+              </span>
+            </div>
             <div class="mv-layout-grid" id="mvLayoutGrid" role="radiogroup">
               <!-- 고른 채널 수에 맞는 배치만 렌더한다 -->
             </div>
@@ -248,6 +271,110 @@
           <button type="submit" value="move" class="mv-dialog-button is-primary" autofocus>멀티뷰 이동</button>
         </div>
       </form>
+    </dialog>
+
+    <!-- 멀티뷰가 이미 실행 중일 때 새로 시작하면: 탭 추가 부담 안내 + 다른 멀티뷰와 겹치는 채널 안내. -->
+    <dialog class="mv-dialog" id="mvMultiTabDialog" aria-labelledby="mvMultiTabTitle">
+      <form method="dialog">
+        <h2 class="mv-dialog-title" id="mvMultiTabTitle">멀티뷰 탭 추가</h2>
+        <p class="mv-dialog-desc mv-dialog-warn" id="mvMultiTabDup" hidden></p>
+        <p class="mv-dialog-desc" id="mvMultiTabLoad" hidden>
+          멀티뷰 탭을 하나 더 실행합니다. PC·네트워크 환경에 따라 시청 중 버벅이거나 부담이 될 수 있습니다.
+        </p>
+        <div class="mv-dialog-actions">
+          <button type="submit" value="cancel" class="mv-dialog-button">취소</button>
+          <button type="submit" value="replace" class="mv-dialog-button" id="mvMultiTabReplace" hidden>기존 멀티뷰 바꾸기</button>
+          <button type="submit" value="open" class="mv-dialog-button is-primary" id="mvMultiTabOpen" autofocus>새 탭으로 열기</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- 내 배치 만들기·수정(multiview.js 내 배치 편집기). -->
+    <dialog class="mv-dialog mv-custom-layout-dialog" id="mvCustomLayoutDialog" aria-labelledby="mvCustomLayoutTitle">
+      <h2 class="mv-dialog-title" id="mvCustomLayoutTitle">내 배치 만들기</h2>
+      <div class="mv-custom-layout-row">
+        <label class="mv-custom-layout-name">이름
+          <input type="text" id="mvCustomLayoutName" maxlength="30" placeholder="내 배치" autocomplete="off" />
+        </label>
+        <div class="mv-custom-layout-size" aria-label="격자 크기">
+          <span>열</span>
+          <button type="button" data-mv-custom-size="cols:-1" aria-label="열 줄이기">−</button>
+          <output id="mvCustomCols">4</output>
+          <button type="button" data-mv-custom-size="cols:1" aria-label="열 늘리기">+</button>
+          <span>행</span>
+          <button type="button" data-mv-custom-size="rows:-1" aria-label="행 줄이기">−</button>
+          <output id="mvCustomRows">2</output>
+          <button type="button" data-mv-custom-size="rows:1" aria-label="행 늘리기">+</button>
+        </div>
+      </div>
+      <p class="mv-dialog-desc">빈 칸을 끌어 칸을 만드세요. 처음 만든 화면 칸이 메인입니다. 칸을 끌면 옮겨지고, 누르면 골라서 모서리로 크기를 바꾸거나 메인으로 바꾸고 지울 수 있습니다. 채팅 막대의 '+ 영상'으로 채팅 위에 영상을 둘 수 있습니다.</p>
+      <!-- 그리기: 화면 칸 / 채팅 칸(격자 안 채팅, 4개까지). -->
+      <div class="mv-custom-draw-row">
+        <span>그리기</span>
+        <div class="mv-search-mode mv-custom-draw-mode" role="group" aria-label="그리기">
+          <button type="button" data-mv-custom-draw="video" aria-pressed="true">화면 칸</button>
+          <button type="button" class="mv-custom-tooltip" data-mv-custom-draw="chat" aria-pressed="false"
+            data-tooltip="격자 안에 채팅 칸을 끌어 만듭니다(4개까지)">채팅 칸</button>
+        </div>
+      </div>
+      <!-- 채팅 자리를 함께 그린다: 바깥(오른쪽·왼쪽·아래)이면 격자 옆 채팅 막대(오른쪽·왼쪽이면 위에 영상을 얹는다),
+           격자 안 채팅 칸을 그렸으면 막대는 없다. -->
+      <div class="mv-custom-stage" id="mvCustomStage" data-chat="right">
+        <div class="mv-custom-grid" id="mvCustomGrid" role="application" aria-label="배치 편집 격자"></div>
+        <div class="mv-custom-chatbar" id="mvCustomChatbar">
+          <div class="mv-custom-chattop" id="mvCustomChatTop"></div>
+          <button type="button" class="mv-custom-chattop-add mv-custom-tooltip" data-mv-custom-chattop-add
+            data-tooltip="채팅 위에 영상 칸을 얹습니다(2개까지)">+ 영상</button>
+          <span class="mv-custom-chatbar-label">채팅</span>
+        </div>
+      </div>
+      <div class="mv-custom-layout-tools">
+        <button type="button" class="mv-dialog-button" data-mv-custom-tool="main" disabled>메인으로</button>
+        <button type="button" class="mv-dialog-button" data-mv-custom-tool="remove" disabled>칸 지우기</button>
+        <button type="button" class="mv-dialog-button" data-mv-custom-tool="clear">모두 지우기</button>
+      </div>
+      <div class="mv-custom-layout-chat">
+        <span>채팅 자리</span>
+        <div class="mv-search-mode mv-custom-chat-options" role="group" aria-label="채팅 자리(바깥)">
+          <button type="button" data-mv-custom-chat="right" aria-pressed="true">오른쪽</button>
+          <button type="button" data-mv-custom-chat="left" aria-pressed="false">왼쪽</button>
+          <button type="button" data-mv-custom-chat="bottom" aria-pressed="false">아래</button>
+        </div>
+      </div>
+      <p class="mv-custom-layout-status" id="mvCustomLayoutStatus" role="status"></p>
+      <div class="mv-dialog-actions">
+        <button type="button" class="mv-dialog-button is-danger" id="mvCustomLayoutDelete" hidden>삭제</button>
+        <span class="mv-dialog-spacer"></span>
+        <button type="button" class="mv-dialog-button" data-mv-custom-close>취소</button>
+        <button type="button" class="mv-dialog-button is-primary" id="mvCustomLayoutSave">저장</button>
+      </div>
+    </dialog>
+
+    <!-- 내 배치 관리: 칸 수와 상관없이 저장한 배치 전체(수정·복제·삭제). -->
+    <dialog class="mv-dialog mv-custom-manage-dialog" id="mvCustomManageDialog" aria-labelledby="mvCustomManageTitle">
+      <h2 class="mv-dialog-title" id="mvCustomManageTitle">내 배치 관리</h2>
+      <ol class="mv-custom-manage-list" id="mvCustomManageList"></ol>
+      <p class="mv-dialog-desc" id="mvCustomManageEmpty" hidden>저장한 내 배치가 없습니다.</p>
+      <div class="mv-dialog-actions">
+        <button type="button" class="mv-dialog-button" data-mv-custom-manage-new>+ 새로 만들기</button>
+        <span class="mv-dialog-spacer"></span>
+        <button type="button" class="mv-dialog-button is-primary" data-mv-custom-manage-close>닫기</button>
+      </div>
+    </dialog>
+
+    <!-- 기본 배치 설정: 채널 수마다 목록에 보일 배치(사용/숨김)와 그 채널 수의 기본 배치. -->
+    <dialog class="mv-dialog mv-layout-prefs-dialog" id="mvLayoutPrefsDialog" aria-labelledby="mvLayoutPrefsTitle">
+      <h2 class="mv-dialog-title" id="mvLayoutPrefsTitle">기본 배치 설정</h2>
+      <p class="mv-dialog-desc">채널 수마다 배치 목록에 보일 배치와, 그 채널 수가 되면 먼저 고를 <b>기본 배치</b>를 정합니다.
+        기본 배치를 정하지 않으면 지금 쓰는 배치와 비슷한 배치로 바뀝니다. 시청 화면의 배치 메뉴에도 같이 적용됩니다.</p>
+      <div class="mv-search-mode mv-layout-prefs-counts" id="mvLayoutPrefsCounts" role="tablist" aria-label="채널 수"></div>
+      <div class="mv-layout-prefs-summary" id="mvLayoutPrefsSummary"></div>
+      <div class="mv-layout-prefs-grid" id="mvLayoutPrefsGrid"></div>
+      <div class="mv-dialog-actions">
+        <button type="button" class="mv-dialog-button" data-mv-layout-prefs-reset>이 채널 수 되돌리기</button>
+        <span class="mv-dialog-spacer"></span>
+        <button type="button" class="mv-dialog-button is-primary" data-mv-layout-prefs-close>닫기</button>
+      </div>
     </dialog>
 
     <!-- 친밀도 구역 점수 계산에 쓴다(전용 팔로잉 탭에서만 동작). -->

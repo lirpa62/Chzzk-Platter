@@ -226,6 +226,7 @@ const MARKUP = `<aside id="aside-chatting"><div class="_input_box_x">
       ${sliceFn(content, "nodeHasDonationHost")}
       ${sliceFn(content, "findLogPowerInputArea")}
       ${sliceFn(content, "findLogPowerHost")}
+      ${sliceFn(content, "findChatViewerCountHost")}
       const findHost = findLogPowerHost;
       window.__finds = 0;
       findLogPowerHost = (...args) => (window.__finds++, findHost(...args));
@@ -256,10 +257,21 @@ const MARKUP = `<aside id="aside-chatting"><div class="_input_box_x">
     check((await viewer())?.hidden === true, "방송이 끝나면 숨긴다");
     await ev(`featureFlags.chatViewerCount = false; applyChatViewerCount()`);
     check((await viewer()) === null, "끄면 뗀다");
+    // 스트리머 본인 방송: '후원하기' 가 없어도 채팅 보내기 버튼이 든 도구 줄 맨 앞에 붙인다.
+    await ev(`document.getElementById('donation').remove(); window.__live = { status: 'OPEN', concurrentUserCount: 321 };
+      featureFlags.chatViewerCount = true; window.getCurrentLiveChannelId = () => 'own'; applyChatViewerCount()`);
+    const own = await ev(`new Promise((resolve) => setTimeout(() => {
+      const badge = document.getElementById('cheese-chat-viewer-count');
+      resolve(badge ? { tools: /_tools_/.test(badge.parentElement?.className || ''), first: badge.parentElement?.firstElementChild === badge,
+        text: badge.querySelector('.cheese-chat-viewer-count-value')?.textContent } : null);
+    }, 20))`);
+    check(own?.tools && own.first && own.text === "321",
+      `후원 버튼이 없는 채팅(스트리머 본인 방송)에서는 입력창 도구 줄 맨 앞에 붙인다 ${JSON.stringify(own)}`);
     // 채팅을 접어 붙일 곳이 없으면 묻지 않는다.
-    await ev(`document.getElementById('donation').remove(); window.__fetches = 0;
+    await ev(`featureFlags.chatViewerCount = false; applyChatViewerCount();
+      document.getElementById('send_chat_or_donate').remove(); window.__fetches = 0;
       featureFlags.chatViewerCount = true; window.getCurrentLiveChannelId = () => 'def'; applyChatViewerCount()`);
-    check(await ev("window.__fetches") === 0, "붙일 곳(후원 도구 줄)이 없으면 시청자 수를 묻지 않는다");
+    check(await ev("window.__fetches") === 0, "붙일 곳(입력창 도구 줄)이 없으면 시청자 수를 묻지 않는다");
   } finally {
     browser.kill();
     try { rmSync(dir, { recursive: true, force: true }); } catch {}

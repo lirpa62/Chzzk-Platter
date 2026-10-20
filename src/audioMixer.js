@@ -92,6 +92,7 @@
     tabMute: false,
     screenshotButton: false, // 스크린샷 버튼 숨김(true=숨김, 기본 표시)
     speedButton: false, // 재생 속도 버튼 숨김(true=숨김, 기본 표시)
+    qualityButton: true, // 화질 바로 바꾸기 버튼 숨김(true=숨김, 기본 숨김 — 플래그를 받기 전에도 숨김)
   };
   // '항상 켜기'(전역) + 첫 사용자 제스처 감지. 제스처 전엔 자동 활성화하지 않는다
   // (AudioContext 자동재생 정책 + 타 확장과의 source 선점 경쟁 회피).
@@ -173,6 +174,7 @@
       speed: "right",
       commentTs: "right",
       chatRecap: "right",
+      quality: "right",
     },
     order: {
       left: [],
@@ -186,6 +188,7 @@
         "tabMute",
         "screenshot",
         "streamStats",
+        "quality",
       ],
     },
     // 각 우리 버튼이 붙는 네이티브 앵커(그 뒤에 배치). "START"=그룹 맨 앞. 기본은
@@ -200,6 +203,7 @@
       speed: { grp: "right", after: "custom__shop-button" },
       commentTs: { grp: "right", after: "custom__shop-button" },
       chatRecap: { grp: "right", after: "custom__shop-button" },
+      quality: { grp: "right", after: "custom__shop-button" },
     },
   };
   // 그룹별 네이티브 앵커 클래스(DOM 순서). arrangePlayerButtons 가 이 순서로 앵커를
@@ -275,6 +279,7 @@
     featureFlags.tabMute = f.tabMute === true;
     featureFlags.screenshotButton = f.screenshotButton === true;
     featureFlags.speedButton = f.speedButton === true;
+    featureFlags.qualityButton = f.qualityButton !== false;
     // 채팅 입력창 안내 문구 숨김 > 지연 시간 표시. 부모 옵션이 꺼져 있으면 쓰지 않는다.
     latencyPlaceholderOn =
       f.chatHideInputPlaceholder === true && f.chatInputLatencyPlaceholder === true;
@@ -568,6 +573,8 @@
   //   더 넓히면 네이티브 메뉴에 없는 값이 걸려 두 UI 표시가 어긋난다.
   const SPEED_BUTTON_CLASS = "cheese-speed-button";
   const SPEED_CONTROL_CLASS = "cheese-speed-control";
+  const QUALITY_BUTTON_CLASS = "cheese-quality-button";
+  const QUALITY_MENU_ID = "cheese-quality-menu";
   // ⚠ 아래 둘은 content.js(ISOLATED)가 만드는 버튼이다. 우리가 만들지는 않지만
   //   arrangePlayerButtons 는 클래스로 찾아 옮기므로 배치 대상에 포함할 수 있다.
   const COMMENT_TS_BUTTON_CLASS = "cheese-search-comment-timestamp-button";
@@ -629,6 +636,13 @@
   const SYNC_BACK_SEEK_MIN_S = 2; // 이 이상 지연이 늘어난 seek만 '과거 보기'로 간주(앞으로/라이브 복귀는 제외)
   const SYNC_FRESH_ENTRY_WINDOW_MS = 20000; // 라이브 최초 진입 후 이 시간 안에서만 1회 강제 따라잡기 시도
   const SYNC_AUTO_STORE_KEY = "cheeseAudioMixer.autoSync"; // 전역 저장 키
+  // 따라잡기 직후 버퍼링이 나면 이 방송에서만 시작·목표 지연을 늦춘다(적응형).
+  // 목표를 네트워크·송출이 버틸 수 있는 버퍼보다 바짝 잡으면 '따라잡기 → 버퍼링 → 지연
+  // 증가 → 다시 따라잡기' 가 되풀이됐다. 방송(페이지)이 바뀌거나 민감도를 바꾸면 되돌린다.
+  const SYNC_ADAPT_STEP_S = 0.5;
+  const SYNC_ADAPT_MAX_S = 2;
+  const SYNC_ADAPT_WATCH_MS = 10000; // 목표 도달 뒤 이 시간 안의 버퍼링만 따라잡기 탓으로 본다
+  const SYNC_MIN_BUFFER_AHEAD_S = 0.5; // 앞쪽 버퍼가 이보다 적으면 목표 전이라도 멈춘다
   const PANEL_RIGHT_PX = 16;
   const PANEL_BOTTOM_PX = 64;
   const PANEL_TOP_GAP_PX = 12;
@@ -1025,6 +1039,10 @@
   // 같은 탭에서 다른 페이지로 갔다 돌아오는 사용성은 pageKey별 메모리 상태로 유지한다.
   const tabEnabledPageKeys = new Set();
   let wideScreenAppliedForPage = null; // 넓은 화면 자동 적용을 끝낸 pageKey(미디어당 1회)
+  // 라이브/다시보기를 벗어나 플레이어가 PIP 로 남았다. PIP 를 눌러 같은 방송으로 돌아오면
+  // pageKey 가 그대로라 '새 미디어' 리셋이 돌지 않는데, 치지직은 PIP 에서 돌아올 때 넓은 화면을
+  // 풀어 둔다(PIP 를 닫고 다시 들어가면 새 미디어라 적용됐다). 돌아왔을 때 한 번 더 적용한다.
+  let wideScreenPipReturnPending = false;
   let wideScreenRetryUntil = 0; // viewmode 버튼이 늦게 뜰 수 있어 잠깐 재시도하는 마감 시각
   // 느린 환경에서 플레이어 자체가 늦게 뜨는 동안은 마감을 연장한다. 그 연장의 상한과
   // 대기 시작 시각(미디어 전환 때 갱신) — 무한 대기 방지.
@@ -1159,6 +1177,62 @@
   // 다른 확장이 같은 video로 MediaElementSource를 선점해 그래프 구성이 불가능한
   // 충돌 상태. true면 패널에 안내를 띄운다.
   let graphConflict = false;
+
+  // ── 충돌 시 '새로고침 후 다시 시도' ──
+  // createMediaElementSource 는 video 하나에 한 번만 되고 먼저 연결한 쪽이 이긴다. 충돌 안내의
+  // 버튼을 누르면 새로고침하고, 새 페이지에서는 자동 활성화 설정과 관계없이 연결이 허용되는 가장
+  // 이른 때(소리가 나는 재생이 시작됐을 때·첫 클릭/키 입력) 믹서를 먼저 연결한다.
+  //   - 사용자가 누를 때만, 같은 탭·같은 영상에서는 한 번만(다시 충돌하면 원인 안내만) → 새로고침 반복 없음.
+  //   - 제스처 전 연결은 하지 않는다: 멈춘 AudioContext 에 연결하면 영상 소리가 끊긴다.
+  // 표시는 sessionStorage(탭 단위)에 둔다. 콘텐츠 스크립트(MAIN)라 치지직 페이지의 저장소다.
+  const MIXER_PREEMPT_KEY = "cheeseMixerPreempt"; // { pageKey, at } — 새로고침 직후 먼저 연결할 영상
+  const MIXER_RETRIED_KEY = "cheeseMixerConflictRetried"; // 이 탭에서 이미 다시 시도한 영상(pageKey)
+  const MIXER_PREEMPT_TTL_MS = 60000;
+  function readSessionJson(key) {
+    try {
+      return JSON.parse(sessionStorage.getItem(key) || "null");
+    } catch {
+      return null;
+    }
+  }
+  let mixerPreemptPageKey = (() => {
+    // 같은 탭의 치지직 iframe(멀티뷰 칸 등)도 이 저장소를 같이 쓴다 → 맨 위 화면만 읽고 지운다.
+    if (window.top !== window) return "";
+    const flag = readSessionJson(MIXER_PREEMPT_KEY);
+    try {
+      sessionStorage.removeItem(MIXER_PREEMPT_KEY);
+    } catch {}
+    const pageKey = getPageKey();
+    if (!flag || !pageKey || flag.pageKey !== pageKey) return "";
+    const age = Date.now() - Number(flag.at);
+    return age >= 0 && age < MIXER_PREEMPT_TTL_MS ? pageKey : "";
+  })();
+  function mixerPreemptActive() {
+    return Boolean(mixerPreemptPageKey) && mixerPreemptPageKey === (currentPageKey || getPageKey());
+  }
+  function mixerConflictRetried() {
+    const pageKey = currentPageKey || getPageKey();
+    return Boolean(pageKey) && readSessionJson(MIXER_RETRIED_KEY) === pageKey;
+  }
+  function reloadToPreemptMixer() {
+    const pageKey = currentPageKey || getPageKey();
+    if (!pageKey || mixerConflictRetried()) return;
+    try {
+      sessionStorage.setItem(MIXER_PREEMPT_KEY, JSON.stringify({ pageKey, at: Date.now() }));
+      sessionStorage.setItem(MIXER_RETRIED_KEY, JSON.stringify(pageKey));
+    } catch {
+      return; // 표시를 못 남기면 새로고침해도 먼저 연결하지 못한다
+    }
+    // 다시보기는 보던 위치에서 다시 시작한다.
+    const video = findVideo();
+    if (pageKey.startsWith("video:") && video && Number(video.currentTime) > 5) {
+      const url = new URL(location.href);
+      url.searchParams.set("currentTime", String(Math.floor(video.currentTime)));
+      location.replace(url.href);
+      return;
+    }
+    location.reload();
+  }
 
   // 페이지 식별: 라이브(/live/<channelId>)·다시보기(/video/<videoNo>)에서 URL로
   // 즉시 얻는 raw 키. 채널id 해석(resolveChannelId)의 입력으로 쓴다.
@@ -1797,6 +1871,10 @@
   // 시엔 시도하지 않는다. 충돌이면 setEnabled→buildGraph 실패가 graphConflict를
   // 세워 재시도가 멈추므로 무한 루프가 되지 않는다.
   function maybeAutoEnableMixer() {
+    if (mixerPreemptActive()) {
+      maybeEnableMixerPreempt();
+      return;
+    }
     if (!mixerAlwaysOn && !mixerDefaultOn) return;
     if (!userGestureSeen) return; // 제스처 전엔 대기
     if (!stateLoaded) return; // 저장 프리셋 로드 전엔 대기(기본 프리셋 오활성 방지)
@@ -1811,6 +1889,31 @@
     if (state.enabled && audio.connected) return; // 이미 동작 중
     if (!isElementRendered(findVideo())) return; // video 준비 전이면 다음 기회
     setEnabled(true);
+  }
+
+  // 충돌 뒤 새로고침한 페이지: 사용자가 켜려던 믹서이므로 자동 활성화 설정·채널 제외와 관계없이 켠다.
+  // 연결됐거나 다시 충돌하면 한 번으로 끝낸다(일시 실패면 다음 제스처에 다시).
+  function maybeEnableMixerPreempt() {
+    if (!userGestureSeen || !stateLoaded) return;
+    if (featureFlags.audioMixer) return;
+    if (state.enabled && audio.connected) {
+      mixerPreemptPageKey = "";
+      return;
+    }
+    if (!isElementRendered(findVideo())) return;
+    setEnabled(true);
+    if (audio.connected || graphConflict) mixerPreemptPageKey = "";
+  }
+
+  // 충돌 안내: 처음이면 '새로고침 후 다시 시도'(멀티뷰 칸 안에서는 칸만 새로고침할 수 없어 빼고),
+  // 이미 다시 시도했는데도 충돌이면 상대 확장이 페이지를 열 때 바로 연결하는 경우라 끄는 방법만 안내한다.
+  function renderGraphConflictNotice() {
+    if (mixerConflictRetried()) {
+      return `<p class="cheese-mixer-conflict">새로고침해도 다른 확장 프로그램이 이 영상의 오디오를 먼저 연결했습니다. 그 확장은 페이지를 열 때 바로 오디오를 연결하는 것으로 보입니다. 치지직에서 그 확장을 끄거나(확장 프로그램 관리 → 사이트 액세스) 그 확장의 오디오 기능을 끈 뒤 새로고침해 주세요.</p>`;
+    }
+    const retry = multiviewSlotId ? "" :
+      `<button type="button" class="cheese-mixer-conflict-retry" data-action="conflict-reload">새로고침 후 다시 시도</button>`;
+    return `<div class="cheese-mixer-conflict"><p>다른 확장 프로그램이 이 영상의 오디오를 먼저 연결해 오디오 믹서를 켤 수 없습니다.${retry ? " 새로고침하면 믹서가 먼저 연결을 시도합니다(이 영상에서 한 번)." : " 그 확장을 끄거나 오디오 기능을 끈 뒤 새로고침해 주세요."}</p>${retry}</div>`;
   }
 
   function applyPreset(key) {
@@ -2970,7 +3073,12 @@
     if (e.source !== window || e.data?.source !== "cheese-audio-mixer-content")
       return;
     if (e.data.type === "auto-sync-loaded") {
+      if ("channels" in e.data) applyAutoSyncChannels(e.data.channels);
       setAutoSync(e.data.enabled === true, { syncStorage: false });
+      return;
+    }
+    if (e.data.type === "auto-sync-channels-loaded") {
+      applyAutoSyncChannels(e.data.channels);
       return;
     }
     // 설정에서 채널 간 공유를 켜고 끈 경우. 지금 화면은 그대로 두고 '다음 새 채널'
@@ -3202,9 +3310,9 @@
       </svg>`;
   }
 
-  // 게인 범위와 조절 간격은 설정에서 조절 가능(전역). 기본 0.5~2(50%~200%),
+  // 게인 범위와 조절 간격은 설정에서 조절 가능(전역). 기본 0.1~2(10%~200%),
   // 간격 0.05(5%). content.js가 feature-flags 브리지로 전달하면 갱신한다.
-  let GAIN_MIN = 0.5;
+  let GAIN_MIN = 0.1;
   let GAIN_MAX = 2;
   let GAIN_STEP = 0.05;
   // ⚠ 레이스 방어: 사용자가 설정한 게인 범위(예: 최소 10%)를 아직 브리지로 못 받았는데
@@ -3309,6 +3417,11 @@
 
   function multiviewQualitySnapshot() {
     if (!multiviewQualityChannelId) return null;
+    return playerQualitySnapshot();
+  }
+
+  // 지금 플레이어의 화질 목록·선택·고정 상태(멀티뷰 화질 패널·화질 버튼 공용).
+  function playerQualitySnapshot() {
     const core = findCorePlayer();
     const tracks = Array.from(core?.videoTracks || []);
     const choicesByValue = new Map();
@@ -3452,31 +3565,7 @@
         !Number.isSafeInteger(data.commandId) || data.commandId <= 0 ||
         typeof data.quality !== "string") return;
 
-    let reason = null;
-    const snapshot = multiviewQualitySnapshot();
-    if (!snapshot?.ready || !findVideo()) reason = "not-ready";
-    else if (!snapshot.choices.some((choice) => choice.value === data.quality))
-      reason = "unavailable";
-    else if (snapshot.locked && data.quality !== snapshot.lockedQuality)
-      reason = "quality-locked";
-    else {
-      const clicked = clickMultiviewQualityMenuItem(data.quality);
-      if (!clicked) reason = "menu-unavailable";
-      else {
-        const selectedHeight = data.quality === "auto" ? 0 : Number(data.quality);
-        maxQualityOwnClickUntil = Date.now() + 1500;
-        maxQualityUserTouchedPage = currentPageKey;
-        maxQualitySetHeight = selectedHeight;
-        maxQualityMenuClickAt = Date.now();
-        multiviewQualityManualOverride = true;
-        multiviewInitialQualityApplied = true;
-        multiviewInitialGlobalPending = false;
-        if (["highest", "cap-480", "cap-720"].includes(multiviewQualityPolicy) ||
-            maxQualityCap > 0 || (maxQualityAuto && maxQualityRespectManual)) {
-          maxQualityRespectedPage = currentPageKey;
-        }
-      }
-    }
+    const reason = applyPlayerQualityChoice(data.quality, { multiview: true });
     window.postMessage({
       source: "cheese-multiview-quality-main",
       type: "result",
@@ -3487,6 +3576,31 @@
       reason,
     }, location.origin);
   });
+
+  // 화질 하나를 고른다(멀티뷰 화질 패널·화질 버튼 공용). 성공이면 null, 아니면 사유.
+  // ⚠ 사용자가 직접 고른 것으로 기록한다. '최대 화질 자동 고정' 의 '수동 변경 존중' 이
+  //   이 선택을 덮어쓰지 않게 하려는 것이다(존중을 끈 고정 상태면 고정 화질만 고를 수 있다).
+  function applyPlayerQualityChoice(value, { multiview = false } = {}) {
+    const snapshot = playerQualitySnapshot();
+    if (!snapshot?.ready || !findVideo()) return "not-ready";
+    if (!snapshot.choices.some((choice) => choice.value === value)) return "unavailable";
+    if (snapshot.locked && value !== snapshot.lockedQuality) return "quality-locked";
+    if (!clickMultiviewQualityMenuItem(value)) return "menu-unavailable";
+    maxQualityOwnClickUntil = Date.now() + 1500;
+    maxQualityUserTouchedPage = currentPageKey;
+    maxQualitySetHeight = value === "auto" ? 0 : Number(value);
+    maxQualityMenuClickAt = Date.now();
+    if (multiview) {
+      multiviewQualityManualOverride = true;
+      multiviewInitialQualityApplied = true;
+      multiviewInitialGlobalPending = false;
+    }
+    if ((multiview && ["highest", "cap-480", "cap-720"].includes(multiviewQualityPolicy)) ||
+        maxQualityCap > 0 || (maxQualityAuto && maxQualityRespectManual)) {
+      maxQualityRespectedPage = currentPageKey;
+    }
+    return null;
+  }
 
   // 멀티뷰 싱크 기준점: 지금 재생 중인 조각의 송출 시각(PROGRAM-DATE-TIME)과 미디어 시작 시각.
   // ⚠ 채널마다 seekable 끝(라이브 가장자리)이 송출 시각과 떨어진 정도가 달라, 가장자리 기준
@@ -3610,11 +3724,11 @@
     let min = Number(rawMin);
     let max = Number(rawMax);
     let step = Math.round(Number(rawStep));
-    if (!Number.isFinite(min) || min < 0 || min > 1) min = 0.5; // 0~100%
+    if (!Number.isFinite(min) || min < 0 || min > 1) min = 0.1; // 0~100%
     if (!Number.isFinite(max) || max < 1 || max > 4) max = 2; // 100~400%
     if (!Number.isFinite(step) || step < 1 || step > 10) step = 5;
     if (max <= min) {
-      min = 0.5;
+      min = 0.1;
       max = 2;
     } // 잘못된 조합이면 기본값
     const firstReceive = !gainRangeReceived;
@@ -4047,7 +4161,7 @@
       </div>
       ${
         graphConflict
-          ? `<p class="cheese-mixer-conflict">다른 확장 프로그램이 이 영상의 오디오를 이미 사용 중이라 오디오 믹서를 켤 수 없습니다. 해당 확장을 끄거나 컴프레서를 비활성화한 뒤 새로고침해 주세요.</p>`
+          ? renderGraphConflictNotice()
           : ""
       }
       <div class="cheese-mixer-tabs" role="tablist">
@@ -4557,6 +4671,10 @@
         }
         e.preventDefault();
         e.stopPropagation();
+        if (action === "conflict-reload") {
+          reloadToPreemptMixer();
+          return;
+        }
         if (action === "close") {
           closePanel();
           return;
@@ -5435,6 +5553,7 @@
   // 이 페이지를 켠 채 이동했다 돌아온 경우. 둘 다 저장 프리셋 로드 후 판단한다.
   function wantsAutoEnable() {
     if (userGestureSeen) return false;
+    if (mixerPreemptActive()) return true; // 충돌 뒤 새로고침 — 먼저 연결해야 한다
     if (mixerDefaultOffThisPage) return false; // 이번 페이지에서 직접 끔
     // 저장된 채널 제외는 '항상 켜기'의 장치(위 maybeAutoEnableMixer 와 같은 규칙).
     if (state.userDisabled && (mixerAlwaysOn || !mixerDefaultOn)) return false;
@@ -5468,7 +5587,7 @@
         if (audio.ctx && audio.ctx.state === "running") {
           userGestureSeen = true; // resume 성공 = 오디오 시작 가능 상태
           // 항상 켜기면 maybeAutoEnableMixer, 탭 복원 상태면 그래프만 복원.
-          if (mixerAlwaysOn) maybeAutoEnableMixer();
+          if (mixerAlwaysOn || mixerPreemptActive()) maybeAutoEnableMixer();
           if (state.enabled && !audio.connected) ensureEnabledGraph();
         }
       };
@@ -6245,7 +6364,7 @@
         const end = v.seekable.end(v.seekable.length - 1);
         if (Number.isFinite(end) && end > 0) {
           ourSeekUntil = Date.now() + 1500; // 곧 발생할 seeked는 우리 것 → 무시
-          v.currentTime = Math.max(0, end - syncCfg.target);
+          v.currentTime = Math.max(0, end - syncTargetS());
           return true;
         }
       }
@@ -6786,6 +6905,7 @@
     rewind: [REWIND_BUTTON_CLASS],
     forward: [FORWARD_BUTTON_CLASS],
     sync: [SYNC_BUTTON_CLASS],
+    quality: [QUALITY_BUTTON_CLASS],
   };
 
   // 네이티브 볼륨 컨트롤(우리 믹서/필터 래퍼가 아닌 것)만 반환. ⚠ 믹서 버튼 래퍼도
@@ -6946,6 +7066,7 @@
       REWIND_BUTTON_CLASS,
       FORWARD_BUTTON_CLASS,
       SYNC_BUTTON_CLASS,
+      QUALITY_BUTTON_CLASS,
     ].forEach((cls) => {
       document.querySelectorAll(`.${cls}`).forEach((btn) => btn.remove());
     });
@@ -8100,7 +8221,7 @@
       e.stopPropagation();
       // 버튼 상태를 그대로 따른다(정지 모드면 자동 따라잡기 해제).
       const btn = document.querySelector(`.${SYNC_BUTTON_CLASS}`);
-      if (btn?.disabled) return;
+      if (isSyncButtonLocked(btn)) return;
       if (btn?.classList.contains("is-stop") && !syncCatchUp) {
         setAutoSync(false);
         closeSyncMenu();
@@ -8186,6 +8307,89 @@
   // 발동 없이 플래그만 소진). tick의 페이지 전환에서 true로 세팅.
   let syncFreshLiveEntry = false;
   let freshEntryDeadline = 0; // 이 시각까지만 최초-진입 강제 시도(무한 대기 방지)
+  let syncAdaptBoost = 0; // 이 방송에서 늦춘 초(0~SYNC_ADAPT_MAX_S)
+  let syncAdaptWatch = null; // { video, until } — 목표 도달 직후 버퍼링 감시
+  // 채널별 자동 따라잡기: { [channelId]: true(항상 켜기) | false(항상 끄기) }. 없으면 전체 설정.
+  let autoSyncChannels = {};
+
+  const syncEnableS = () => syncCfg.enable + syncAdaptBoost;
+  const syncTargetS = () =>
+    Math.min(syncCfg.target + syncAdaptBoost, syncEnableS() - 0.5);
+  function resetSyncAdapt() {
+    syncAdaptBoost = 0;
+    syncAdaptWatch = null;
+  }
+  function raiseSyncAdapt() {
+    syncAdaptWatch = null;
+    if (syncAdaptBoost >= SYNC_ADAPT_MAX_S) return;
+    syncAdaptBoost = Math.min(SYNC_ADAPT_MAX_S, syncAdaptBoost + SYNC_ADAPT_STEP_S);
+  }
+  function onSyncWaiting(event) {
+    const watch = syncAdaptWatch;
+    if (!watch || event.currentTarget !== watch.video) return;
+    if (Date.now() > watch.until) {
+      syncAdaptWatch = null;
+      return;
+    }
+    raiseSyncAdapt();
+    updateSyncButtonState();
+  }
+  // 재생 위치에서 앞쪽으로 받아 둔 버퍼(초). 모르면 NaN.
+  function syncBufferAhead(video) {
+    try {
+      const ranges = video.buffered;
+      const t = video.currentTime;
+      for (let i = 0; i < ranges.length; i += 1) {
+        if (ranges.start(i) <= t + 0.1 && ranges.end(i) >= t) return ranges.end(i) - t;
+      }
+    } catch {}
+    return NaN;
+  }
+
+  // 라이브 페이지의 채널(채널별 자동 따라잡기 기준). 다시보기·팝업 밖은 "".
+  function syncChannelId() {
+    return currentPageKey?.startsWith("live:") ? currentPageKey.slice(5) : "";
+  }
+  function channelAutoSyncMode() {
+    const id = syncChannelId();
+    const value = id ? autoSyncChannels[id] : undefined;
+    return value === true ? "on" : value === false ? "off" : "inherit";
+  }
+  // 지금 이 방송에서 자동 따라잡기가 켜져 있는가(채널 설정 → 전체 설정 순).
+  function autoSyncActive() {
+    const mode = channelAutoSyncMode();
+    return mode === "inherit" ? autoSyncEnabled : mode === "on";
+  }
+  function applyAutoSyncChannels(raw) {
+    const next = {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [id, value] of Object.entries(raw)) {
+        if (/^[0-9a-f]{32}$/i.test(id) && typeof value === "boolean") next[id] = value;
+      }
+    }
+    autoSyncChannels = next;
+    updateSyncButtonState();
+  }
+  // mode: "on" | "off" | "inherit". 저장은 격리 월드가 맡는다(채널 이름과 함께).
+  function setChannelAutoSync(mode) {
+    const id = syncChannelId();
+    if (!id) return;
+    const next = { ...autoSyncChannels };
+    if (mode === "on") next[id] = true;
+    else if (mode === "off") next[id] = false;
+    else delete next[id];
+    autoSyncChannels = next;
+    window.postMessage(
+      {
+        source: "cheese-audio-mixer",
+        type: "save-auto-sync-channel",
+        channelId: id,
+        mode: mode === "on" || mode === "off" ? mode : "inherit",
+      },
+      BRIDGE_ORIGIN,
+    );
+    updateSyncButtonState();
+  }
 
   function loadAutoSync() {
     try {
@@ -8251,11 +8455,27 @@
     btn.dataset.icon = wantStop ? "stop" : "play";
   }
 
+  // 누를 수 없는 상태(지연이 작음)는 disabled 속성 대신 aria-disabled 로 표시한다. disabled 버튼에는
+  // 브라우저가 마우스 이벤트 일부를 보내지 않아(Windows 에서 우클릭 메뉴가 열리는 mouseup 포함)
+  // 지연이 작을 때 우클릭으로 자동 따라잡기 메뉴를 열 수 없었다. 좌클릭·단축키는 JS 에서 막는다.
+  function setSyncButtonLocked(btn, locked) {
+    if (!btn) return;
+    if (locked) {
+      if (btn.getAttribute("aria-disabled") !== "true") btn.setAttribute("aria-disabled", "true");
+    } else if (btn.hasAttribute("aria-disabled")) {
+      btn.removeAttribute("aria-disabled");
+    }
+  }
+
+  function isSyncButtonLocked(btn) {
+    return btn?.getAttribute("aria-disabled") === "true";
+  }
+
   function createSyncButton() {
     const btn = document.createElement("button");
     btn.className = `${SYNC_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
     btn.type = "button";
-    btn.disabled = true;
+    setSyncButtonLocked(btn, true);
     btn.setAttribute("aria-label", "실시간 따라잡기");
     btn.dataset.icon = "play";
     btn.innerHTML = `<span class="pzp-button__tooltip pzp-button__tooltip--top">실시간 따라잡기</span><span class="pzp-ui-icon">${syncIcon()}</span>`;
@@ -9057,11 +9277,13 @@
     if (syncSeekVideo) {
       syncSeekVideo.removeEventListener("seeking", onUserSeeking);
       syncSeekVideo.removeEventListener("seeked", onUserSeeked);
+      syncSeekVideo.removeEventListener("waiting", onSyncWaiting);
     }
     syncSeekVideo = video || null;
     if (syncSeekVideo) {
       syncSeekVideo.addEventListener("seeking", onUserSeeking);
       syncSeekVideo.addEventListener("seeked", onUserSeeked);
+      syncSeekVideo.addEventListener("waiting", onSyncWaiting);
     }
   }
 
@@ -9279,7 +9501,7 @@
     } else if (catching) {
       // 자동으로 따라잡는 중이면 목표까지 함께 알린다.
       text = Number.isFinite(lat)
-        ? `지연 ${lat.toFixed(1)}초 · ${syncCfg.target}초까지 따라잡는 중`
+        ? `지연 ${lat.toFixed(1)}초 · ${syncTargetS()}초까지 따라잡는 중`
         : "따라잡는 중…";
     } else if (idle) {
       // 지연이 목표 이하라 누를 수 없는 상태. 그래도 지금 지연은 알려 준다.
@@ -9297,6 +9519,10 @@
         ? `실시간 따라잡기 (지연 ${lat.toFixed(1)}초)`
         : "실시간 따라잡기";
     }
+    // 자동 따라잡기는 우클릭 메뉴에서만 켤 수 있어 찾기 어렵다 — 꺼져 있을 때는 둘째 줄로 알린다.
+    if (!autoStop && !catching && !autoSyncActive()) {
+      text += "\n우클릭: 자동 따라잡기";
+    }
     if (tip.textContent !== text) tip.textContent = text;
   }
 
@@ -9313,10 +9539,11 @@
     if (!btn) return;
     ensureSeekListener();
     // 자동 모드 표시(우클릭 메뉴로 토글). 자동이면 버튼에 표식을 둔다.
-    btn.classList.toggle("is-auto", autoSyncEnabled);
+    const autoOn = autoSyncActive();
+    btn.classList.toggle("is-auto", autoOn);
     if (syncCatchUp) {
       // 따라잡는 중엔 항상 활성(클릭 시 중단). 툴팁은 따라잡기 타이머가 갱신한다.
-      btn.disabled = false;
+      setSyncButtonLocked(btn, false);
       btn.classList.add("is-active");
       setSyncIcon(btn, false);
       btn.classList.remove("is-stop");
@@ -9329,16 +9556,17 @@
     if (overThreshold) syncLastUnstableAt = Date.now();
     // 발동 임계 이상 + 점프 임계 미만이면 자동 발동 대상. 점프 임계 이상은 '타임머신으로
     // 과거를 보는 중'으로 간주해 자동 발동하지 않는다(라이브 복귀는 수동 버튼).
+    // ⚠ 자동은 이 방송에서 늦춘 기준(syncEnableS)을 쓴다. 수동 버튼은 원래 기준 그대로.
     const autoEligible =
       Number.isFinite(lat) &&
-      lat >= syncCfg.enable &&
+      lat >= syncEnableS() &&
       lat < SYNC_JUMP_LATENCY_S;
 
     // 라이브 최초 진입 1회: 쿨다운/사용자 seek 차단을 무시하고 따라잡는다. 지연이
     // 측정되어 판단이 끝나면 플래그를 소진한다(임계 미만이면 발동 없이 소진). 평소
     // 자동 로직과 달리 점프 임계(SYNC_JUMP_LATENCY_S) 이상도 발동시킨다 — 진입 직후
     // 큰 지연은 '과거를 보는 중'이 아니라 단순 진입 지연이므로 라이브로 끌어온다.
-    if (autoSyncEnabled && syncFreshLiveEntry) {
+    if (autoOn && syncFreshLiveEntry) {
       if (Date.now() > freshEntryDeadline) {
         syncFreshLiveEntry = false; // 창 만료 → 강제 시도 종료, 평소 자동 로직으로
       } else if (Number.isFinite(lat) && canFreshEntryCatchUp()) {
@@ -9354,7 +9582,7 @@
     }
 
     // 자동 따라잡기: 임계 초과 + 점프 임계 미만 + 쿨다운 경과 + 안전조건이면 발동.
-    if (autoSyncEnabled && autoEligible && canAutoCatchUp()) {
+    if (autoOn && autoEligible && canAutoCatchUp()) {
       lastAutoCatchUpAt = Date.now();
       // 지수 백오프: 발동할 때마다 다음 쿨다운을 2배로(상한까지). 네트워크가 계속
       // 못 따라가 자주 발동하면 간격을 벌려 1.5배속 끊김 구간을 줄인다. 안정되면
@@ -9368,18 +9596,18 @@
     }
 
     // 수동: 활성화(클릭 가능)면 민트색, 비활성화면 흐리게(클릭 불가).
-    btn.disabled = !overThreshold;
+    setSyncButtonLocked(btn, !overThreshold);
     btn.classList.toggle("is-active", overThreshold);
 
     // 자동 ON인데 지연이 작아 수동 버튼이 비활성일 때: 그대로 두면 자동을 끌 방법이
     // 눈에 띄지 않는다(우클릭 메뉴는 숨겨져 있음). 정지(■) 아이콘 + 활성 상태로 바꿔
     // 좌클릭으로 자동을 바로 해제할 수 있게 한다. 지연이 커서 수동이 활성일 땐 그
     // 본래 동작(따라잡기)을 유지한다.
-    const showStop = autoSyncEnabled && !overThreshold;
+    const showStop = autoOn && !overThreshold;
     btn.classList.toggle("is-stop", showStop);
     setSyncIcon(btn, showStop);
     if (showStop) {
-      btn.disabled = false;
+      setSyncButtonLocked(btn, false);
       // 같은 헬퍼를 쓴다(지연 표기를 두 곳에 따로 만들지 않는다).
       setSyncTooltip(btn, lat, { autoStop: true });
     } else {
@@ -9423,8 +9651,9 @@
       return;
     syncPresetKey = next;
     syncCfg = nextCfg;
-    // 프리셋이 바뀌면 백오프도 초기화(새 기준으로 다시 판단).
+    // 프리셋이 바뀌면 백오프·이 방송에서 늦춘 기준도 초기화(새 기준으로 다시 판단).
     syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS;
+    resetSyncAdapt();
     updateSyncButtonState();
   }
 
@@ -9462,6 +9691,7 @@
 
   // 라이브 최초 진입 후 1회 강제 따라잡기를 무장한다(tick의 페이지 전환에서 호출).
   function armFreshLiveEntry() {
+    resetSyncAdapt();
     syncFreshLiveEntry = true;
     freshEntryDeadline = Date.now() + SYNC_FRESH_ENTRY_WINDOW_MS;
   }
@@ -9692,6 +9922,165 @@
       .forEach((b) => b.remove());
   }
 
+  // ── 화질 바로 바꾸기 ───────────────────────────────────────────────────────
+  // 톱니바퀴 > 해상도 > 화질 세 단계를 버튼 하나로 줄인다. 라벨에 지금 화질을 보이고,
+  // 누르면 화질 목록이 바로 뜬다. 바꾸는 방법은 멀티뷰 화질 패널과 같다(치지직 화질 메뉴
+  // 항목을 클론 교체로 눌러 치지직의 정상 화질 변경 경로를 태운다).
+  function qualityButtonText(snapshot) {
+    const selected = snapshot?.choices?.find((choice) => choice.selected);
+    if (!selected) return "화질";
+    return selected.value === "auto" ? "자동" : selected.label;
+  }
+
+  function createQualityButton() {
+    const btn = document.createElement("button");
+    btn.className = `${QUALITY_BUTTON_CLASS} pzp-pc__setting-button pzp-button pzp-pc-ui-button`;
+    btn.type = "button";
+    btn.setAttribute("aria-haspopup", "menu");
+    btn.setAttribute("aria-expanded", "false");
+    // ⚠ 라벨은 .pzp-ui-icon 으로 감싼다(재생 속도 버튼과 같은 이유: 툴팁 기준점).
+    btn.innerHTML =
+      `<span class="pzp-button__tooltip pzp-button__tooltip--top">화질 바꾸기</span>` +
+      `<span class="pzp-ui-icon"><span class="cheese-quality-label" aria-hidden="true">화질</span></span>`;
+    return btn;
+  }
+
+  function syncQualityButton() {
+    const btn = document.querySelector(`.${QUALITY_BUTTON_CLASS}`);
+    if (!btn) return;
+    const text = qualityButtonText(playerQualitySnapshot());
+    const label = btn.querySelector(".cheese-quality-label");
+    if (label && label.textContent !== text) label.textContent = text;
+    const tip = `화질 ${text} · 클릭해서 바꾸기`;
+    if (btn.getAttribute("aria-label") !== tip) btn.setAttribute("aria-label", tip);
+    const tooltip = btn.querySelector(".pzp-button__tooltip");
+    if (tooltip && tooltip.textContent !== tip) tooltip.textContent = tip;
+  }
+
+  let qualityButtonTimer = 0;
+  function ensureQualityButton() {
+    if (featureFlags.qualityButton || !getPageKey()) {
+      removeQualityButton();
+      return;
+    }
+    const player = findPlayer();
+    if (!player) return;
+    const controls = sideControls(player, "quality");
+    if (!controls) return;
+    if (!player.querySelector(`.${QUALITY_BUTTON_CLASS}`)) {
+      const rightAnchor =
+        controls.querySelector(".custom__clip-button") ||
+        controls.querySelector(".cheese-search-comment-timestamp-button") ||
+        controls.firstChild;
+      controls.insertBefore(
+        createQualityButton(),
+        insertAnchorFor(controls, "quality", rightAnchor),
+      );
+    }
+    syncQualityButton();
+    // ABR·치지직 메뉴로 바뀐 화질도 라벨에 따라오게 가볍게 다시 읽는다(트랙 목록만 본다).
+    if (!qualityButtonTimer) {
+      qualityButtonTimer = window.setInterval(() => {
+        if (!document.querySelector(`.${QUALITY_BUTTON_CLASS}`)) {
+          window.clearInterval(qualityButtonTimer);
+          qualityButtonTimer = 0;
+          return;
+        }
+        if (!document.hidden) syncQualityButton();
+      }, 1500);
+    }
+  }
+
+  function removeQualityButton() {
+    closeQualityMenu();
+    document
+      .querySelectorAll(`.${QUALITY_BUTTON_CLASS}`)
+      .forEach((b) => b.remove());
+  }
+
+  function closeQualityMenu() {
+    const menu = document.getElementById(QUALITY_MENU_ID);
+    if (!menu) return;
+    menu.remove();
+    document
+      .querySelector(`.${QUALITY_BUTTON_CLASS}`)
+      ?.setAttribute("aria-expanded", "false");
+    releaseControlsVisible("quality-menu");
+  }
+
+  function openQualityMenu(btn) {
+    closeQualityMenu();
+    const root = getPanelRoot(btn) || findPlayer();
+    if (!root) return;
+    if (getComputedStyle(root).position === "static") root.style.position = "relative";
+    const snapshot = playerQualitySnapshot();
+    const menu = document.createElement("div");
+    menu.id = QUALITY_MENU_ID;
+    menu.className = "cheese-sync-menu cheese-quality-menu";
+    menu.setAttribute("role", "menu");
+    const choices = snapshot?.ready ? snapshot.choices : [];
+    menu.innerHTML = choices.length
+      ? choices
+          .map((choice) => {
+            const locked = snapshot.locked && choice.value !== snapshot.lockedQuality;
+            return (
+              `<button type="button" class="cheese-sync-menu-item" data-quality-value="${choice.value}" role="menuitemradio" aria-checked="${choice.selected}"${locked ? " disabled" : ""}>` +
+              `<span class="cheese-sync-menu-check" aria-hidden="true">${choice.selected ? "✓" : ""}</span>` +
+              `<span>${choice.label}</span></button>`
+            );
+          })
+          .join("") +
+        (snapshot.locked
+          ? `<p class="cheese-sync-menu-hint">최대 화질 자동 고정이 켜져 있어 다른 화질은 고를 수 없습니다.</p>`
+          : "")
+      : `<p class="cheese-sync-menu-hint">화질 목록을 아직 불러오지 못했습니다.</p>`;
+    root.appendChild(menu);
+    const rootRect = root.getBoundingClientRect();
+    const btnRect = btn.getBoundingClientRect();
+    menu.style.bottom = `${rootRect.bottom - btnRect.top + 14}px`;
+    const right = Math.max(
+      8,
+      Math.min(rootRect.right - btnRect.right - 40, root.clientWidth - menu.offsetWidth - 8),
+    );
+    menu.style.right = `${right}px`;
+    btn.setAttribute("aria-expanded", "true");
+    keepControlsVisible(root, "quality-menu");
+  }
+
+  document.addEventListener("click", (e) => {
+    const item = e.target.closest?.(`#${QUALITY_MENU_ID} [data-quality-value]`);
+    if (item) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!item.disabled) applyPlayerQualityChoice(item.dataset.qualityValue);
+      closeQualityMenu();
+      window.setTimeout(syncQualityButton, 300);
+      return;
+    }
+    const btn = e.target.closest?.(`.${QUALITY_BUTTON_CLASS}`);
+    if (btn) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (document.getElementById(QUALITY_MENU_ID)) closeQualityMenu();
+      else openQualityMenu(btn);
+      btn.blur();
+      return;
+    }
+    if (
+      document.getElementById(QUALITY_MENU_ID) &&
+      !e.target.closest?.(`#${QUALITY_MENU_ID}`)
+    ) {
+      closeQualityMenu();
+    }
+  }, true);
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Escape" && document.getElementById(QUALITY_MENU_ID)) closeQualityMenu();
+    },
+    true,
+  );
+
   function startSyncCatchUp() {
     if (syncCatchUp) return;
     const core = findCorePlayer();
@@ -9746,10 +10135,23 @@
         }
       }
       const stalled = tnow - syncCatchUp.lastProgressAt > SYNC_NO_PROGRESS_MS;
-      // 목표 도달 / 측정 불가 / 안전 시간 초과 / 진전 없음(스톨) / 사용자 속도 변경 시 종료.
+      // 앞쪽 버퍼가 바닥나면 목표 전이라도 멈춘다. 더 당기면 곧 버퍼링이 나서 지연이
+      // 오히려 늘어난다. 이 방송은 기준을 늦춘다.
+      const ahead = syncBufferAhead(video);
+      if (Number.isFinite(ahead) && ahead < SYNC_MIN_BUFFER_AHEAD_S) {
+        raiseSyncAdapt();
+        stopSyncCatchUp();
+        return;
+      }
+      // 목표에 닿았으면 그 직후의 버퍼링을 지켜본다(나면 이 방송은 기준을 늦춘다).
+      if (Number.isFinite(cur) && cur <= syncTargetS()) {
+        syncAdaptWatch = { video, until: tnow + SYNC_ADAPT_WATCH_MS };
+        stopSyncCatchUp();
+        return;
+      }
+      // 측정 불가 / 안전 시간 초과 / 진전 없음(스톨) / 사용자 속도 변경 시 종료.
       if (
         cur == null ||
-        cur <= syncCfg.target ||
         elapsed > SYNC_MAX_DURATION_MS ||
         stalled ||
         // ⚠ '배속이 우리 값과 다르다'만 보면 다른 확장(VSC 등)이 값을 조금
@@ -9972,6 +10374,16 @@
       closeSyncMenu();
       return;
     }
+    const channelItem = e.target.closest?.(
+      `#${SYNC_MENU_ID} [data-sync-channel]`,
+    );
+    if (channelItem) {
+      e.preventDefault();
+      e.stopPropagation();
+      setChannelAutoSync(channelItem.dataset.syncChannel);
+      closeSyncMenu();
+      return;
+    }
     // 메뉴 바깥 클릭 → 닫기
     if (
       document.getElementById(SYNC_MENU_ID) &&
@@ -9983,10 +10395,15 @@
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    if (btn.disabled) return;
+    if (isSyncButtonLocked(btn)) return;
     // 정지(■) 모드: 자동 따라잡기 해제 전용(따라잡기 발동 아님).
     if (btn.classList.contains("is-stop") && !syncCatchUp) {
-      setAutoSync(false);
+      // 이 채널만 켜 둔 경우는 이 채널 설정만 푼다(전체가 꺼져 있으면 '전체 따르기' 로 충분).
+      if (channelAutoSyncMode() === "on") {
+        setChannelAutoSync(autoSyncEnabled ? "off" : "inherit");
+      } else {
+        setAutoSync(false);
+      }
       closeSyncMenu();
       return;
     }
@@ -10220,12 +10637,33 @@
     menu.id = SYNC_MENU_ID;
     menu.className = "cheese-sync-menu";
     menu.setAttribute("role", "menu");
+    // 전체 설정 + (라이브 채널이면) 이 채널만의 설정. 채널 설정이 전체보다 앞선다.
+    const channelMode = channelAutoSyncMode();
+    const channelItems = syncChannelId()
+      ? `<p class="cheese-sync-menu-label">이 채널</p>` +
+        [
+          ["inherit", `전체 설정 따르기 (${autoSyncEnabled ? "켜짐" : "꺼짐"})`],
+          ["on", "이 채널은 항상 켜기"],
+          ["off", "이 채널은 항상 끄기"],
+        ]
+          .map(
+            ([mode, label]) =>
+              `<button type="button" class="cheese-sync-menu-item" data-sync-channel="${mode}" role="menuitemradio" aria-checked="${channelMode === mode}">` +
+              `<span class="cheese-sync-menu-check" aria-hidden="true">${channelMode === mode ? "●" : ""}</span>` +
+              `<span>${label}</span></button>`,
+          )
+          .join("")
+      : "";
+    const adaptNote = syncAdaptBoost
+      ? `<br>버퍼링이 있어 이 방송은 ${syncAdaptBoost}초 늦춰 ${syncEnableS()}초 → ${syncTargetS()}초로 따라잡습니다.`
+      : "";
     menu.innerHTML = `
       <button type="button" class="cheese-sync-menu-item" data-sync-auto role="menuitemcheckbox" aria-checked="${autoSyncEnabled}">
         <span class="cheese-sync-menu-check" aria-hidden="true">${autoSyncEnabled ? "✓" : ""}</span>
-        <span>자동 따라잡기</span>
+        <span>모든 방송 자동 따라잡기</span>
       </button>
-      <p class="cheese-sync-menu-hint">지연이 ${syncCfg.enable}초를 넘으면 자동으로 따라잡습니다.<br>타임머신으로 과거를 볼 땐 자동 따라잡기를 멈춥니다.</p>`;
+      ${channelItems}
+      <p class="cheese-sync-menu-hint">지연이 ${syncEnableS()}초를 넘으면 자동으로 따라잡습니다.<br>타임머신으로 과거를 볼 땐 자동 따라잡기를 멈춥니다.${adaptNote}</p>`;
     root.appendChild(menu);
     // 버튼 위쪽에 배치(재생바 위로 뜨도록). 아이콘 오른쪽 끝 기준에서 조금 더
     // 오른쪽(-12px)·살짝 더 위(+14px)로.
@@ -10931,6 +11369,13 @@
         : !has(SCREENSHOT_BUTTON_CLASS)
     )
       return false;
+    // 화질 바로 바꾸기
+    if (
+      featureFlags.qualityButton
+        ? has(QUALITY_BUTTON_CLASS)
+        : !has(QUALITY_BUTTON_CLASS)
+    )
+      return false;
     // 라이브 전용: 따라잡기 / 되감기 버튼
     if (isLive) {
       if (
@@ -10964,6 +11409,7 @@
     // 자동 넓은 화면 적용이 아직 남아 있으면(이 미디어에 미적용) full tick 필요.
     if (wideScreenAuto && wideScreenAppliedForPage !== currentPageKey)
       return false;
+    if (wideScreenPipReturnPending) return false;
     // '항상 켜기'/'기본 켜짐'이 켜졌는데 아직 자동 활성화 전이면 full tick.
     if (
       (mixerAlwaysOn || mixerDefaultOn) &&
@@ -11026,6 +11472,7 @@
       removeSeekBar();
       clearStrayScrollLock(); // 치지직이 남긴 inline overflow:hidden 회수
       if (keepGraph) {
+        wideScreenPipReturnPending = true;
         if (!featureFlags.audioMixer) ensureEnabledGraph();
         return;
       }
@@ -11044,7 +11491,13 @@
         stateLoaded = false;
         resetStateLoadRetry();
       }
+      wideScreenPipReturnPending = false;
       return;
+    }
+    if (wideScreenPipReturnPending) {
+      wideScreenPipReturnPending = false;
+      // 다른 방송으로 갔으면 아래 '새 미디어' 리셋이 같은 일을 한다.
+      if (pageKey === currentPageKey) resetWideScreenAttempt();
     }
     if (pageKey !== currentPageKey) {
       // 이전 채널에서 마지막으로 조절한 값이 debounce 대기 중이면, currentMediaId/state를
@@ -11152,6 +11605,8 @@
     }
     // 재생 속도 버튼(다시보기 전용). 내부에서 페이지·설정을 판정한다.
     ensureSpeedButton();
+    // 화질 바로 바꾸기(라이브·다시보기). 내부에서 설정을 판정한다.
+    ensureQualityButton();
     // 우리 버튼들을 order 대로 정렬(순서 이미 맞으면 no-op). 재렌더로 순서가 흐트러져도
     // 다음 tick 에서 복구된다.
     arrangePlayerButtons();
@@ -11485,7 +11940,9 @@
     const now = Date.now();
     if (!wideScreenWaitStartedAt) resetWideScreenAttempt();
     const btn = findViewModeButton();
-    if (!isViewModeButtonReady(btn)) {
+    // PIP 에서 막 돌아오는 중이면 버튼이 아직 PIP 플레이어 안에 있다. 거기서 누르지 않고
+    // 플레이어가 제자리로 돌아올 때까지 '아직 준비 안 됨' 으로 기다린다.
+    if (!isViewModeButtonReady(btn) || btn.closest("[class*='_type_pip_'], .pzp-pc--pip")) {
       // ⚠ 마감(8초)은 '페이지 전환 시점' 기준이라, 사양·네트워크가 느려 플레이어가
       // 늦게 뜨면 버튼이 나타나기도 전에 만료돼 자동 적용이 통째로 취소됐다.
       // 아직 viewmode 버튼이 없다는 건 컨트롤 UI 가 덜 준비됐다는 뜻이므로 '늦은' 게

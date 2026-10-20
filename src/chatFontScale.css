@@ -1131,7 +1131,11 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
 /* (F) 역할 기반 특수 메시지 폴백.
    치지직이 카드 해시를 gb6rb -> 126f6 처럼 바꾸더라도 닉네임 메타데이터에 남는
    _is_donation_/_is_mission_/_is_subscription_ 역할로 실제 카드 루트를 식별한다.
-   일반 채팅(_is_message_)과 프로필 다이얼로그는 이 조건에 들어오지 않는다. */
+   일반 채팅(_is_message_)과 프로필 다이얼로그는 이 조건에 들어오지 않는다.
+   ⚠ 카드 루트는 content.js(markChatSpecialCardRow)가 단 표식으로 고른다. 예전처럼
+   `[class*="_container_"]:has(역할)` 로 고르면 class 에 _container_ 가 든 조상까지
+   :has 검사 대상이 돼, 채팅 한 줄마다 채팅 전체의 스타일을 다시 계산했다.
+   표식을 두 번 쓴 것은 예전 :has(속성 2개)와 우선순위를 같게 맞추려는 것이다. */
 html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
   :is(aside#aside-chatting, aside#vod-aside)
   :is(
@@ -1139,11 +1143,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="live_chatting_list_item"],
     [class*="vod_chatting_item"]
   )
-  > [class*="_container_"]:has(
-    [class*="_container_"][class*="_is_donation_"],
-    [class*="_container_"][class*="_is_mission_"],
-    [class*="_container_"][class*="_is_subscription_"]
-  ) {
+  > [class*="_container_"][data-cheese-chat-card][data-cheese-chat-card] {
   font-size: calc(13px * var(--cheese-chat-font-scale)) !important;
   line-height: calc(18px * var(--cheese-chat-font-scale)) !important;
 }
@@ -1157,11 +1157,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="live_chatting_list_item"],
     [class*="vod_chatting_item"]
   )
-  > [class*="_container_"]:has(
-    [class*="_container_"][class*="_is_donation_"],
-    [class*="_container_"][class*="_is_mission_"],
-    [class*="_container_"][class*="_is_subscription_"]
-  )
+  > [class*="_container_"][data-cheese-chat-card][data-cheese-chat-card]
   :is(
     [class*="_header_"],
     [class*="_row_"],
@@ -1231,7 +1227,7 @@ html.cheese-chat-font-scale-enabled.cheese-chat-font-scale-special
     [class*="live_chatting_list_item"],
     [class*="vod_chatting_item"]
   )
-  > [class*="_container_"]:has([class*="_is_mission_"])
+  > [class*="_container_"][data-cheese-chat-card-mission]
   [class*="_money_"]
   > svg {
   width: calc(16px * var(--cheese-chat-font-scale)) !important;

@@ -341,6 +341,9 @@
       channel?.verifiedMark === true || entry?.verifiedMark === true,
     liveTitle: String(live?.liveTitle || "").trim(),
     category: String(live?.liveCategoryValue || "").trim(),
+    // 카테고리 칩을 누르면 그 카테고리 라이브를 부른다(categories/{type}/{id}/lives).
+    categoryType: String(live?.categoryType || "").trim(),
+    categoryId: String(live?.liveCategory || "").trim(),
     viewers: Number(live?.concurrentUserCount) || 0,
     openedAt: liveOpenedAt(live?.openDate),
     adult:
@@ -413,6 +416,8 @@
       liveTitle: String(video?.videoTitle || video?.title || entry?.videoTitle || "").trim(),
       liveImageUrl: thumbnail,
       category: String(video?.videoCategoryValue || video?.categoryName || video?.category || "").trim(),
+      categoryType: String(video?.categoryType || "").trim(),
+      categoryId: String(video?.videoCategory || "").trim(),
       tags: tags.map((tag) => String(tag?.name || tag || "").trim()).filter(Boolean),
       viewers: Number(video?.readCount ?? video?.viewCount ?? entry?.readCount) || 0,
       livePv: Number(video?.livePv ?? entry?.livePv) || 0,
@@ -1326,6 +1331,271 @@
     return (await searchLivePage(keyword)).rows;
   }
 
+
+  // ── 카테고리·태그로 찾기 ──────────────────────────────────────────────
+  // 카드의 카테고리·태그 칩을 누르거나 '카테고리' 검색에서 카테고리를 고르면 그 라이브를
+  // 시청자순으로 보인다(치지직 카테고리·태그 화면과 같은 목록, 2026-10-18 실측).
+  //   카테고리: GET /service/v2/categories/{GAME|SPORTS|ETC}/{categoryId}/lives?size=&concurrentUserCount=&liveId=
+  //   태그:     GET /service/v1/tag/lives?size=&sortType=POPULAR&tags=&concurrentUserCount=&liveId=
+  //   둘 다 content.page.next = { concurrentUserCount, liveId } 로 다음 묶음을 잇는다.
+  //   카테고리 찾기: GET /manage/v1/auto-complete/categories?keyword=&size=(≤50) — 표시 이름 부분 일치.
+  const CATEGORY_TYPES = new Set(["GAME", "SPORTS", "ETC"]);
+  const CATEGORY_ID_RE = /^[^/?#\s]{1,120}$/;
+  const FILTER_PAGE_SIZE = 30;
+  const CATEGORY_SEARCH_SIZE = 50;
+
+  // { kind: "category", categoryType, categoryId, label } | { kind: "tag", tag, label } | null
+  function normalizeSearchFilter(raw) {
+    if (raw?.kind === "category") {
+      const categoryType = String(raw.categoryType || "").toUpperCase();
+      const categoryId = String(raw.categoryId || "").trim();
+      if (!CATEGORY_TYPES.has(categoryType) || !CATEGORY_ID_RE.test(categoryId)) return null;
+      return { kind: "category", categoryType, categoryId, label: String(raw.label || categoryId).trim().slice(0, 100) };
+    }
+    if (raw?.kind === "tag") {
+      const tag = String(raw.tag || "").trim().replace(/^#/, "").trim().slice(0, 80);
+      return tag ? { kind: "tag", tag, label: tag } : null;
+    }
+    return null;
+  }
+
+  function searchFilterKey(filter) {
+    const f = normalizeSearchFilter(filter);
+    if (!f) return "";
+    return f.kind === "category" ? `category:${f.categoryType}:${f.categoryId}` : `tag:${f.tag.toLocaleLowerCase("ko-KR")}`;
+  }
+
+  // 카드의 칩 → 필터(카테고리는 종류·id 를 아는 카드만).
+  function searchFilterFromRow(row, kind, tag = "") {
+    if (kind === "category") {
+      return normalizeSearchFilter({ kind, categoryType: row?.categoryType, categoryId: row?.categoryId, label: row?.category });
+    }
+    return normalizeSearchFilter({ kind: "tag", tag });
+  }
+
+  // 카드의 카테고리·태그 칩. 누를 수 있는 칩에는 data-mv-filter-* 를 단다(카드 버튼 안이라
+  // 버튼 대신 span — 누르기는 카드 클릭보다 먼저 받아 처리한다).
+  function cardFilterChipsHtml(row, esc) {
+    const tags = Array.isArray(row?.tags) ? row.tags : [];
+    const category = String(row?.category || "");
+    const categoryFilter = category ? searchFilterFromRow(row, "category") : null;
+    return (
+      (category
+        ? categoryFilter
+          ? `<span class="mv-card-category-chip is-filter" data-mv-filter-kind="category" data-mv-filter-type="${esc(categoryFilter.categoryType)}" ` +
+            `data-mv-filter-id="${esc(categoryFilter.categoryId)}" data-mv-filter-label="${esc(category)}" title="${esc(`${category} 방송 보기`)}">${esc(category)}</span>`
+          : `<span class="mv-card-category-chip">${esc(category)}</span>`
+        : "") +
+      tags.map((tag) =>
+        `<span class="mv-card-tag-chip is-filter" data-mv-filter-kind="tag" data-mv-filter-tag="${esc(tag)}" title="${esc(`#${tag} 방송 보기`)}">${esc(tag)}</span>`).join("")
+    );
+  }
+
+  // 누른 칩 → 필터. 칩이 아니면 null.
+  function searchFilterFromChip(target) {
+    const chip = target?.closest?.("[data-mv-filter-kind]");
+    if (!chip) return null;
+    return chip.dataset.mvFilterKind === "category"
+      ? normalizeSearchFilter({ kind: "category", categoryType: chip.dataset.mvFilterType, categoryId: chip.dataset.mvFilterId, label: chip.dataset.mvFilterLabel })
+      : normalizeSearchFilter({ kind: "tag", tag: chip.dataset.mvFilterTag });
+  }
+
+  function normalizeFilterCursor(value) {
+    const count = Number(value?.concurrentUserCount);
+    const liveId = Number(value?.liveId);
+    return Number.isSafeInteger(count) && count >= 0 && Number.isSafeInteger(liveId) && liveId > 0
+      ? { concurrentUserCount: count, liveId }
+      : null;
+  }
+
+  function filterLivesUrl(filter, cursor = null) {
+    const url = filter.kind === "category"
+      ? new URL(`${API}/service/v2/categories/${encodeURIComponent(filter.categoryType)}/${encodeURIComponent(filter.categoryId)}/lives`)
+      : new URL(`${API}/service/v1/tag/lives`);
+    url.searchParams.set("size", String(FILTER_PAGE_SIZE));
+    if (filter.kind === "tag") {
+      url.searchParams.set("sortType", "POPULAR");
+      url.searchParams.set("tags", filter.tag);
+    }
+    const next = normalizeFilterCursor(cursor);
+    if (next) {
+      url.searchParams.set("concurrentUserCount", String(next.concurrentUserCount));
+      url.searchParams.set("liveId", String(next.liveId));
+    }
+    return url.toString();
+  }
+
+  async function loadFilterLivesPage(filter, cursor = null) {
+    const f = normalizeSearchFilter(filter);
+    if (!f) return { rows: [], next: null };
+    const c = await getJson(filterLivesUrl(f, cursor));
+    const rows = Array.isArray(c?.data) ? c.data : Array.isArray(c?.liveInfoResponseList) ? c.liveInfoResponseList : [];
+    return {
+      rows: rows
+        .filter((row) => HASH_RE.test(String(row?.channel?.channelId || "").toLowerCase()) && typeof row?.liveTitle === "string")
+        .map((row) => normalize(row.channel, row)),
+      next: rows.length ? normalizeFilterCursor(c?.page?.next) : null,
+    };
+  }
+
+  // 검색 pager 와 같은 모양(rows·next·loading·done·error·generation·snapshot·loadFirst·loadNext·invalidate).
+  function createCursorPager(fetchPage, firstCursor = null) {
+    let rows = [];
+    let next = firstCursor;
+    let loading = false;
+    let done = false;
+    let error = null;
+    let generation = 0;
+    let pending = null;
+    let started = false;
+    const snapshot = () => ({ rows: [...rows], next, loading, done, error, generation });
+    const request = async (cursor, replace) => {
+      const requestGeneration = ++generation;
+      loading = true;
+      error = null;
+      try {
+        const page = await fetchPage(cursor);
+        if (requestGeneration !== generation) return snapshot();
+        const seen = new Set(replace ? [] : rows.map((row) => row.channelId));
+        const fresh = (page.rows || []).filter((row) => row.channelId && !seen.has(row.channelId) && seen.add(row.channelId));
+        rows = replace ? fresh : [...rows, ...fresh];
+        next = page.next || null;
+        done = next === null;
+        started = true;
+      } catch (reason) {
+        if (requestGeneration === generation) error = reason;
+      } finally {
+        if (requestGeneration === generation) {
+          loading = false;
+          pending = null;
+        }
+      }
+      return snapshot();
+    };
+    return {
+      get rows() { return [...rows]; },
+      get next() { return next; },
+      get loading() { return loading; },
+      get done() { return done; },
+      get error() { return error; },
+      get generation() { return generation; },
+      snapshot,
+      loadFirst(force = false) {
+        if (loading && pending) return pending;
+        if (!force && started && !error) return Promise.resolve(snapshot());
+        pending = request(firstCursor, true);
+        return pending;
+      },
+      loadNext() {
+        if (loading && pending) return pending;
+        if (done || !started) return Promise.resolve(snapshot());
+        pending = request(next, false);
+        return pending;
+      },
+      invalidate() {
+        generation += 1;
+        loading = false;
+        pending = null;
+      },
+    };
+  }
+
+  function createFilterPager(filter) {
+    const f = normalizeSearchFilter(filter);
+    const pager = createCursorPager((cursor) => loadFilterLivesPage(f, cursor));
+    pager.filter = f;
+    return pager;
+  }
+
+  // '카테고리' 검색: 이름이 맞는 카테고리 목록(카드로 보이고, 누르면 그 카테고리 라이브).
+  // 행은 mediaType "category" 이고 channelId 자리에 "category:{type}:{id}" 를 둔다(목록 키).
+  async function searchCategories(keyword) {
+    const query = String(keyword || "").trim().slice(0, 50);
+    if (!query) return [];
+    const url = new URL(`${API}/manage/v1/auto-complete/categories`);
+    url.searchParams.set("keyword", query);
+    url.searchParams.set("size", String(CATEGORY_SEARCH_SIZE));
+    const c = await getJson(url.toString());
+    const results = Array.isArray(c?.results) ? c.results : Array.isArray(c?.data) ? c.data : [];
+    return results.map((item) => {
+      const filter = normalizeSearchFilter({ kind: "category", categoryType: item?.categoryType, categoryId: item?.categoryId, label: item?.categoryValue });
+      if (!filter) return null;
+      return {
+        mediaType: "category",
+        channelId: searchFilterKey(filter),
+        filter,
+        channelName: filter.label,
+        liveTitle: filter.label,
+        categoryType: filter.categoryType,
+        posterImageUrl: String(item?.posterImageUrl || ""),
+        tags: Array.isArray(item?.tags) ? item.tags.map((tag) => String(tag || "").trim()).filter(Boolean).slice(0, 4) : [],
+        viewers: 0,
+      };
+    }).filter(Boolean);
+  }
+
+  // '방제' 검색: 방송 제목에 검색어가 든 라이브(search/lives — 채널 이름은 찾지 않는다, 2026-10-19 실측).
+  //   GET /service/v1/search/lives?keyword=&offset=&size= → data[].{live, channel}, page.next = { offset }
+  async function searchLiveTitlesPage(keyword, cursor = null) {
+    const query = String(keyword || "").trim().slice(0, 100);
+    const offset = Number.isSafeInteger(Number(cursor?.offset)) && Number(cursor.offset) >= 0 ? Number(cursor.offset) : 0;
+    if (!query) return { rows: [], next: null };
+    const url = new URL(`${API}/service/v1/search/lives`);
+    url.searchParams.set("keyword", query);
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("size", String(FILTER_PAGE_SIZE));
+    const c = await getJson(url.toString());
+    const data = Array.isArray(c?.data) ? c.data : [];
+    const rows = data
+      .filter((entry) => HASH_RE.test(String(entry?.channel?.channelId || "").toLowerCase()) && typeof entry?.live?.liveTitle === "string")
+      .map((entry) => normalize(entry.channel, entry.live));
+    const nextOffset = Number(c?.page?.next?.offset);
+    return {
+      rows,
+      next: data.length && Number.isSafeInteger(nextOffset) && nextOffset > offset && nextOffset <= 10000 ? { offset: nextOffset } : null,
+    };
+  }
+
+  function createTitleSearchPager(keyword) {
+    const query = String(keyword || "").trim();
+    return createCursorPager((cursor) => searchLiveTitlesPage(query, cursor), { offset: 0 });
+  }
+
+  function createCategorySearchPager(keyword) {
+    const query = String(keyword || "").trim();
+    return createCursorPager(async () => ({ rows: query ? await searchCategories(query) : [], next: null }));
+  }
+
+  const CATEGORY_TYPE_LABELS = { GAME: "게임", SPORTS: "스포츠", ETC: "기타" };
+  // 카테고리 카드(포스터 + 이름 + 종류). 누르면 data-mv-category-pick 으로 그 카테고리 라이브.
+  function categoryCardHtml(row, esc, className = "mv-category-card") {
+    const poster = /^https:\/\//.test(row.posterImageUrl || "") ? row.posterImageUrl : "";
+    return (
+      `<button type="button" class="${className}" data-mv-category-pick="${esc(row.channelId)}" ` +
+      `data-mv-filter-type="${esc(row.filter.categoryType)}" data-mv-filter-id="${esc(row.filter.categoryId)}" data-mv-filter-label="${esc(row.filter.label)}">` +
+      `<span class="mv-category-card-poster">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}</span>` +
+      `<span class="mv-category-card-name">${esc(row.filter.label)}</span>` +
+      `<span class="mv-category-card-type">${esc(CATEGORY_TYPE_LABELS[row.filter.categoryType] || "")}</span>` +
+      `</button>`
+    );
+  }
+
+  function categoryFromCard(target) {
+    const card = target?.closest?.("[data-mv-category-pick]");
+    if (!card) return null;
+    return normalizeSearchFilter({ kind: "category", categoryType: card.dataset.mvFilterType, categoryId: card.dataset.mvFilterId, label: card.dataset.mvFilterLabel });
+  }
+
+  // 검색 탭 위의 필터 표시('카테고리: 이름 ×' / '#태그 ×').
+  function searchFilterPillHtml(filter, esc) {
+    const f = normalizeSearchFilter(filter);
+    if (!f) return "";
+    const label = f.kind === "category" ? `카테고리 · ${f.label}` : `태그 · #${f.tag}`;
+    return `<span class="mv-search-filter-label">${esc(label)}</span>` +
+      `<button type="button" class="mv-search-filter-clear" data-mv-filter-clear aria-label="${esc(`${label} 필터 해제`)}" title="필터 해제">` +
+      `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>`;
+  }
+
   // 전용 팔로잉을 사이드바와 같은 구분(즐겨찾기 → 그룹 → 구독 → 태그 → 친밀도 →
   // 나머지 팔로잉)으로 나눠 돌려준다.
   //
@@ -1617,6 +1887,20 @@
     mergeSearchRows,
     searchLivePage,
     createSearchPager,
+    normalizeSearchFilter,
+    searchFilterKey,
+    searchFilterFromRow,
+    searchFilterFromChip,
+    cardFilterChipsHtml,
+    loadFilterLivesPage,
+    createFilterPager,
+    searchCategories,
+    createCategorySearchPager,
+    searchLiveTitlesPage,
+    createTitleSearchPager,
+    categoryCardHtml,
+    categoryFromCard,
+    searchFilterPillHtml,
     searchLive,
     loadCustomFollowing,
     loadCustomSections,

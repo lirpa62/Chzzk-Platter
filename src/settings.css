@@ -1081,8 +1081,42 @@ html.settings-tab-view .settings-item-desc {
 }
 .settings-live-tag-row > label.settings-live-tag-toggle {
   flex: none;
+  justify-content: center;
+  width: 56px;
   gap: 0;
   position: relative;
+}
+/* 열 머리(전체 방송 · 팔로잉): 아래 줄의 스위치 열과 같은 폭·간격. 스위치는 그 열을 모두 켜고 끈다. */
+.settings-live-tag-columns {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding-bottom: 6px;
+  /* 아래 목록에 스크롤 막대가 생기면 그 폭만큼 오른쪽을 비운다(JS 가 재서 padding-right 로 넣는다). */
+}
+.settings-live-tag-columns[hidden] {
+  display: none;
+}
+.settings-live-tag-column {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 56px;
+  color: var(--popup-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.settings-live-tag-column .settings-live-tag-toggle {
+  position: relative;
+  display: inline-flex;
+}
+.settings-live-tag-column-gap {
+  flex: none;
+  width: 32px;
 }
 .settings-live-tag-toggle input {
   opacity: 0;
@@ -1171,7 +1205,14 @@ html.settings-tab-view .settings-item-desc {
   height: 20px;
   border-radius: 999px;
   background: var(--popup-dimmed-bg);
+  /* 꺼짐 상태는 바탕과 색이 비슷해 어두운 화면에서 스위치가 있는지조차 안 보였다 —
+     테두리로 모양을 남긴다(켜짐은 브랜드 색이라 테두리를 뺀다). */
+  box-shadow: inset 0 0 0 1px var(--popup-border);
   transition: background 0.15s ease;
+}
+
+:root[data-theme="dark"] .settings-switch input:not(:checked) + i {
+  background: #3a4148;
 }
 
 .settings-switch i::after {
@@ -1189,6 +1230,7 @@ html.settings-tab-view .settings-item-desc {
 
 .settings-switch input:checked + i {
   background: var(--popup-brand);
+  box-shadow: none;
 }
 
 .settings-switch input:checked + i::after {
@@ -1406,6 +1448,11 @@ html.settings-tab-view .settings-item-desc {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+/* 한 줄당 방송 개수: 자동 + 2~7 */
+.settings-segmented[data-cards-per-row] {
+  grid-template-columns: 1.6fr repeat(6, minmax(0, 1fr));
+}
+
 /* 5칸 세그먼트(미리보기 자동 종료 30초~5분) */
 .settings-segmented-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1512,6 +1559,9 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-chat-history-limit]),
 .settings-item:has([data-chat-time-size]),
 .settings-item:has([data-mixer-gain-max]),
+.settings-item:has([data-cards-per-row]),
+.settings-item:has([data-cf-group-style-value]),
+.settings-item:has([data-auto-sync-channels-list]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {

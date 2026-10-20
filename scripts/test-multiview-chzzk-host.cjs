@@ -266,7 +266,7 @@ function backgroundContext() {
   };
   const ctx = { chrome, fetch: async () => ({ text: async () => "<html></html>" }), Number, Array, Object, String, JSON, Error, URL };
   vm.createContext(ctx);
-  vm.runInContext(bgSource + "\nthis.out={openMultiviewHost,handleMultiviewHostApi,readMultiviewHosts,runningMultiviewHost,focusMultiviewHost};", ctx);
+  vm.runInContext(bgSource + "\nthis.out={openMultiviewHost,handleMultiviewHostApi,readMultiviewHosts,runningMultiviewHosts,focusMultiviewHost};", ctx);
   return { ...ctx.out, calls, listeners, session, tabUrls, closedTabs };
 }
 (async () => {
@@ -333,17 +333,32 @@ function backgroundContext() {
     /handoffSaveTimer = setTimeout\(\(\) => \{\s*handoffSaveTimer = 0;\s*void saveHandoff\(\);/.test(watch),
     "시청 화면은 채널·메인·배치가 바뀌면(applyLayout) 지금 구성을 저장해 둔다");
 
-  // 멀티뷰 탭은 하나만 쓴다(한 탭에 최대 9채널). 다시 시작하면 열린 탭을 새 구성으로 다시 연다.
+  // 멀티뷰 탭은 여러 개 열 수 있다(2026-10-19). 다른 구성은 새 탭, 같은 구성 id(그 탭의 '고르기 화면 열기' 로
+  // 고친 구성)나 reuseTabId('기존 멀티뷰 바꾸기')면 그 탭을 새 구성으로 다시 연다.
   {
     const bg2 = backgroundContext();
     const count = (name) => bg2.calls.filter(([n]) => n === name).length;
     const first = await bg2.openMultiviewHost("setup-a", "light", { windowId: 3, index: 1 });
-    bg2.session["cheeseMultiviewSetup:setup-a"] = { chosen: [] };
+    bg2.session["cheeseMultiviewSetup:setup-a"] = { chosen: [{ channelId: "c1", channelName: "채널1" }, { channelId: "c2", channelName: "채널2" }] };
     const chat = await bg2.handleMultiviewHostApi({ op: "windows.create",
       args: { url: "https://chzzk.naver.com/live/x/chat" } }, { tab: { id: first.tabId } });
-    const second = await bg2.openMultiviewHost("setup-b", "dark", { windowId: 3, index: 1 });
-    check(count("tabs.create") === 1 && second.tabId === first.tabId && second.reused === true,
-      "이미 열린 멀티뷰 탭이 있으면 새 탭을 만들지 않는다");
+    const extra = await bg2.openMultiviewHost("setup-x", "dark", { windowId: 3, index: 1 });
+    check(count("tabs.create") === 2 && extra.tabId !== first.tabId && !extra.reused,
+      "이미 멀티뷰 탭이 있어도 다른 구성은 새 탭으로 연다(여러 탭 허용)");
+    bg2.session["cheeseMultiviewSetup:setup-x"] = { chosen: [{ channelId: "c2", channelName: "채널2" }, { channelId: "c3", channelName: "채널3" }] };
+    const list = await bg2.runningMultiviewHosts();
+    check(Array.isArray(list) && list.length === 2 && list.some((h) => h.tabId === first.tabId && h.setupId === "setup-a") &&
+      list.some((h) => h.tabId === extra.tabId && h.setupId === "setup-x"), "실행 중인 멀티뷰 탭을 모두 알려 준다");
+    const others = await bg2.handleMultiviewHostApi({ op: "others.channels", args: {} }, { tab: { id: extra.tabId } });
+    check(JSON.stringify(others.map((o) => o.channelId).sort()) === '["c1","c2"]' && others.find((o) => o.channelId === "c1").channelName === "채널1",
+      "다른 멀티뷰 탭들이 보고 있는 채널을 알려 준다(자기 탭은 빼고)");
+    // 이 아래는 탭 하나(first)만 두고 예전 재사용 규칙을 확인한다.
+    bg2.closedTabs.add(extra.tabId);
+    bg2.listeners.removed(extra.tabId);
+    for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = await bg2.openMultiviewHost("setup-b", "dark", { windowId: 3, index: 1 }, first.tabId);
+    check(count("tabs.create") === 2 && second.tabId === first.tabId && second.reused === true,
+      "'기존 멀티뷰 바꾸기'(reuseTabId)면 새 탭을 만들지 않는다");
     check(bg2.calls.some(([n, id]) => n === "tabs.reload" && id === first.tabId) &&
       bg2.calls.some(([n, id, o]) => n === "tabs.update" && id === first.tabId && o.active === true) &&
       bg2.calls.some(([n, id, o]) => n === "windows.update" && id === first.windowId && o.focused === true),
@@ -357,8 +372,8 @@ function backgroundContext() {
       "바뀐 예전 구성 저장값은 지운다");
     const removesBefore = count("session.remove");
     await bg2.openMultiviewHost("setup-b", "dark", null);
-    check(count("tabs.create") === 1 && count("session.remove") === removesBefore,
-      "'고르기 화면 열기' 로 고쳐 같은 구성 id 로 다시 시작해도 그 탭을 다시 연다(저장값은 지우지 않는다)");
+    check(count("tabs.create") === 2 && count("session.remove") === removesBefore,
+      "'고르기 화면 열기' 로 고쳐 같은 구성 id 로 다시 시작하면 그 탭을 다시 연다(저장값은 지우지 않는다)");
     // 시청 화면(content script)의 구성 읽기·쓰기는 배경이 맡는다(파이어폭스는 content script 가
     // 세션 저장소를 못 읽는다). 이 탭 자신의 구성 id 만 다룬다.
     {
@@ -373,11 +388,14 @@ function backgroundContext() {
       await hostApi("setup.set", { setup: { chosen: new Array(9).fill({}) } });
       check(bg2.session["cheeseMultiviewSetup:setup-b"]?.chosen.length === 9,
         "9채널 구성도 시청 탭에서 저장할 수 있다");
-      await assert.rejects(hostApi("setup.set", { setup: { chosen: new Array(10).fill({}) } }), /invalid-setup/);
+      await hostApi("setup.set", { setup: { chosen: new Array(16).fill({}) } });
+      check(bg2.session["cheeseMultiviewSetup:setup-b"]?.chosen.length === 16, "내 배치 16채널 구성도 저장할 수 있다");
+      await assert.rejects(hostApi("setup.set", { setup: { chosen: new Array(17).fill({}) } }), /invalid-setup/);
       await assert.rejects(hostApi("setup.set", { setup: "x" }), /invalid-setup/);
-      checks.push("모양이 이상한 구성(10칸 이상 등)은 저장하지 않는다");
+      checks.push("모양이 이상한 구성(17칸 이상 등)은 저장하지 않는다");
       await assert.rejects(hostApi("setup.get", {}, 999), /not-multiview-host/);
-      checks.push("멀티뷰 탭이 아니면 구성을 읽고 쓰지 못한다");
+      await assert.rejects(hostApi("others.channels", {}, 999), /not-multiview-host/);
+      checks.push("멀티뷰 탭이 아니면 구성·다른 탭 채널을 읽고 쓰지 못한다");
       const watchSrc = read("src/multiviewWatch.js");
       check(/if \(HOSTED_ON_CHZZK\) return \(await hostApi\("setup\.get"\)\) \|\| null;/.test(watchSrc) &&
         /if \(HOSTED_ON_CHZZK\) return hostApi\("setup\.set", \{ setup \}\);/.test(watchSrc) &&
@@ -386,7 +404,7 @@ function backgroundContext() {
     }
     // 고르기 화면이 같은 구성인지 비교할 수 있게 실행 중인 탭과 구성 id 를 알려 주고,
     // '멀티뷰 이동' 은 다시 불러오지 않고 그 탭으로만 옮긴다.
-    const running = await bg2.runningMultiviewHost();
+    const running = (await bg2.runningMultiviewHosts())[0];
     check(running?.tabId === first.tabId && running.setupId === "setup-b",
       "실행 중인 멀티뷰 탭과 구성 id 를 알려 준다");
     const reloadsBefore = count("tabs.reload");
@@ -405,9 +423,9 @@ function backgroundContext() {
       bg2.calls.some(([n, key]) => n === "session.remove" && key === "cheeseMultiviewSetup:setup-b"),
       "멀티뷰 탭을 닫으면 기록과 구성 저장값을 지운다");
     const third = await bg2.openMultiviewHost("setup-c", "light", null);
-    check(count("tabs.create") === 2 && third.tabId !== first.tabId && !third.reused,
+    check(count("tabs.create") === 3 && third.tabId !== first.tabId && !third.reused,
       "열린 멀티뷰 탭이 없으면 새 탭을 연다");
-    check((await bg2.runningMultiviewHost())?.tabId === third.tabId, "닫힌 탭은 실행 중으로 알리지 않는다");
+    check((await bg2.runningMultiviewHosts()).map((h) => h.tabId).join() === String(third.tabId), "닫힌 탭은 실행 중으로 알리지 않는다");
     // 파이어폭스는 새 탭을 about:blank 로 먼저 '로드 완료' 라고 알린다. 그때 기록을 지우면
     // 정작 /lives 로드가 끝났을 때 화면을 세우지 않았다.
     {
@@ -418,11 +436,11 @@ function backgroundContext() {
       hosts = await bg2.readMultiviewHosts();
       check(hosts[third.tabId]?.setupId === "setup-c" && count("executeScript") === injectBefore,
         "about:blank 로드 완료에서는 기록을 지우지도, 화면을 세우지도 않는다");
-      check((await bg2.runningMultiviewHost())?.tabId === third.tabId,
-        "아직 about:blank 인 멀티뷰 탭도 실행 중으로 본다(시작을 두 번 눌러도 탭이 둘 생기지 않는다)");
+      check((await bg2.runningMultiviewHosts()).some((h) => h.tabId === third.tabId),
+        "아직 about:blank 인 멀티뷰 탭도 실행 중으로 본다(고르기 화면이 탭 추가를 묻는다)");
       const reloadBefore = count("tabs.reload");
       await bg2.focusMultiviewHost(third.tabId);
-      const pendingReuse = await bg2.openMultiviewHost("setup-pending", "dark", null);
+      const pendingReuse = await bg2.openMultiviewHost("setup-pending", "dark", null, third.tabId);
       hosts = await bg2.readMultiviewHosts();
       check(pendingReuse.tabId === third.tabId && hosts[third.tabId]?.setupId === "setup-pending" &&
         count("tabs.reload") === reloadBefore,
@@ -434,9 +452,9 @@ function backgroundContext() {
     }
     // 기록만 남고 실제로는 없는 탭(브라우저가 알림 없이 닫은 경우)은 건너뛴다.
     bg2.closedTabs.add(third.tabId);
-    const fourth = await bg2.openMultiviewHost("setup-d", "light", null);
+    const fourth = await bg2.openMultiviewHost("setup-d", "light", null, third.tabId);
     hosts = await bg2.readMultiviewHosts();
-    check(count("tabs.create") === 3 && !hosts[third.tabId] && hosts[fourth.tabId]?.setupId === "setup-d",
+    check(count("tabs.create") === 4 && !hosts[third.tabId] && hosts[fourth.tabId]?.setupId === "setup-d",
       "기록만 남은 닫힌 탭은 지우고 새 탭을 연다");
   }
 

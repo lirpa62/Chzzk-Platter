@@ -1,0 +1,178 @@
+/* 치즈 플래터 - '기록 관리'·확인 모달(recordManage.js). 색은 popup.css 의 테마 변수를 쓴다. */
+.crm-overlay {
+  align-items: center;
+  background: rgb(0 0 0 / 45%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 16px;
+  position: fixed;
+  z-index: 2147483000;
+}
+.crm-dialog {
+  background: var(--popup-surface, #fff);
+  border: 1px solid var(--popup-border, rgb(0 0 0 / 12%));
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 28%);
+  box-sizing: border-box;
+  color: var(--popup-text, #111);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 32px);
+  max-width: 100%;
+  padding: 20px;
+  width: 400px;
+}
+.crm-dialog h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.crm-message,
+.crm-desc {
+  color: var(--popup-muted, rgb(0 0 0 / 58%));
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-line;
+}
+.crm-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.crm-spacer {
+  flex: 1;
+}
+.crm-button {
+  background: var(--popup-surface, #fff);
+  border: 1px solid var(--popup-border, rgb(0 0 0 / 12%));
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+}
+.crm-button:hover:not(:disabled) {
+  background: var(--popup-soft-bg, rgb(0 0 0 / 5%));
+}
+.crm-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.crm-button.is-danger {
+  background: #e5484d;
+  border-color: #e5484d;
+  color: #fff;
+}
+.crm-button.is-danger:hover:not(:disabled) {
+  background: #d13a3f;
+}
+.crm-button.is-primary {
+  background: var(--popup-brand, #00c73c);
+  border-color: var(--popup-brand, #00c73c);
+  color: #fff;
+}
+.crm-button.is-danger-ghost {
+  border-color: rgb(229 72 77 / 55%);
+  color: #e5484d;
+}
+.crm-button:focus-visible,
+.crm-icon-button:focus-visible {
+  outline: 2px solid var(--popup-brand, #00c73c);
+  outline-offset: 2px;
+}
+
+.crm-manager-dialog {
+  width: 480px;
+}
+.crm-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.crm-head h2 {
+  flex: 1;
+}
+.crm-icon-button {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--popup-muted, rgb(0 0 0 / 58%));
+  cursor: pointer;
+  display: inline-grid;
+  height: 32px;
+  place-items: center;
+  width: 32px;
+}
+.crm-icon-button:hover {
+  background: var(--popup-soft-bg, rgb(0 0 0 / 5%));
+  color: inherit;
+}
+.crm-select-all {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+.crm-list {
+  border: 1px solid var(--popup-border, rgb(0 0 0 / 12%));
+  border-radius: 10px;
+  flex: 1 1 auto;
+  min-height: 80px;
+  overflow-y: auto;
+}
+.crm-row {
+  align-items: center;
+  border-bottom: 1px solid var(--popup-border-soft, rgb(0 0 0 / 6%));
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  padding: 8px 12px;
+}
+.crm-row:last-child {
+  border-bottom: 0;
+}
+.crm-row:hover {
+  background: var(--popup-soft-bg, rgb(0 0 0 / 5%));
+}
+.crm-avatar {
+  background: var(--popup-soft-bg, rgb(0 0 0 / 5%));
+  border-radius: 50%;
+  display: inline-block;
+  height: 26px;
+  object-fit: cover;
+  width: 26px;
+}
+.crm-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crm-detail {
+  color: var(--popup-muted, rgb(0 0 0 / 58%));
+  font-size: 12px;
+  white-space: nowrap;
+}
+.crm-empty {
+  color: var(--popup-muted, rgb(0 0 0 / 58%));
+  font-size: 13px;
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+}
+.crm-error {
+  color: #e5484d;
+  font-size: 13px;
+  margin: 0;
+}
+.crm-error[hidden] {
+  display: none;
+}
+.crm-overlay.is-busy .crm-list {
+  opacity: 0.5;
+  pointer-events: none;
+}

@@ -71,7 +71,7 @@ const STORAGE = {
       window.__local = ${JSON.stringify(STORAGE)};
       window.__sent = [];
       window.__fetches = 0;
-      window.confirm = () => true;
+      window.confirm = () => { throw new Error('브라우저 confirm 을 쓰면 안 된다'); };
       window.chrome = {
         storage: {
           local: {
@@ -158,10 +158,28 @@ const STORAGE = {
       detail.detailSplit[1] === "다시보기/-/20분/20분" && detail.detailSplit[2] === "라디오/10분/-/10분" &&
       detail.detailSplit[3] === "합계/1시간 10분/20분/1시간 30분",
       `채널을 누르면 로그인·비로그인 × 라이브·다시보기·라디오 상세(없는 칸은 -) ${JSON.stringify(detail.detailSplit)}`);
-    await ev(`document.getElementById('wtDetailDelete').click()`);
+    // 지우기 전에 브라우저 confirm 대신 페이지 스타일 확인 모달(recordManage.js). 취소하면 지우지 않는다.
+    const modal = await ev(`(async () => {
+      const sentBefore = window.__sent.length;
+      document.getElementById('wtDetailDelete').click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const dialog = document.querySelector('.crm-confirm [role="alertdialog"]');
+      const out = { shown: !!dialog, title: dialog?.querySelector('h2')?.textContent,
+        focusCancel: document.activeElement?.hasAttribute('data-crm-cancel') };
+      dialog?.querySelector('[data-crm-cancel]').click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      out.cancelled = !document.querySelector('.crm-overlay') && window.__sent.length === sentBefore;
+      document.getElementById('wtDetailDelete').click();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      document.querySelector('.crm-confirm [data-crm-ok]').click();
+      return out;
+    })()`);
+    check(modal.shown && modal.title === "이 채널 기록 지우기" && modal.focusCancel && modal.cancelled,
+      `채널 기록 지우기는 확인 모달을 거친다(처음 포커스는 취소, 취소하면 그대로) ${JSON.stringify(modal)}`);
     await new Promise((resolve) => setTimeout(resolve, 200));
     check(await ev(`JSON.stringify(window.__sent.at(-1))`) === JSON.stringify({ type: "CHEESE_WATCH_TIME_DELETE", channelId: A }),
       "채널 기록 지우기는 배경에 맡긴다(쓰기와 같은 줄)");
+    check(await ev(`typeof window.confirm === 'function' && !document.querySelector('.crm-overlay')`), "확인하면 모달이 닫힌다");
 
     await open(`?channel=${B}`);
     const linked = await view();

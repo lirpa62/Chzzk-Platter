@@ -161,6 +161,14 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseScreenshotNameFormat:'{채널}_{날짜}',
         cheeseLiveTagFiltersDisabled:['game'],
         cheeseFollowingLiveAutoExpand:true,
+        cheeseFollowingGroupFilterSelected:'custom:group-1',
+        cheesePlaylistPanelRect:{left:30,top:40,width:420,height:360},
+        cheeseChzzkPlaylistPanelCollapsed:true,
+        cheesePlaylists:{v:1,lists:[{id:'playlist01',name:'테스트 목록',items:[{
+          id:'item0001',type:'video',videoNo:'123456',start:12,title:'테스트 영상',
+          thumb:'https://example.com/tracker.png',channelId:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          channelName:'테스트 채널',duration:120,adult:false,addedAt:1,
+        }],createdAt:1,updatedAt:1}]},
         cheeseWatchTime:true,
         cheeseChatTimeSize:90,
         cheeseChatTimeSeekOffset:5,
@@ -202,6 +210,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       await evaluate(`{const style=document.createElement('style');style.textContent=${JSON.stringify(readFileSync(file,'utf8'))};document.head.append(style);}`);
     }
     await evaluate(readFileSync('src/settingsUi.js','utf8'));
+    await evaluate(readFileSync('src/playlistStore.js','utf8'));
     await evaluate(readFileSync('src/settings.js','utf8'));
     await evaluate('new Promise(resolve=>setTimeout(resolve,100))');
     assert.deepEqual(await evaluate('errors'),[]);
@@ -553,6 +562,11 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         !Object.hasOwn(full.appearance,'watchTimeChartType'),'removed chart preference is still exported');
       check(!regular.userData&&!Object.hasOwn(regular.settings,'cheeseWatchTimeDays'),
         'settings-only export included watch-time history');
+      check(!Object.hasOwn(regular.settings,'cheesePlaylists'),
+        'settings-only export included playlist contents');
+      check(full.userData?.storage?.cheesePlaylists?.lists?.[0]?.name==='테스트 목록'&&
+        full.userData.storage.cheesePlaylists.lists[0].items[0].thumb==='',
+        'full backup omitted or failed to sanitize playlists');
       check(full.userData?.storage?.cheeseWatchTimeDays?.[0]==='2026-10-13'&&
         full.userData.storage['cheeseWatchTime:2026-10-13']?.['-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|l']===3600&&
         full.userData.storage.cheeseWatchTimeChannels?.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?.name==='테스트 채널',
@@ -564,6 +578,10 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
           exported.settings.cheeseMultiviewLogPower===false&&exported.settings.cheeseVodRoleChatEnabled===true,
           'new settings missing from export');
         check(exported.settings.cheeseFeatureHidden?.chatHideSendButton===false,'send-button option missing from backup');
+        check(exported.settings.cheeseFollowingGroupFilterSelected==='custom:group-1'&&
+          exported.settings.cheesePlaylistPanelRect?.width===420&&
+          exported.settings.cheeseChzzkPlaylistPanelCollapsed===true,
+          'playlist panel or following filter state missing from export');
         check(exported.settings.cheeseFeatureHidden?.chatHideInputPlaceholder===true,'placeholder option missing from backup');
         check(exported.settings.cheeseFeatureHidden?.vodLocalChat===true,'local replay chat option missing from backup');
         check(exported.settings.cheeseMultiviewQuickPosition?.width===640,'multiview panel geometry missing from export');
@@ -599,6 +617,9 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseMultiviewQuickPosition:{left:30,top:40,width:700,height:420},
         cheeseFeatureHidden:{...saved.cheeseFeatureHidden,chatHideSendButton:true,chatHideInputPlaceholder:false,vodLocalChat:false},
         cheeseMultiviewMainBorder:true,
+        cheeseFollowingGroupFilterSelected:'fav',
+        cheesePlaylistPanelRect:{left:50,top:60,width:500,height:null},
+        cheeseChzzkPlaylistPanelCollapsed:false,
         cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false,
         cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62},
         cheeseMultiviewLiveCatchUpLimit:4},appearance:{multiviewChatSize:{w:720,h:180,topH:210}}};
@@ -621,6 +642,7 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       });
       payload.appearance.watchTimeChartType={main:'bar',detail:'line'};
       payload.userData={storage:{cheeseWatchTimeDays:['2026-10-12'],
+        cheesePlaylists:{v:1,lists:[{id:'playlist02',name:'복원 목록',items:[],createdAt:1,updatedAt:1}]},
         'cheeseWatchTime:2026-10-12':{'-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|v':1800},
         cheeseWatchTimeChannels:{'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa':{name:'복원 채널',image:'',verified:true,at:2}}}};
       payload.settings.cheeseMultiviewChatPopoutMode='platter';
@@ -648,6 +670,11 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         saved['cheeseWatchTime:2026-10-12']?.['-|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|v']===1800&&
         saved.cheeseWatchTimeChannels?.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?.name==='복원 채널',
         'watch-time full backup data was not imported');
+      check(saved.cheesePlaylists?.lists?.[0]?.name==='복원 목록',
+        'playlist contents were not imported');
+      check(saved.cheeseFollowingGroupFilterSelected==='fav'&&
+        saved.cheesePlaylistPanelRect?.width===500&&saved.cheeseChzzkPlaylistPanelCollapsed===false,
+        'playlist panel or following filter state was not imported');
       check(localStorage.getItem('cheeseWatchTimeChartType')===null,
         'removed watch-time chart preference was imported');
       check(saved.cheeseLiveTagFiltersDisabled?.[0]==='game'&&saved.cheeseFollowingLiveAutoExpand===false,

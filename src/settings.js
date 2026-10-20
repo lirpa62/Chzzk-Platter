@@ -85,9 +85,14 @@
     "cheeseHideBlockedComment",
     "cheeseCommentBlocks",
     "cheeseChatProfileBlockButton",
+    "cheeseChatProfileFollowDays",
+    "cheeseChatProfileMenuFold",
+    "cheeseChatProfileMenuFolded",
+    "cheeseChatProfileSide",
     "cheeseCommentNickMenu",
     "cheeseChatWordFilters",
     "cheeseLogPowerLogDays",
+    "cheeseLogPowerLogEnabled",
     "cheeseLogPowerLogDaysLast",
     "cheeseLogPowerStatsGroup",
     "cheeseLogPowerStatsGroupOrder",
@@ -134,6 +139,18 @@
     "cheeseChatDonationTools",
     "cheeseChatTimeSeekOffset",
     "cheeseWatchTime",
+    "cheesePlaylistMiniPlayer",
+    "cheesePlaylistMinimizeTarget",
+    "cheesePlaylistLibraryButton",
+    "cheesePlaylistLibraryTarget",
+    "cheesePlaylistLibraryOpen",
+    "cheesePlaylistPanelRect",
+    "cheeseMultiviewChatSide",
+    "cheeseMultiviewCustomLayouts",
+    "cheeseMultiviewLayoutPrefs",
+    "cheeseChzzkPlaylistMiniPlayer",
+    "cheeseChzzkPlaylistMinimizeTarget",
+    "cheeseChzzkPlaylistPanelCollapsed",
     "cheeseChatMoaActive",
     "cheeseFollowChannelTooltip",
     "cheeseFollowingLiveSortRemember",
@@ -252,6 +269,7 @@
     "cheeseFollowCustomGroups",
     "cheeseFollowGroupCollapsed",
     "cheeseFollowGroupCustomIcons",
+    "cheeseFollowGroupStyle",
     "cheeseFollowGroupOrder",
     "cheeseFollowGroupExcludedTags",
     "cheeseFollowGroupOfflineOverrides",
@@ -277,7 +295,11 @@
     "cheeseLiveTagFilterButton",
     "cheeseLiveTagFilters",
     "cheeseLiveTagFiltersDisabled",
+    "cheeseLiveTagFiltersFollowingDisabled",
     "cheeseFollowingLiveAutoExpand",
+    "cheeseFollowingGroupFilter",
+    "cheeseFollowingGroupFilterSelected",
+    "cheeseCardsPerRow",
     "cheeseLogPowerClickAction",
     "cheeseLogPowerEarningColor",
     "cheeseLogPowerPopupLimit",
@@ -287,6 +309,7 @@
     "cheeseMixerAlwaysOn",
     "cheeseMixerDefaultOn",
     "cheeseAudioMixer.autoSync",
+    "cheeseAutoSyncChannels",
     "cheeseMaxQuality",
     "cheeseMaxQualityTarget",
     "cheeseMaxQualityRespectManual",
@@ -1094,6 +1117,18 @@
       window.open(url, "_blank", "noopener");
     });
 
+  // 나만의 재생목록 편집 화면을 새 탭으로 연다(머리 아이콘·다시보기 탭 버튼).
+  for (const id of ["openPlaylistButton", "openPlaylist"]) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      const url = chrome.runtime.getURL("playlist.html");
+      if (chrome.tabs?.create) {
+        chrome.tabs.create({ url });
+        return;
+      }
+      window.open(url, "_blank", "noopener");
+    });
+  }
+
   // 채팅 리캡을 새 탭으로 연다.
   document.getElementById("openChatRecap")?.addEventListener("click", () => {
     const url = chrome.runtime.getURL("chatRecap.html");
@@ -1102,6 +1137,100 @@
       return;
     }
     window.open(url, "_blank", "noopener");
+  });
+
+  // 나만의 재생목록: 접은 패널을 재생바 모양으로 보이기(기본 켬).
+  const PLAYLIST_MINI_PLAYER_KEY = "cheesePlaylistMiniPlayer";
+  const playlistMiniToggle = document.querySelector("[data-playlist-mini-player]");
+  void (async () => {
+    try {
+      const data = await cachedStorageGet(PLAYLIST_MINI_PLAYER_KEY);
+      if (playlistMiniToggle) playlistMiniToggle.checked = data?.[PLAYLIST_MINI_PLAYER_KEY] !== false;
+    } catch {}
+  })();
+  playlistMiniToggle?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [PLAYLIST_MINI_PLAYER_KEY]: playlistMiniToggle.checked });
+    } catch {}
+  });
+
+  // 나만의 재생목록: 헤더/사이드바 버튼.
+  //   재생목록 버튼(재생 중이 아닐 때 목록 고르기): 켜기/끄기(기본 켬) + └ 위치
+  //   패널 최소화 버튼 위치(재생 중 최소화했을 때 다시 열기): 따로 정한다
+  // 위치는 헤더 기본 / 사이드바. 선택 표시는 .is-active 로 그린다(settings.css).
+  function bindPlaylistTarget(selector, valueAttr, storageKey, values = ["header", "sidebar"]) {
+    const [fallback, other] = values;
+    const group = document.querySelector(selector);
+    const paint = (value) => {
+      group?.querySelectorAll(`[${valueAttr}]`).forEach((button) => {
+        const on = button.getAttribute(valueAttr) === value;
+        button.setAttribute("aria-checked", String(on));
+        button.classList.toggle("is-active", on);
+      });
+    };
+    void (async () => {
+      try {
+        const data = await cachedStorageGet(storageKey);
+        paint(data?.[storageKey] === other ? other : fallback);
+      } catch {}
+    })();
+    group?.addEventListener("click", (event) => {
+      const button = event.target.closest(`[${valueAttr}]`);
+      if (!button || button.disabled) return;
+      const value = button.getAttribute(valueAttr) === other ? other : fallback;
+      paint(value);
+      try {
+        cachedStorageSet({ [storageKey]: value });
+      } catch {}
+    });
+    return group;
+  }
+  const PLAYLIST_LIBRARY_BUTTON_KEY = "cheesePlaylistLibraryButton";
+  const PLAYLIST_LIBRARY_TARGET_KEY = "cheesePlaylistLibraryTarget";
+  const PLAYLIST_MINIMIZE_TARGET_KEY = "cheesePlaylistMinimizeTarget";
+  const playlistLibraryToggle = document.querySelector("[data-playlist-library-button]");
+  const playlistLibraryTargetGroup = bindPlaylistTarget("[data-playlist-library-target]", "data-playlist-library-target-value", PLAYLIST_LIBRARY_TARGET_KEY);
+  // └ 카드 열기(재생목록 버튼에만): 호버(기본) / 클릭.
+  const playlistLibraryOpenGroup = bindPlaylistTarget("[data-playlist-library-open]", "data-playlist-library-open-value", "cheesePlaylistLibraryOpen", ["hover", "click"]);
+  bindPlaylistTarget("[data-playlist-minimize-target]", "data-playlist-minimize-target-value", PLAYLIST_MINIMIZE_TARGET_KEY);
+  // 치지직 재생목록(다시보기 재생목록 패널): 접은 패널 재생바(기본 켬) · 최소화 버튼 위치 — 나만의 재생목록과 따로.
+  const CHZZK_PLAYLIST_MINI_PLAYER_KEY = "cheeseChzzkPlaylistMiniPlayer";
+  const chzzkPlaylistMiniToggle = document.querySelector("[data-chzzk-playlist-mini-player]");
+  void (async () => {
+    try {
+      const data = await cachedStorageGet(CHZZK_PLAYLIST_MINI_PLAYER_KEY);
+      if (chzzkPlaylistMiniToggle) chzzkPlaylistMiniToggle.checked = data?.[CHZZK_PLAYLIST_MINI_PLAYER_KEY] !== false;
+    } catch {}
+  })();
+  chzzkPlaylistMiniToggle?.addEventListener("change", () => {
+    try {
+      cachedStorageSet({ [CHZZK_PLAYLIST_MINI_PLAYER_KEY]: chzzkPlaylistMiniToggle.checked });
+    } catch {}
+  });
+  bindPlaylistTarget("[data-chzzk-playlist-minimize-target]", "data-chzzk-playlist-minimize-target-value", "cheeseChzzkPlaylistMinimizeTarget");
+  // 재생목록 버튼을 끄면 └ 위치는 잠근다(값은 그대로 둔다).
+  function reflectPlaylistLibraryLock() {
+    const disabled = playlistLibraryToggle ? !playlistLibraryToggle.checked : false;
+    for (const group of [playlistLibraryTargetGroup, playlistLibraryOpenGroup]) {
+      group?.setAttribute("aria-disabled", String(disabled));
+      group?.closest(".settings-item")?.classList.toggle("is-locked", disabled);
+      group?.querySelectorAll("button").forEach((button) => {
+        button.disabled = disabled;
+      });
+    }
+  }
+  void (async () => {
+    try {
+      const data = await cachedStorageGet(PLAYLIST_LIBRARY_BUTTON_KEY);
+      if (playlistLibraryToggle) playlistLibraryToggle.checked = data?.[PLAYLIST_LIBRARY_BUTTON_KEY] !== false;
+    } catch {}
+    reflectPlaylistLibraryLock();
+  })();
+  playlistLibraryToggle?.addEventListener("change", () => {
+    reflectPlaylistLibraryLock();
+    try {
+      cachedStorageSet({ [PLAYLIST_LIBRARY_BUTTON_KEY]: playlistLibraryToggle.checked });
+    } catch {}
   });
 
   // 시청 시간 기록: 켜고 끄기(기본 꺼짐) + 통계 화면 열기.
@@ -1209,6 +1338,10 @@
   const FEATURE_HIDDEN_KEY = "cheeseFeatureHidden";
   // 미설정 시 기본 체크인 항목. 기존 동작을 유지해야 하는 영역도 여기에 포함한다.
   const DEFAULT_CHECKED = new Set([
+    // 재생목록 담기 버튼·채널 재생목록 미리보기는 켬이 기본(content.js 의 FEATURE_DEFAULT_TRUE 와 맞춘다).
+    "playlist",
+    "chzzkPlaylistPreview",
+    "chzzkPlaylistPanel",
     "sbFollowFavEnabled",
     "sbFollowGroupEnabled",
     // 즐겨찾기 버튼을 둘 페이지. 부모를 켜면 네 곳 모두가 기본이다.
@@ -1226,6 +1359,7 @@
     "searchVideos",
     "searchClips",
     "speedButton",
+    "qualityButton",
   ]);
   const inputs = Array.from(document.querySelectorAll("[data-feature]"));
   const CLIP_EDITOR_ARROW_STEP_KEY = "cheeseClipEditorArrowStepS";
@@ -2918,6 +3052,87 @@
     prefix: "videoFilter:",
     label: "비디오 필터",
   });
+
+  // ── 채널별 자동 따라잡기 ───────────────────────────────────────────────
+  // 플레이어의 실시간 따라잡기 버튼 우클릭 메뉴에서 정한 채널별 '항상 켜기·항상 끄기'.
+  // 저장값: { [channelId]: { on, name, at } }. 여기서 지우면 다시 위 '자동 따라잡기' 를 따른다.
+  (() => {
+    const AUTO_SYNC_CHANNELS_KEY = "cheeseAutoSyncChannels";
+    const list = document.querySelector("[data-auto-sync-channels-list]");
+    if (!list) return;
+    const imageCache = new Map();
+    async function channelImage(id) {
+      if (imageCache.has(id)) return imageCache.get(id);
+      let url = "";
+      try {
+        const res = await fetch(
+          `https://api.chzzk.naver.com/service/v1/channels/${encodeURIComponent(id)}`,
+          { credentials: "include" },
+        );
+        if (res.ok) url = String((await res.json())?.content?.channelImageUrl || "");
+      } catch {}
+      imageCache.set(id, url);
+      return url;
+    }
+    async function render() {
+      let map = {};
+      try {
+        const raw = (await chrome.storage.local.get(AUTO_SYNC_CHANNELS_KEY))?.[
+          AUTO_SYNC_CHANNELS_KEY
+        ];
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) map = raw;
+      } catch {}
+      const entries = Object.entries(map)
+        .filter(([id, entry]) => /^[0-9a-f]{32}$/i.test(id) && typeof entry?.on === "boolean")
+        .sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+      list.textContent = "";
+      if (!entries.length) {
+        const empty = document.createElement("p");
+        empty.className = "settings-exclude-empty";
+        empty.textContent = "채널별 설정이 없습니다.";
+        list.append(empty);
+        return;
+      }
+      for (const [id, entry] of entries) {
+        const row = document.createElement("div");
+        row.className = "settings-exclude-row";
+        row.dataset.autoSyncChannel = id;
+        const img = document.createElement("img");
+        img.alt = "";
+        img.loading = "lazy";
+        img.hidden = true;
+        const name = document.createElement("span");
+        name.className = "settings-exclude-name";
+        name.textContent = `${entry.name || `${id.slice(0, 8)}…`} · ${entry.on ? "항상 켜기" : "항상 끄기"}`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "해제";
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          try {
+            const raw = (await chrome.storage.local.get(AUTO_SYNC_CHANNELS_KEY))?.[
+              AUTO_SYNC_CHANNELS_KEY
+            ];
+            const next = raw && typeof raw === "object" ? { ...raw } : {};
+            delete next[id];
+            await chrome.storage.local.set({ [AUTO_SYNC_CHANNELS_KEY]: next });
+          } catch {}
+          await render();
+        });
+        row.append(img, name, button);
+        list.append(row);
+        void channelImage(id).then((url) => {
+          if (!url) return;
+          img.src = url;
+          img.hidden = false;
+        });
+      }
+    }
+    void render();
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area === "local" && changes[AUTO_SYNC_CHANNELS_KEY]) void render();
+    });
+  })();
 
   // ── 오디오 믹서 전역 기본값(채널 무관) ────────────────────────────────────
   const AUDIO_MIXER_PRESETS_KEY = "audioMixer:presets";
@@ -5328,6 +5543,12 @@
     ["[data-multiview-live-catch-up]", "cheeseMultiviewLiveCatchUp", true],
     ["[data-multiview-track-resize]", "cheeseMultiviewTrackResize", true],
     ["[data-following-live-auto-expand]", "cheeseFollowingLiveAutoExpand", false],
+    // 팔로잉 화면 그룹 필터 칩(기본 켬). 고른 칩(cheeseFollowingGroupFilterSelected)은 content.js 가 저장.
+    ["[data-following-group-filter]", "cheeseFollowingGroupFilter", true],
+    // 채팅 프로필 팝업 다듬기. 접힘 상태(cheeseChatProfileMenuFolded)는 팝업의 머리 버튼이 저장한다.
+    ["[data-chat-profile-follow-days]", "cheeseChatProfileFollowDays", false],
+    ["[data-chat-profile-menu-fold]", "cheeseChatProfileMenuFold", false],
+    ["[data-chat-profile-side]", "cheeseChatProfileSide", false],
     // 자동 따라잡기. 플레이어 버튼 우클릭 메뉴와 같은 키(content.js 가 열린 치지직 탭에 전한다).
     ["[data-live-auto-sync]", "cheeseAudioMixer.autoSync", false],
   ].forEach(([sel, key, defaultOn]) => {
@@ -5508,7 +5729,7 @@
     "gain-min-value",
     "cheeseMixerGainMin",
     [0.5, 0.25, 0.1, 0],
-    0.5,
+    0.1,
   );
   bindGainRangeSegmented(
     document.querySelector("[data-mixer-gain-max]"),
@@ -5583,7 +5804,7 @@
     "[data-mixer-global-gain-default-reset]",
   );
   let mixerGlobalGainDefault = { enabled: false, gain: 1 };
-  let mixerGlobalGainMinPct = 50;
+  let mixerGlobalGainMinPct = 10;
   let mixerGlobalGainMaxPct = 200;
   let mixerGlobalGainStepPct = 5;
 
@@ -5599,7 +5820,7 @@
   function normalizeMixerGlobalGainBounds(min, max, step) {
     const normalizedMin = [0, 0.1, 0.25, 0.5].includes(Number(min))
       ? Number(min)
-      : 0.5;
+      : 0.1;
     const normalizedMax = [2, 3].includes(Number(max)) ? Number(max) : 2;
     mixerGlobalGainMinPct = Math.round(normalizedMin * 100);
     mixerGlobalGainMaxPct = Math.round(normalizedMax * 100);
@@ -5890,7 +6111,7 @@
     "embed-clip-gain-min-value",
     "cheeseEmbedClipGainMin",
     [0.5, 0.25, 0.1, 0],
-    0.5,
+    0.1,
   );
   bindGainRangeSegmented(
     document.querySelector("[data-embed-clip-gain-max]"),
@@ -5941,7 +6162,7 @@
   );
   let embedClipDefaultGain = null;
   let embedClipDefaultPresetKey = "default";
-  let embedClipDefaultGainMinPct = 50;
+  let embedClipDefaultGainMinPct = 10;
   let embedClipDefaultGainMaxPct = 200;
   let embedClipDefaultGainStepPct = 5;
 
@@ -5965,7 +6186,7 @@
   function normalizeEmbedClipDefaultGainBounds(min, max, step) {
     const normalizedMin = [0, 0.1, 0.25, 0.5].includes(Number(min))
       ? Number(min)
-      : 0.5;
+      : 0.1;
     const normalizedMax = [2, 3].includes(Number(max)) ? Number(max) : 2;
     embedClipDefaultGainMinPct = Math.round(normalizedMin * 100);
     embedClipDefaultGainMaxPct = Math.round(normalizedMax * 100);
@@ -6139,7 +6360,7 @@
             Number(changes.cheeseEmbedClipGainMin.newValue),
           )
             ? Number(changes.cheeseEmbedClipGainMin.newValue)
-            : 0.5) * 100,
+            : 0.1) * 100,
         );
       }
       if (changes.cheeseEmbedClipGainMax) {
@@ -6460,6 +6681,24 @@
     },
   );
   // setupCfFavOrderEditor() 호출은 cfFavMeta/cfFavOrder(let) 선언 뒤로 옮겼다(TDZ 방지).
+
+  // 한 줄당 방송 개수(전체 방송·팔로잉 탭·카테고리). "0" = 자동(치지직 그대로). content.js 가 숫자로 읽는다.
+  bindStringSegmented(
+    document.querySelector("[data-cards-per-row]"),
+    "cards-per-row-value",
+    "cheeseCardsPerRow",
+    ["0", "2", "3", "4", "5", "6", "7"],
+    "0",
+  );
+
+  // 전용 팔로잉 그룹 구분 모양(세로줄/상자/구분선). 기본은 기존 세로줄.
+  bindStringSegmented(
+    document.querySelector("[data-cf-group-style]"),
+    "cf-group-style-value",
+    "cheeseFollowGroupStyle",
+    ["line", "box", "divider"],
+    "line",
+  );
 
   // 구역별 별표 버튼 표시 방식(항상/호버/숨김). 기본은 기존 동작인 호버.
   for (const section of ["favorites", "groups", "following"]) {
@@ -9929,38 +10168,11 @@
     }
   }
 
+  // 저장 키·카탈로그 정리는 채팅 리캡 화면과 같은 공용 처리(recordManage.js)에 맡긴다.
+  // ⚠ 본문 삭제 실패는 그쪽에서 던진다. 호출부가 목록에서 행을 지울지 되돌릴지 판단한다.
   async function removeRecapChannels(ids) {
-    const keys = [];
-    const byAccount = new Map();
-    for (const id of ids) {
-      const entry = recapManageChannels.get(id);
-      if (!entry) continue;
-      keys.push(...entry.keys);
-      if (!byAccount.has(entry.accountId)) byAccount.set(entry.accountId, []);
-      byAccount.get(entry.accountId).push(entry.channelId);
-    }
-    if (!keys.length) return;
-    // ⚠ 본문 삭제 실패는 삼키지 않는다. 호출부가 목록에서 행을 지울지 되돌릴지
-    //   판단해야 한다(지워지지 않았는데 행만 사라지면 화면과 저장소가 어긋난다).
-    await chrome.storage.local.remove(keys);
-    // 카탈로그에서도 그 채널을 빼야 목록이 다시 살아나지 않는다.
-    // 여기부터는 실패해도 본문은 이미 지워졌으므로 행은 없앤다(다음 열람 때 정리된다).
-    for (const [accountId, channels] of byAccount) {
-      const catalogKey = `chatRecapCatalog:${accountId}`;
-      try {
-        const stored = (await chrome.storage.local.get(catalogKey))?.[
-          catalogKey
-        ];
-        if (!stored || typeof stored !== "object") continue;
-        const next = { ...stored, channels: { ...(stored.channels || {}) } };
-        for (const channelId of channels) delete next.channels[channelId];
-        if (Object.keys(next.channels).length) {
-          await chrome.storage.local.set({ [catalogKey]: next });
-        } else {
-          await chrome.storage.local.remove(catalogKey);
-        }
-      } catch {}
-    }
+    const groups = ids.map((id) => recapManageChannels.get(id)).filter(Boolean);
+    await globalThis.CheeseRecordManage.chatRecap.remove(groups);
   }
 
   recapManageList?.addEventListener("change", syncRecapManageButtons);
@@ -10019,27 +10231,124 @@
     recapManageClear.textContent = "전체 삭제";
     recapManageClear.disabled = true;
     try {
-      await removeRecapChannels([...recapManageChannels.keys()]);
+      // 가져오기 완료 표식까지 비워 다시보기를 처음부터 다시 모을 수 있게 한다.
+      await globalThis.CheeseRecordManage.chatRecap.clearAll();
     } catch {
       recapManageClear.disabled = false;
       settingsToast("채팅 기록을 삭제하지 못했습니다.");
       return;
     }
-    // 가져오기 완료 표식까지 비워야 다시보기를 처음부터 다시 모을 수 있다.
-    try {
-      await chrome.storage.local.remove([
-        "chatRecapImportedVideos",
-        "chatRecapVerifiedVideosV2",
-        "chatRecapVodEventLinksV3",
-        "chatRecapHistoryRevisionV1",
-        "chatRecapNewVideosV1",
-      ]);
-    } catch {}
     settingsToast("저장된 채팅 기록을 모두 삭제했습니다.");
     void renderRecapManage();
   });
 
   if (recapManageRow) void renderRecapManage();
+
+  // ── 통나무파워 내역 기록 켜기/끄기(기본 켜짐) ─────────────────────────────
+  // 배경(background.js lpLogEnabled)이 이 값을 보고 새 기록·보유량 비교를 멈춘다.
+  const LOG_POWER_LOG_ENABLED_KEY = "cheeseLogPowerLogEnabled";
+  const logPowerLogEnabledInput = document.querySelector("[data-log-power-log-enabled]");
+  if (logPowerLogEnabledInput) {
+    (async () => {
+      let on = true;
+      try {
+        const data = await cachedStorageGet(LOG_POWER_LOG_ENABLED_KEY);
+        on = data?.[LOG_POWER_LOG_ENABLED_KEY] !== false;
+      } catch {}
+      logPowerLogEnabledInput.checked = on;
+    })();
+    logPowerLogEnabledInput.addEventListener("change", () => {
+      try {
+        cachedStorageSet({ [LOG_POWER_LOG_ENABLED_KEY]: logPowerLogEnabledInput.checked });
+      } catch {}
+    });
+  }
+
+  // ── 통나무파워 저장된 내역: 채널별 선택 삭제·전체 삭제 ──────────────────────
+  // 내 채팅 기록 '저장된 기록'과 같은 모양. 삭제는 배경의 단일 작성자에 맡긴다
+  // (recordManage.js logPower — 보유량 비교 기준도 함께 초기화한다).
+  const lpManageRow = document.querySelector("[data-lp-manage-row]");
+  const lpManageList = document.querySelector("[data-lp-manage-list]");
+  const lpManageDelete = document.querySelector("[data-lp-manage-delete]");
+  const lpManageClear = document.querySelector("[data-lp-manage-clear]");
+  let lpManageGroups = new Map();
+
+  function syncLpManageButtons() {
+    if (!lpManageDelete) return;
+    const checked = lpManageList ? lpManageList.querySelectorAll("input:checked").length : 0;
+    lpManageDelete.disabled = checked === 0;
+    lpManageDelete.textContent = checked ? `선택 삭제 (${checked})` : "선택 삭제";
+  }
+
+  async function renderLpManage() {
+    if (!lpManageList) return;
+    lpManageList.innerHTML = '<p class="settings-memo-empty">불러오는 중…</p>';
+    let groups = [];
+    try {
+      groups = await globalThis.CheeseRecordManage.logPower.collect();
+    } catch {}
+    lpManageGroups = new Map(groups.map((group) => [group.id, group]));
+    if (lpManageClear) lpManageClear.disabled = !groups.length;
+    lpManageList.innerHTML = groups.length
+      ? groups
+          .map(
+            (group) =>
+              `<div class="settings-memo-group" data-lp-row="${escapeHtml(group.id)}">` +
+              `<label class="settings-memo-channel">` +
+              `<input type="checkbox" value="${escapeHtml(group.id)}">` +
+              `<span>${escapeHtml(group.name || `채널 ${group.channelId.slice(0, 8)}`)}</span>` +
+              `<small>${escapeHtml(group.detail)}</small></label></div>`,
+          )
+          .join("")
+      : '<p class="settings-memo-empty">저장된 통나무파워 내역이 없습니다.</p>';
+    syncLpManageButtons();
+  }
+
+  lpManageList?.addEventListener("change", syncLpManageButtons);
+
+  lpManageDelete?.addEventListener("click", async () => {
+    const ids = [...lpManageList.querySelectorAll("input:checked")].map((input) => input.value);
+    const groups = ids.map((id) => lpManageGroups.get(id)).filter(Boolean);
+    if (!groups.length) return;
+    lpManageDelete.disabled = true;
+    try {
+      await globalThis.CheeseRecordManage.logPower.remove(groups);
+    } catch {
+      syncLpManageButtons();
+      settingsToast("통나무파워 내역을 삭제하지 못했습니다.");
+      return;
+    }
+    settingsToast(`${groups.length}개 채널의 통나무파워 내역을 삭제했습니다.`);
+    void renderLpManage();
+  });
+
+  // ⚠ 전체 삭제는 되돌릴 수 없다. 한 번 더 눌러야 실행한다(채팅 기록과 같은 방식).
+  lpManageClear?.addEventListener("click", async () => {
+    if (lpManageClear.dataset.armed !== "1") {
+      lpManageClear.dataset.armed = "1";
+      lpManageClear.textContent = "정말 전체 삭제할까요?";
+      setTimeout(() => {
+        if (!lpManageClear.isConnected) return;
+        delete lpManageClear.dataset.armed;
+        lpManageClear.textContent = "전체 삭제";
+      }, 3000);
+      return;
+    }
+    delete lpManageClear.dataset.armed;
+    lpManageClear.textContent = "전체 삭제";
+    lpManageClear.disabled = true;
+    try {
+      await globalThis.CheeseRecordManage.logPower.clearAll();
+    } catch {
+      lpManageClear.disabled = false;
+      settingsToast("통나무파워 내역을 삭제하지 못했습니다.");
+      return;
+    }
+    settingsToast("저장된 통나무파워 내역을 모두 삭제했습니다.");
+    void renderLpManage();
+  });
+
+  if (lpManageRow) void renderLpManage();
 
   // 자동 표시(캐시가 있을 때) + 하위 옵션(캐시가 없어도 자동 수집).
   // 상위(채팅 활성도)가 꺼져 있으면 둘 다, 자동 표시가 꺼져 있으면 자동 수집을 잠근다.
@@ -11043,6 +11352,9 @@
   const LIVE_TAG_FILTERS_KEY = "cheeseLiveTagFilters";
   // 꺼 둔 제외 항목(정규화한 키). content.js 와 같은 키.
   const LIVE_TAG_FILTERS_DISABLED_KEY = "cheeseLiveTagFiltersDisabled";
+  // 위 키 = 전체 방송에서 끈 항목, 이 키 = 팔로잉에서 끈 항목(content.js 와 같다. 없으면 위 키를 옮긴다).
+  const LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY = "cheeseLiveTagFiltersFollowingDisabled";
+  const LIVE_TAG_SCOPE_LABELS = { lives: "전체 방송", following: "팔로잉" };
   const LIVE_TAG_FILTER_BUTTON_KEY = "cheeseLiveTagFilterButton";
   const LIVE_VIEWER_COUNT_POSITION_KEY = "cheeseLiveViewerCountPosition";
   const LIVE_VIEWER_COUNT_INLINE_KEY = "cheeseLiveViewerCountInline";
@@ -11068,8 +11380,12 @@
     "[data-live-tag-remove-selected]",
   );
   const liveTagRemoveAll = document.querySelector("[data-live-tag-remove-all]");
+  const liveTagColumns = document.querySelector("[data-live-tag-columns]");
   let settingsLiveTagFilters = [];
-  let settingsLiveTagDisabled = new Set();
+  let settingsLiveTagDisabled = new Set(); // 전체 방송에서 끈 항목
+  let settingsLiveTagFollowingDisabled = new Set(); // 팔로잉에서 끈 항목
+  const settingsLiveTagDisabledFor = (scope) =>
+    scope === "following" ? settingsLiveTagFollowingDisabled : settingsLiveTagDisabled;
   const settingsLiveTagSelected = new Set();
 
   const LIVE_VIEWER_COUNT_POSITIONS = new Set([
@@ -11158,21 +11474,23 @@
     liveTagList.innerHTML = settingsLiveTagFilters
       .map((tag, index) => {
         const key = normalizeLiveTagFilter(tag);
-        const on = !settingsLiveTagDisabled.has(key);
+        const onLives = !settingsLiveTagDisabled.has(key);
+        const onFollowing = !settingsLiveTagFollowingDisabled.has(key);
+        const toggle = (scope, on) => `
+            <label class="settings-live-tag-toggle" title="${LIVE_TAG_SCOPE_LABELS[scope]} ${on ? "적용 중 · 눌러서 끄기" : "꺼 둠 · 눌러서 켜기"}">
+              <input type="checkbox" role="switch" data-live-tag-toggle="${index}" data-live-tag-scope="${scope}" ${
+                on ? "checked" : ""
+              } aria-label="${escapeHtml(tag)} ${LIVE_TAG_SCOPE_LABELS[scope]}에서 제외">
+              <i aria-hidden="true"></i>
+            </label>`;
         return `
-          <li class="settings-live-tag-row${on ? "" : " is-off"}">
+          <li class="settings-live-tag-row${onLives || onFollowing ? "" : " is-off"}">
             <label>
               <input type="checkbox" data-live-tag-select="${index}" ${
                 settingsLiveTagSelected.has(key) ? "checked" : ""
               }>
               <span>${escapeHtml(tag)}</span>
-            </label>
-            <label class="settings-live-tag-toggle" title="${on ? "적용 중 · 눌러서 끄기" : "꺼 둠 · 눌러서 켜기"}">
-              <input type="checkbox" role="switch" data-live-tag-toggle="${index}" ${
-                on ? "checked" : ""
-              } aria-label="${escapeHtml(tag)} 제외 적용">
-              <i aria-hidden="true"></i>
-            </label>
+            </label>${toggle("lives", onLives)}${toggle("following", onFollowing)}
             <button type="button" data-live-tag-remove="${index}" aria-label="${escapeHtml(
               tag,
             )} 제외 항목 삭제" title="삭제">
@@ -11192,6 +11510,23 @@
     const hasItems = settingsLiveTagFilters.length > 0;
     if (liveTagEmpty) liveTagEmpty.hidden = hasItems;
     if (liveTagBulk) liveTagBulk.hidden = !hasItems;
+    // 열 머리: 그 곳의 항목을 모두 켜고 끈다(모두 켜져 있으면 켜짐으로 보인다).
+    if (liveTagColumns) {
+      liveTagColumns.hidden = !hasItems;
+      // 목록의 스크롤 막대 폭만큼 비워 스위치 열과 맞춘다.
+      liveTagColumns.style.paddingRight = `${Math.max(0, liveTagList.offsetWidth - liveTagList.clientWidth)}px`;
+      liveTagColumns.querySelectorAll("[data-live-tag-scope-all]").forEach((input) => {
+        const scope = input.dataset.liveTagScopeAll;
+        const disabled = settingsLiveTagDisabledFor(scope);
+        const onCount = settingsLiveTagFilters.filter((tag) => !disabled.has(normalizeLiveTagFilter(tag))).length;
+        const all = hasItems && onCount === settingsLiveTagFilters.length;
+        input.checked = all;
+        input.setAttribute("aria-checked", onCount > 0 && !all ? "mixed" : String(all));
+        const label = `${LIVE_TAG_SCOPE_LABELS[scope]} 모두 ${all ? "끄기" : "켜기"}`;
+        input.setAttribute("aria-label", label);
+        input.closest("label")?.setAttribute("title", label);
+      });
+    }
     if (liveTagSelectedCount) {
       liveTagSelectedCount.textContent = count ? `${count}개 선택됨` : "";
     }
@@ -11208,10 +11543,12 @@
   function saveSettingsLiveTagFilters(next) {
     settingsLiveTagFilters = sanitizeLiveTagFilters(next);
     settingsLiveTagDisabled = sanitizeLiveTagFiltersDisabled([...settingsLiveTagDisabled]);
+    settingsLiveTagFollowingDisabled = sanitizeLiveTagFiltersDisabled([...settingsLiveTagFollowingDisabled]);
     renderSettingsLiveTagFilters();
     cachedStorageSet({
       [LIVE_TAG_FILTERS_KEY]: settingsLiveTagFilters,
       [LIVE_TAG_FILTERS_DISABLED_KEY]: [...settingsLiveTagDisabled],
+      [LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY]: [...settingsLiveTagFollowingDisabled],
     });
   }
 
@@ -11237,8 +11574,11 @@
       liveTagInput?.focus();
       return;
     }
-    // 꺼 둔 항목을 다시 추가하면 켠다.
-    added.forEach((tag) => settingsLiveTagDisabled.delete(normalizeLiveTagFilter(tag)));
+    // 꺼 둔 항목을 다시 추가하면 두 곳 모두 켠다.
+    added.forEach((tag) => {
+      settingsLiveTagDisabled.delete(normalizeLiveTagFilter(tag));
+      settingsLiveTagFollowingDisabled.delete(normalizeLiveTagFilter(tag));
+    });
     saveSettingsLiveTagFilters([...settingsLiveTagFilters, ...added]);
     if (liveTagInput) liveTagInput.value = "";
     liveTagInput?.focus();
@@ -11252,8 +11592,9 @@
         settingsLiveTagFilters[Number(toggle.dataset.liveTagToggle)],
       );
       if (!key) return;
-      if (toggle.checked) settingsLiveTagDisabled.delete(key);
-      else settingsLiveTagDisabled.add(key);
+      const disabled = settingsLiveTagDisabledFor(toggle.dataset.liveTagScope);
+      if (toggle.checked) disabled.delete(key);
+      else disabled.add(key);
       saveSettingsLiveTagFilters(settingsLiveTagFilters);
       return;
     }
@@ -11277,6 +11618,16 @@
     saveSettingsLiveTagFilters(
       settingsLiveTagFilters.filter((_, itemIndex) => itemIndex !== index),
     );
+  });
+
+  // 열 머리 스위치: 그 곳의 항목을 모두 켜거나 모두 끈다.
+  liveTagColumns?.addEventListener("change", (event) => {
+    const input = event.target.closest?.("[data-live-tag-scope-all]");
+    if (!input) return;
+    const disabled = settingsLiveTagDisabledFor(input.dataset.liveTagScopeAll);
+    disabled.clear();
+    if (!input.checked) settingsLiveTagFilters.forEach((tag) => disabled.add(normalizeLiveTagFilter(tag)));
+    saveSettingsLiveTagFilters(settingsLiveTagFilters);
   });
 
   liveTagSelectAll?.addEventListener("change", () => {
@@ -11322,6 +11673,7 @@
         LIVE_VIEWER_COUNT_POSITION_KEY,
         LIVE_VIEWER_COUNT_INLINE_KEY,
         LIVE_VIEWER_COUNT_HIDDEN_KEY,
+        LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY,
       ]);
       settingsLiveTagFilters = sanitizeLiveTagFilters(
         data?.[LIVE_TAG_FILTERS_KEY],
@@ -11329,6 +11681,14 @@
       settingsLiveTagDisabled = sanitizeLiveTagFiltersDisabled(
         data?.[LIVE_TAG_FILTERS_DISABLED_KEY],
       );
+      // 팔로잉 키가 없으면 예전처럼 '꺼 둔 항목은 두 곳 모두 꺼짐'으로 옮겨 둔다.
+      const hasFollowing = Array.isArray(data?.[LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY]);
+      settingsLiveTagFollowingDisabled = sanitizeLiveTagFiltersDisabled(
+        hasFollowing ? data[LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY] : [...settingsLiveTagDisabled],
+      );
+      if (!hasFollowing && settingsLiveTagFollowingDisabled.size) {
+        cachedStorageSet({ [LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY]: [...settingsLiveTagFollowingDisabled] });
+      }
       if (liveTagFilterButtonInput) {
         liveTagFilterButtonInput.checked =
           data?.[LIVE_TAG_FILTER_BUTTON_KEY] === true;
@@ -11346,6 +11706,7 @@
     } catch {
       settingsLiveTagFilters = [];
       settingsLiveTagDisabled = new Set();
+      settingsLiveTagFollowingDisabled = new Set();
       if (liveTagFilterButtonInput) liveTagFilterButtonInput.checked = false;
       reflectLiveViewerCountPosition("native");
     }
@@ -11355,7 +11716,8 @@
   if (chrome.storage?.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (changes[LIVE_TAG_FILTERS_KEY] || changes[LIVE_TAG_FILTERS_DISABLED_KEY]) {
+      if (changes[LIVE_TAG_FILTERS_KEY] || changes[LIVE_TAG_FILTERS_DISABLED_KEY] ||
+          changes[LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY]) {
         if (changes[LIVE_TAG_FILTERS_KEY]) {
           settingsLiveTagFilters = sanitizeLiveTagFilters(
             changes[LIVE_TAG_FILTERS_KEY].newValue,
@@ -11365,6 +11727,11 @@
           changes[LIVE_TAG_FILTERS_DISABLED_KEY]
             ? changes[LIVE_TAG_FILTERS_DISABLED_KEY].newValue
             : [...settingsLiveTagDisabled],
+        );
+        settingsLiveTagFollowingDisabled = sanitizeLiveTagFiltersDisabled(
+          changes[LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY]
+            ? changes[LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY].newValue
+            : [...settingsLiveTagFollowingDisabled],
         );
         renderSettingsLiveTagFilters();
       }
@@ -11430,6 +11797,7 @@
   const SETTINGS_IMPORT_MAX_BYTES = 256 * 1024 * 1024;
   const SETTINGS_TRANSFER_KEYS = new Set(SETTINGS_STORAGE_KEYS);
   const SETTINGS_FULL_DATA_KEYS = new Set([
+    "cheesePlaylists",
     "cheeseClipVault", // 계정별 저장 이전의 레거시 보관함
     "cheeseTimelineMemoV1",
     "cheeseLogPowerLog",
@@ -11585,6 +11953,25 @@
   }
 
   function normalizeImportedSettingValue(key, value) {
+    if (key === "cheeseFollowingGroupFilterSelected") {
+      return typeof value === "string" &&
+        (value === "" || value === "fav" || /^custom:[a-zA-Z0-9_-]{1,80}$/.test(value))
+        ? value : undefined;
+    }
+    if (key === "cheesePlaylistPanelRect") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+      const { left, top, width, height } = value;
+      if (![left, top, width].every((n) => typeof n === "number" && Number.isFinite(n)) ||
+          width < 240 || width > 4000 || Math.abs(left) > 10000 || Math.abs(top) > 10000 ||
+          (height !== null && height !== undefined &&
+            (typeof height !== "number" || !Number.isFinite(height) || height < 180 || height > 4000))) {
+        return undefined;
+      }
+      return { left, top, width, height: height ?? null };
+    }
+    if (key === "cheeseChzzkPlaylistPanelCollapsed") {
+      return typeof value === "boolean" ? value : undefined;
+    }
     if (key === MULTIVIEW_CHAT_SIZE_KEY) {
       return normalizeTransferMultiviewChatSize(value) || undefined;
     }
@@ -11621,10 +12008,25 @@
     if (key === "cheeseScreenshotNameFormat") {
       return typeof value === "string" && value.length <= 200 ? value : undefined;
     }
+    // 내 배치: 모양 검사는 멀티뷰가 읽을 때 한다(multiviewLayouts normalizeCustomLayout). 여기서는 크기만.
+    if (key === "cheeseMultiviewCustomLayouts") {
+      return Array.isArray(value) && value.length <= 30 && JSON.stringify(value).length <= 60000 &&
+        value.every((item) => item && typeof item === "object" && !Array.isArray(item))
+        ? cloneSafeTransferValue(value)
+        : undefined;
+    }
+    // 기본 배치 설정: { hidden: [id], defaults: { 채널 수: id } }. 모양 검사는 멀티뷰가 읽을 때 한다.
+    if (key === "cheeseMultiviewLayoutPrefs") {
+      return value && typeof value === "object" && !Array.isArray(value) &&
+        JSON.stringify(value).length <= 20000 ? cloneSafeTransferValue(value) : undefined;
+    }
+    if (key === "cheeseMultiviewChatSide") {
+      return ["right", "left", "bottom", "top", "inset"].includes(value) ? value : undefined;
+    }
     if (key === "cheeseMultiviewTrackResize" || key === "cheeseFollowingLiveAutoExpand") {
       return typeof value === "boolean" ? value : undefined;
     }
-    if (key === "cheeseLiveTagFiltersDisabled") {
+    if (key === "cheeseLiveTagFiltersDisabled" || key === "cheeseLiveTagFiltersFollowingDisabled") {
       return Array.isArray(value) && value.length <= 500
         ? [...new Set(value.filter((tag) => typeof tag === "string" && tag.length <= 200)
           .map(normalizeLiveTagFilter).filter(Boolean))]
@@ -11835,6 +12237,13 @@
   }
 
   function normalizeWatchTimeFullData(key, value) {
+    if (key === "cheesePlaylists") {
+      if (!value || typeof value !== "object" || Array.isArray(value) ||
+          value.v !== 1 || !Array.isArray(value.lists) || value.lists.length > 200 ||
+          value.lists.some((list) => !list || typeof list !== "object" ||
+            !Array.isArray(list.items) || list.items.length > 1000)) return undefined;
+      return globalThis.CheesePlaylistStore?.normalize(value);
+    }
     if (key === "cheeseWatchTimeDays") {
       return Array.isArray(value) && value.length <= 20000 &&
         value.every((day) => typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day))
@@ -12232,6 +12641,13 @@
         imported.cheeseMultiviewBadgeChatKeepPopupOpen = false;
       } else if (imported.cheeseMultiviewBadgeChatKeepPopupOpen === true) {
         imported.cheeseMultiviewBadgeChatHidePillButton = false;
+      }
+      // 예전 백업(팔로잉 키 없음)은 꺼 둔 항목이 두 곳 모두 꺼져 있던 때다 → 팔로잉에도 그대로.
+      if (
+        imported[LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY] === undefined &&
+        imported[LIVE_TAG_FILTERS_DISABLED_KEY] !== undefined
+      ) {
+        imported[LIVE_TAG_FILTERS_FOLLOWING_DISABLED_KEY] = [...imported[LIVE_TAG_FILTERS_DISABLED_KEY]];
       }
       if (
         imported[LIVE_VIEWER_COUNT_POSITION_KEY] === undefined &&
@@ -13574,6 +13990,7 @@
     "tabMute",
     "screenshot",
     "streamStats",
+    "quality",
   ];
   const PLAYER_BTN_LABELS = {
     streamStats: "스트림 정보",
@@ -13585,6 +14002,7 @@
     rewind: "되감기",
     forward: "앞으로",
     sync: "실시간 따라잡기",
+    quality: "화질 바꾸기",
   };
   // 네이티브(이동 불가) 칩: [클래스, 라벨, noAnchor?]. 우리 버튼을 이 칩들 사이로 끼운다.
   // 믹서/필터는 우리 버튼이지만 볼륨 래핑·좌측 고정이라 이동 불가 칩으로만 노출.

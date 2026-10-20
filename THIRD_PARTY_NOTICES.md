@@ -61,11 +61,19 @@ conditions of any kind. See the Apache License 2.0 text for details.
 
 ## Lucide Icons
 
-This extension includes the Lucide `apple`, `armchair`, `arrow-up`,
-`chevron-down`, `eye`, `eye-off`, `folder`, `funnel-x`, `gamepad-2`,
-`grip-vertical`, `heart`, `image`, `monitor`, `music-2`, `pencil`, `plus`,
-`picture-in-picture-2`, `settings-2`, `smartphone`, `sparkles`, `star`,
-`trash-2`, `users`, and `x` SVG icons.
+This extension includes the following Lucide SVG icons: `apple`, `archive`,
+`armchair`, `arrow-big-up`, `arrow-left`, `arrow-up`, `arrow-up-down`,
+`book-open`, `bookmark`, `camera`, `cat`, `check`, `chevron-down`,
+`chevron-up`, `chevrons-down`, `chevrons-up`, `clock`, `coffee`, `crown`,
+`download`, `eye`, `eye-off`, `file-text`, `flame`, `folder`, `funnel-x`,
+`gamepad-2`, `ghost`, `gift`, `grip-vertical`, `heart`, `history`, `image`,
+`info`, `layout-grid`, `list`, `list-plus`, `list-video`, `loader-circle`,
+`maximize-2`, `mic`, `monitor`, `moon`, `move-diagonal-2`, `music-2`,
+`notebook-pen`, `palette`, `panels-top-left`, `pause`, `pencil`,
+`picture-in-picture-2`, `play`, `plus`, `rotate-ccw`, `rotate-cw`, `search`,
+`settings-2`, `shield`, `smartphone`, `smile`, `sparkles`, `square`, `star`,
+`sun`, `sword`, `trash-2`, `trophy`, `tv`, `tv-minimal-play`, `users`,
+`volume-2`, `volume-x`, `x`, and `zap`.
 
 - Project: https://github.com/lucide-icons/lucide
 - License: ISC License

@@ -29,7 +29,8 @@ assert.match(content, /data\.type === "REQUEST_MULTIVIEW_QUALITY"[\s\S]*?forward
 assert.match(content, /data\.type === "SET_MULTIVIEW_QUALITY"[\s\S]*?forwardMultiviewQualityCommand/);
 assert.match(content, /Number\(value\) >= 144 && Number\(value\) <= 4320/);
 assert.match(mixer, /locked: Boolean\(lockedQuality\)/);
-assert.match(mixer, /snapshot\.locked && data\.quality !== snapshot\.lockedQuality/);
+assert.match(mixer, /snapshot\.locked && value !== snapshot\.lockedQuality\) return "quality-locked";/);
+assert.match(mixer, /const reason = applyPlayerQualityChoice\(data\.quality, \{ multiview: true \}\);/);
 
 const cellStatusStart = watch.indexOf("  function setCellStatus(");
 const cellStatusEnd = watch.indexOf("  function renderCellOverlay(", cellStatusStart);

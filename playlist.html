@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>치즈 플래터 - 나만의 재생목록</title>
+    <script src="src/themeInit.js"></script>
+    <link rel="stylesheet" href="src/popup.css" />
+    <link rel="stylesheet" href="src/recordManage.css" />
+    <link rel="stylesheet" href="src/playlist.css" />
+  </head>
+  <body>
+    <main class="pl-shell">
+      <header class="pl-header">
+        <div>
+          <h1>나만의 재생목록</h1>
+          <p class="pl-subtitle">
+            다시보기와 클립을 모아 차례로 재생합니다. 재생은 치지직 화면에서 하고, 끝나면 다음 항목으로
+            넘어갑니다. 목록은 이 브라우저에만 저장되며, 내보내기·불러오기로 다른 사람과 나눌 수 있습니다.
+          </p>
+        </div>
+        <div class="pl-header-actions">
+          <button type="button" class="pl-button" id="plImport">불러오기</button>
+          <button type="button" class="pl-button pl-icon-button" id="plTheme" aria-label="라이트/다크 모드 전환"></button>
+        </div>
+      </header>
+
+      <div class="pl-layout">
+        <!-- 재생목록 목록 -->
+        <aside class="pl-panel pl-lists" aria-labelledby="plListsTitle">
+          <div class="pl-panel-head">
+            <h2 id="plListsTitle">재생목록</h2>
+            <button type="button" class="pl-button pl-primary" id="plNewList">새 재생목록</button>
+          </div>
+          <ul class="pl-list-nav" id="plListNav" role="listbox" aria-label="재생목록"></ul>
+          <p class="pl-empty" id="plNoLists" hidden>아직 재생목록이 없습니다. '새 재생목록'으로 만들거나 공유받은 목록을 불러오세요.</p>
+        </aside>
+
+        <!-- 고른 재생목록 -->
+        <section class="pl-panel pl-detail" id="plDetail" aria-label="재생목록 내용" hidden>
+          <div class="pl-detail-head">
+            <input type="text" class="pl-name-input" id="plName" maxlength="60" aria-label="재생목록 이름" />
+            <p class="pl-detail-meta" id="plMeta"></p>
+            <div class="pl-detail-actions">
+              <button type="button" class="pl-button pl-primary" id="plPlay">처음부터 재생</button>
+              <button type="button" class="pl-button" id="plShuffle">섞어서 재생</button>
+              <div class="pl-menu-wrap">
+                <button type="button" class="pl-button" id="plExport" aria-haspopup="menu" aria-expanded="false">내보내기</button>
+                <div class="pl-menu" id="plExportMenu" role="menu" hidden>
+                  <button type="button" role="menuitem" data-export="code">공유 코드 복사</button>
+                  <button type="button" role="menuitem" data-export="file">파일로 저장</button>
+                  <button type="button" role="menuitem" data-export="all">모든 재생목록 파일로 저장</button>
+                </div>
+              </div>
+              <button type="button" class="pl-button pl-danger" id="plDeleteList">목록 삭제</button>
+            </div>
+          </div>
+
+          <div class="pl-select-bar" id="plSelectBar" hidden>
+            <span id="plSelectCount"></span>
+            <button type="button" class="pl-button" id="plSelectNone">선택 해제</button>
+            <button type="button" class="pl-button pl-danger" id="plDeleteSelected">선택 삭제</button>
+          </div>
+          <ol class="pl-items" id="plItems" aria-label="항목"></ol>
+          <p class="pl-empty" id="plNoItems" hidden>비어 있습니다. 오른쪽에서 다시보기·클립을 추가하거나, 치지직에서 재생목록 버튼으로 담으세요.</p>
+          <p class="pl-hint">손잡이를 끌거나 Alt+↑/↓ 로 순서를 바꿉니다. 시작 시간은 '1:23:45'처럼 적습니다.</p>
+        </section>
+
+        <!-- 항목 추가 -->
+        <section class="pl-panel pl-add" id="plAdd" aria-labelledby="plAddTitle" hidden>
+          <div class="pl-panel-head">
+            <h2 id="plAddTitle">추가</h2>
+          </div>
+          <div class="pl-tabs" role="tablist" aria-label="추가 방법" id="plAddTabs">
+            <button type="button" role="tab" data-add-tab="url" aria-selected="true">주소</button>
+            <button type="button" role="tab" data-add-tab="video" aria-selected="false">다시보기</button>
+            <button type="button" role="tab" data-add-tab="clip" aria-selected="false">클립</button>
+          </div>
+          <div class="pl-tab-body" data-add-body="url">
+            <label class="pl-field-label" for="plUrls">치지직 다시보기·클립 주소(한 줄에 하나)</label>
+            <textarea id="plUrls" class="pl-textarea" rows="6" placeholder="https://chzzk.naver.com/video/15679779?currentTime=10674&#10;https://chzzk.naver.com/clips/..."></textarea>
+            <p class="pl-field-help">다시보기 주소의 currentTime 은 시작 시간이 됩니다. 아래 미리보기에서 시작 시간을 시:분:초로 고칠 수 있습니다.</p>
+            <ul class="pl-url-preview" id="plUrlPreview" aria-label="주소 미리보기" hidden></ul>
+            <div class="pl-row-end">
+              <span class="pl-status" id="plUrlStatus" role="status"></span>
+              <button type="button" class="pl-button pl-primary" id="plAddUrls">추가</button>
+            </div>
+          </div>
+          <div class="pl-tab-body" data-add-body="video" hidden>
+            <div class="pl-tab-tools">
+              <div class="pl-segmented" role="radiogroup" aria-label="다시보기 목록" id="plVideoSource">
+                <button type="button" role="radio" data-video-source="following" aria-checked="true">팔로잉</button>
+                <button type="button" role="radio" data-video-source="popular" aria-checked="false">인기</button>
+                <button type="button" role="radio" data-video-source="latest" aria-checked="false">최신</button>
+                <button type="button" role="radio" data-video-source="vault" aria-checked="false">보관함</button>
+              </div>
+              <div class="pl-segmented pl-view-toggle" role="radiogroup" aria-label="보기 방식" id="plVideoView">
+                <button type="button" role="radio" data-result-view="grid" aria-checked="true" aria-label="그리드로 보기" title="그리드로 보기">
+                  <!-- lucide layout-grid -->
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+                </button>
+                <button type="button" role="radio" data-result-view="list" aria-checked="false" aria-label="목록으로 보기" title="목록으로 보기">
+                  <!-- lucide list -->
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/></svg>
+                </button>
+              </div>
+            </div>
+            <!-- 입력하면 채널을 제안하고(고르면 그 채널 다시보기), Enter 는 다시보기 검색(치즈 플래터 재정렬). 멀티뷰 고르기 화면과 같다. -->
+            <div class="pl-video-search-wrap">
+              <form class="pl-search" id="plVideoSearch">
+                <input type="search" maxlength="100" placeholder="다시보기·채널 검색" aria-label="다시보기·채널 검색"
+                  role="combobox" aria-autocomplete="list" aria-controls="plVideoChannelPopover" aria-expanded="false" autocomplete="off" />
+                <button type="submit" class="pl-button">검색</button>
+              </form>
+              <div class="mv-video-channel-popover" id="plVideoChannelPopover" role="listbox" aria-label="채널 제안" hidden></div>
+            </div>
+            <div class="pl-video-scope" id="plVideoScope" hidden>
+              <span id="plVideoScopeText"></span>
+              <button type="button" class="pl-icon-only" id="plVideoScopeClear" aria-label="검색 지우기" title="검색 지우기">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+              <div class="pl-video-rerank" id="plVideoRerank" hidden></div>
+            </div>
+            <ul class="pl-cards" id="plVideoResults" aria-label="다시보기 결과(누르면 담기/빼기)"></ul>
+            <div class="pl-row-end">
+              <span class="pl-status" id="plVideoStatus" role="status"></span>
+              <button type="button" class="pl-button" id="plVideoMore" hidden>더 보기</button>
+            </div>
+          </div>
+          <div class="pl-tab-body" data-add-body="clip" hidden>
+            <div class="pl-tab-tools">
+              <div class="pl-segmented" role="radiogroup" aria-label="클립 목록" id="plClipSource">
+                <button type="button" role="radio" data-clip-source="vault" aria-checked="true">클립 보관함</button>
+                <button type="button" role="radio" data-clip-source="channel" aria-checked="false">채널 클립</button>
+              </div>
+            </div>
+            <form class="pl-search" id="plClipChannelSearch" hidden>
+              <input type="search" maxlength="60" placeholder="채널 이름" aria-label="채널 이름" />
+              <button type="submit" class="pl-button">찾기</button>
+            </form>
+            <ul class="pl-channels" id="plClipChannels" aria-label="채널" hidden></ul>
+            <div class="pl-channel-head" id="plClipChannelHead" hidden>
+              <strong></strong>
+              <div class="pl-segmented" role="radiogroup" aria-label="클립 정렬" id="plClipOrder">
+                <button type="button" role="radio" data-clip-order="RECENT" aria-checked="true">최신</button>
+                <button type="button" role="radio" data-clip-order="POPULAR" aria-checked="false">인기</button>
+              </div>
+            </div>
+            <ul class="pl-cards is-clip-grid" id="plClipResults" aria-label="클립 결과(누르면 담기/빼기)"></ul>
+            <div class="pl-row-end">
+              <span class="pl-status" id="plClipStatus" role="status"></span>
+              <button type="button" class="pl-button" id="plClipMore" hidden>더 보기</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <div class="pl-toast" id="plToast" role="status" hidden></div>
+    <input type="file" id="plFileInput" accept="application/json,.json" hidden />
+    <script src="src/recordManage.js"></script>
+    <script src="src/playlistStore.js"></script>
+    <script src="src/multiviewSources.js"></script>
+    <script src="src/multiviewVideoSearchControls.js"></script>
+    <script src="src/playlist.js"></script>
+  </body>
+</html>

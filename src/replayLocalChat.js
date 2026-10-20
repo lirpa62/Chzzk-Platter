@@ -797,9 +797,10 @@
       return match?.[1] || "";
     }
 
+    // ⚠ 첫 _content_ 만 보면 헤더 안 같은 이름 요소를 잡을 수 있다. '_content_ 바로 아래
+    //   _list_' 를 한 번에 찾는다.
     function findList(aside) {
-      const content = aside?.querySelector("[class*='_content_']");
-      return content?.querySelector(":scope > [class*='_list_']") ||
+      return aside?.querySelector("[class*='_content_'] > [class*='_list_']") ||
         aside?.querySelector("[class*='vod_chatting_list_container'], [role='log']");
     }
 
@@ -943,6 +944,18 @@
       });
     }
 
+    // 입력창은 채팅 목록(_content_)의 부모 맨 끝에 붙인다(헤더·목록과 같은 세로 줄).
+    // ⚠ 예전에는 aside 바로 아래 _container_ 를 찾았다. 치지직이 그 위에 감싸는 층
+    //   (_stack_, position:absolute)을 넣으면서 못 찾고 aside 에 붙어, 입력창이 헤더
+    //   자리에 겹쳐 보였다(실측: aside > _stack_ > _container_ > _header_ + _content_).
+    function composerContainer(aside) {
+      // 헤더 안에도 _content_ 가 있을 수 있어, 실제 채팅 목록을 품은 _content_ 를 기준으로 한다.
+      const content = findList(aside)?.closest("[class*='_content_']");
+      const parent = content?.parentElement;
+      if (parent && parent !== aside && aside.contains(parent)) return parent;
+      return aside.querySelector(":scope > [class*='_container_']") || aside;
+    }
+
     function attachAside(aside) {
       const list = findList(aside);
       if (!list) return false;
@@ -960,7 +973,7 @@
             scheduleReconcile();
           }
         }, session.getIdentity());
-        const container = aside.querySelector(":scope > [class*='_container_']") || aside;
+        const container = composerContainer(aside);
         if (!container.querySelector(".live_chatting_area")) container.append(composer);
         // 광고 중에 새로 붙는 경우도 있다. 붙이자마자 한 번 맞춘다.
         updateComposerAvailability();

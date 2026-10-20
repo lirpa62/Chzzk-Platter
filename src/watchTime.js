@@ -561,18 +561,33 @@
   // 바깥(행·창이 아닌 곳)을 누르면 닫는다. 달력 등 다른 떠 있는 것은 각자 처리한다.
   document.addEventListener("pointerdown", (event) => {
     if ($("wtDetail").hidden) return;
-    if (event.target.closest?.("#wtDetail, #wtChannelRows tr[data-channel]")) return;
+    // 확인 모달(.crm-overlay) 위를 누르는 것도 바깥이 아니다(삭제 확인 중 창이 닫히지 않게).
+    if (event.target.closest?.("#wtDetail, #wtChannelRows tr[data-channel], .crm-overlay")) return;
     closeDetail();
   });
+  // 브라우저 confirm 대신 페이지 스타일 확인 모달(recordManage.js). 못 불렀으면 confirm 으로.
+  const confirmDelete = (options) =>
+    globalThis.CheeseRecordManage?.confirm(options) ??
+    Promise.resolve(confirm(`${options.title}\n${options.message}`));
   $("wtDetailDelete").addEventListener("click", async () => {
     const id = state.channelId;
-    if (!id || !confirm(`'${channelName(id)}' 채널의 시청 시간 기록을 모두 지울까요? 되돌릴 수 없습니다.`)) return;
+    if (!id) return;
+    const ok = await confirmDelete({
+      title: "이 채널 기록 지우기",
+      message: `'${channelName(id)}' 채널의 시청 시간 기록을 모두 지웁니다.\n지운 기록은 되돌릴 수 없습니다.`,
+    });
+    if (!ok) return;
     await deleteRecords(id);
     state.channelId = "";
     await load();
   });
   $("wtClearAll").addEventListener("click", async () => {
-    if (!confirm("시청 시간 기록을 모두 지울까요? 되돌릴 수 없습니다.")) return;
+    const ok = await confirmDelete({
+      title: "전체 기록 지우기",
+      message: "시청 시간 기록을 모두 지웁니다.\n지운 기록은 되돌릴 수 없습니다.",
+      confirmLabel: "전체 지우기",
+    });
+    if (!ok) return;
     await deleteRecords("");
     await load();
   });

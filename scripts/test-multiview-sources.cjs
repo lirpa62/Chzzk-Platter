@@ -701,7 +701,11 @@ async function test(name, run) {
     const end = background.indexOf("\nasync function fetchMultiviewApi", start);
     assert.ok(start >= 0 && end > start, "멀티뷰 URL 검증 함수를 찾지 못했다");
     const channelVideosDeclaration = background.match(/const MULTIVIEW_CHANNEL_VIDEOS_RE =\s*[^;]+;/)?.[0] || "";
-    const helpers = vm.runInNewContext(`${channelVideosDeclaration}\n${background.slice(start, end)}\n({ validMultiviewApiQuery, preserveFollowingVideoNextNoPrecision })`);
+    const channelClipsDeclaration = background.match(/const MULTIVIEW_CHANNEL_CLIPS_RE =\s*[^;]+;/)?.[0] || "";
+    const channelInfoDeclaration = background.match(/const MULTIVIEW_CHANNEL_INFO_RE =\s*[^;]+;/)?.[0] || "";
+    const liveDetailDeclaration = background.match(/const MULTIVIEW_LIVE_DETAIL_RE =\s*[^;]+;/)?.[0] || "";
+    const categoryLivesDeclaration = background.match(/const MULTIVIEW_CATEGORY_LIVES_RE =\s*[^;]+;/)?.[0] || "";
+    const helpers = vm.runInNewContext(`${channelVideosDeclaration}\n${channelClipsDeclaration}\n${channelInfoDeclaration}\n${liveDetailDeclaration}\n${categoryLivesDeclaration}\n${background.slice(start, end)}\n({ validMultiviewApiQuery, preserveFollowingVideoNextNoPrecision })`);
     const { validMultiviewApiQuery: valid, preserveFollowingVideoNextNoPrecision: preserveNextNo } = helpers;
     const base = "https://api.chzzk.naver.com/service/v1/lives?size=40";
     assert.equal(valid(new URL(base)), true);
@@ -756,17 +760,123 @@ async function test(name, run) {
     assert.equal(valid(new URL(channelVideos)), true);
     assert.equal(valid(new URL(`${channelVideos}&unexpected=1`)), false);
     assert.equal(valid(new URL(channelVideos.replace("page=0", "page=-1"))), false);
+    // 재생목록 편집 화면의 '채널 클립'(첫 쪽은 커서가 빈 값, 다음 쪽은 clipUID·readCount 커서).
+    const channelClips = `https://api.chzzk.naver.com/service/v1/channels/${id(1)}/clips?clipUID=&readCount=&filterType=ALL&orderType=RECENT&size=30`;
+    assert.equal(valid(new URL(channelClips)), true);
+    assert.equal(valid(new URL(channelClips.replace("clipUID=&readCount=", "clipUID=abc_DEF-1&readCount=7"))), true);
+    assert.equal(valid(new URL(channelClips.replace("RECENT", "POPULAR"))), true);
+    assert.equal(valid(new URL(channelClips.replace("RECENT", "RANDOM"))), false);
+    assert.equal(valid(new URL(channelClips.replace("size=30", "size=51"))), false);
+    assert.equal(valid(new URL(channelClips.replace("readCount=", "readCount=-1"))), false);
+    assert.equal(valid(new URL(channelClips.replace("clipUID=", "clipUID=%3Cscript%3E"))), false);
+    assert.equal(valid(new URL(`${channelClips}&unexpected=1`)), false);
+    assert.equal(valid(new URL(`https://api.chzzk.naver.com/service/v1/channels/${id(1)}`)), true);
+    assert.equal(valid(new URL(`https://api.chzzk.naver.com/service/v1/channels/${id(1)}?x=1`)), false);
     const tag = "https://api.chzzk.naver.com/service/v1/tag/lives?size=20&sortType=POPULAR&tags=%EB%B4%89%EB%88%84%EB%8F%84";
     assert.equal(valid(new URL(tag)), true);
     assert.equal(valid(new URL(tag.replace("&tags=", "&unexpected=1&tags="))), false);
     assert.equal(valid(new URL(tag.replace("POPULAR", "LATEST"))), false);
     assert.equal(valid(new URL(tag.replace(/&tags=.*/, ""))), false);
     assert.equal(valid(new URL(`${tag}&tags=duplicate`)), false);
+    // 태그 라이브 다음 묶음(커서 짝), 카테고리 라이브, 카테고리 찾기
+    assert.equal(valid(new URL(`${tag}&concurrentUserCount=412&liveId=21706810`)), true);
+    assert.equal(valid(new URL(`${tag}&concurrentUserCount=412`)), false, "커서는 짝으로만");
+    const category = "https://api.chzzk.naver.com/service/v2/categories/GAME/League_of_Legends/lives?size=30";
+    assert.equal(valid(new URL(category)), true);
+    assert.equal(valid(new URL(`${category}&concurrentUserCount=412&liveId=21706810`)), true);
+    assert.equal(valid(new URL(`${category}&liveId=21706810`)), false);
+    assert.equal(valid(new URL(category.replace("size=30", "size=500"))), false);
+    assert.equal(valid(new URL(`${category}&sortType=POPULAR`)), false);
+    assert.equal(valid(new URL(category.replace("/GAME/", "/OTHER/"))), false);
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v2/categories/GAME/a%2Fb/lives?size=30")), true);
+    assert.match(background, /!MULTIVIEW_CATEGORY_LIVES_RE\.test\(url\.pathname\)/);
+    const autocomplete = "https://api.chzzk.naver.com/manage/v1/auto-complete/categories?keyword=%EA%B2%8C%EC%9E%84&size=50";
+    assert.equal(valid(new URL(autocomplete)), true);
+    assert.equal(valid(new URL(autocomplete.replace("size=50", "size=100"))), false);
+    assert.equal(valid(new URL(autocomplete.replace(/keyword=[^&]*/, "keyword="))), false);
+    assert.match(background, /"\/manage\/v1\/auto-complete\/categories",/);
+    const titles = "https://api.chzzk.naver.com/service/v1/search/lives?keyword=%EB%A1%A4&offset=30&size=30";
+    assert.equal(valid(new URL(titles)), true);
+    assert.equal(valid(new URL(titles.replace("size=30", "size=100"))), false);
+    assert.equal(valid(new URL(titles.replace("offset=30&", ""))), false);
+    assert.equal(valid(new URL(titles.replace(/keyword=[^&]*/, "keyword="))), false);
     const nicknameColors = "https://api.chzzk.naver.com/service/v2/nickname/color/codes";
     assert.equal(valid(new URL(nicknameColors)), true);
     assert.equal(valid(new URL(`${nicknameColors}?unexpected=1`)), false);
     assert.match(background, /url\.origin !== MULTIVIEW_API_ORIGIN/);
     assert.match(background, /!MULTIVIEW_API_PATHS\.has\(url\.pathname\)/);
+  });
+
+  await test("카테고리·태그 라이브는 커서로 잇고, 카드 칩·카테고리 카드가 필터를 만든다", async () => {
+    const calls = [];
+    const live = (n) => ({ liveId: n, liveTitle: `방송${n}`, concurrentUserCount: 100 - n, liveCategoryValue: "리그 오브 레전드",
+      categoryType: "GAME", liveCategory: "League_of_Legends", tags: ["롤"], channel: { channelId: id(n), channelName: `채널${n}` } });
+    await withApi((url) => {
+      calls.push(url);
+      if (url.pathname === "/service/v2/categories/GAME/League_of_Legends/lives") {
+        return url.searchParams.has("liveId")
+          ? { data: [live(3), live(2)], page: { next: null } } // 2 는 겹침 → 한 번만
+          : { data: [live(1), live(2)], page: { next: { concurrentUserCount: 98, liveId: 2 } } };
+      }
+      if (url.pathname === "/manage/v1/auto-complete/categories") {
+        return { results: [{ categoryType: "GAME", categoryId: "League_of_Legends", categoryValue: "리그 오브 레전드", posterImageUrl: "https://x/p.png", tags: ["AOS"] },
+          { categoryType: "BAD", categoryId: "x", categoryValue: "버림" }] };
+      }
+      return { data: [] };
+    }, async () => {
+      const pager = SOURCES.createFilterPager({ kind: "category", categoryType: "game", categoryId: "League_of_Legends", label: "리그 오브 레전드" });
+      await pager.loadFirst();
+      assert.deepEqual(pager.rows.map((r) => r.channelName), ["채널1", "채널2"]);
+      assert.equal(pager.rows[0].categoryType, "GAME");
+      assert.equal(pager.rows[0].categoryId, "League_of_Legends");
+      await pager.loadNext();
+      assert.deepEqual(pager.rows.map((r) => r.channelName), ["채널1", "채널2", "채널3"]);
+      assert.equal(pager.done, true);
+      assert.equal(calls[1].searchParams.get("concurrentUserCount"), "98");
+      assert.equal(calls[1].searchParams.get("liveId"), "2");
+      assert.equal(calls[0].searchParams.get("size"), "30");
+      const cats = await SOURCES.searchCategories("리그");
+      assert.equal(cats.length, 1, "알 수 없는 종류는 버린다");
+      assert.equal(cats[0].mediaType, "category");
+      assert.equal(cats[0].channelId, "category:GAME:League_of_Legends");
+      const tagPager = SOURCES.createFilterPager({ kind: "tag", tag: "#롤" });
+      await tagPager.loadFirst();
+      const tagCall = calls.at(-1);
+      assert.equal(tagCall.pathname, "/service/v1/tag/lives");
+      assert.equal(tagCall.searchParams.get("tags"), "롤");
+      assert.equal(tagCall.searchParams.get("sortType"), "POPULAR");
+    });
+    assert.equal(SOURCES.normalizeSearchFilter({ kind: "category", categoryType: "GAME", categoryId: "a/b" }), null);
+    assert.equal(SOURCES.normalizeSearchFilter({ kind: "tag", tag: "  " }), null);
+    const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    const chips = SOURCES.cardFilterChipsHtml({ category: "게임", categoryType: "GAME", categoryId: "talk", tags: ["<태그>"] }, esc);
+    assert.match(chips, /class="mv-card-category-chip is-filter" data-mv-filter-kind="category" data-mv-filter-type="GAME" data-mv-filter-id="talk"/);
+    assert.match(chips, /data-mv-filter-tag="&#60;태그&#62;"/);
+    assert.doesNotMatch(SOURCES.cardFilterChipsHtml({ category: "게임", tags: [] }, esc), /is-filter/, "종류·id 를 모르면 카테고리 칩은 누를 수 없다");
+    const fakeChip = { closest: () => fakeChip, dataset: { mvFilterKind: "category", mvFilterType: "GAME", mvFilterId: "talk", mvFilterLabel: "게임" } };
+    assert.deepEqual(SOURCES.searchFilterFromChip(fakeChip), { kind: "category", categoryType: "GAME", categoryId: "talk", label: "게임" });
+    assert.equal(SOURCES.searchFilterKey({ kind: "tag", tag: "ABC" }), "tag:abc");
+    // 방제 검색: search/lives 를 offset 으로 잇는다
+    const titleCalls = [];
+    await withApi((url) => {
+      titleCalls.push(url);
+      const offset = Number(url.searchParams.get("offset"));
+      const entry = (n) => ({ live: { liveTitle: `롤 방송 ${n}`, concurrentUserCount: 10, liveCategoryValue: "리그 오브 레전드", categoryType: "GAME", liveCategory: "League_of_Legends" },
+        channel: { channelId: id(n), channelName: `롤${n}` } });
+      return offset === 0 ? { data: [entry(1), entry(2)], page: { next: { offset: 30 } } } : { data: [entry(3)], page: { next: null } };
+    }, async () => {
+      const pager = SOURCES.createTitleSearchPager("롤");
+      await pager.loadFirst();
+      await pager.loadNext();
+      assert.deepEqual(pager.rows.map((r) => r.liveTitle), ["롤 방송 1", "롤 방송 2", "롤 방송 3"]);
+      assert.equal(pager.done, true);
+      assert.equal(titleCalls[0].pathname, "/service/v1/search/lives");
+      assert.equal(titleCalls[0].searchParams.get("keyword"), "롤");
+      assert.equal(titleCalls[1].searchParams.get("offset"), "30");
+      assert.equal(pager.rows[0].categoryId, "League_of_Legends");
+    });
+    const css = fs.readFileSync(path.join(__dirname, "../src/multiview.css"), "utf8");
+    assert.doesNotMatch(css.match(/\.mv-card-tag-chip\.is-filter:hover \{[^}]*\}/)?.[0] || "", /underline/, "태그 칩 호버에 밑줄을 두지 않는다");
   });
 
   console.log("\n멀티뷰 라이브 pager 검증 통과");

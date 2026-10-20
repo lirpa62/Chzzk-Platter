@@ -94,7 +94,9 @@
   const HASH_RE = /^[0-9a-f]{32}$/i;
   const SLOT_RE = /^(?:[0-9a-f]{32}|video:\d+)$/i;
   // 멀티뷰 탭 하나에 담는 최대 채널 수(메인 1 + 보조 8). 고르기 화면(multiview.js)과 같다.
-  const MAX_CHANNELS = 9;
+  // 최대 채널 수: 기본 배치 9, 내 배치 16(그 칸 수의 내 배치가 있어야 늘릴 수 있다 — canAddChannel).
+  const MAX_CHANNELS = 16;
+  const canAddChannel = () => state.chosen.length < MAX_CHANNELS && LAYOUTS.hasLayoutFor(state.chosen.length + 1);
   // 프레임이 준비됐다고 알려 오기를 기다리는 시간. 넘으면 다시 불러오기 안내를 띄운다.
   const FRAME_READY_TIMEOUT_MS = 20000;
   // 4개 이상일 때만 아주 짧게 시차를 준다. 동시에 여러 개를 붙이면 초기 요청이 몰린다.
@@ -129,6 +131,8 @@
     startMainVolume: 1,
     // 메인을 바꾸면 채팅도 따라 바꿀지(기본 켜짐).
     chatFollowsMain: true,
+    // 내 배치의 채팅 2~4 칸(q·r·s)마다 보이는 채널. { q: channelId, … }
+    extraChatChannels: {},
     // 전체 볼륨(0~1). 채널별 볼륨 위에 곱해지는 값이다.
     masterVolume: 1,
     masterMuted: false,
@@ -384,6 +388,7 @@
   new MutationObserver(() => {
     postChatView();
     renderVodChat();
+    for (const pane of extraChats.values()) postExtraChatView(pane);
   }).observe(document.documentElement, {
     attributes: true,
     attributeFilter: ["data-theme"],
@@ -1477,6 +1482,187 @@
     openNativeChatPopup();
   }
 
+  // ── 추가 채팅(내 배치의 채팅 2~4) ─────────────────────────────────────────
+  // 내 배치에 격자 안 채팅 칸(q·r·s)이 있으면 칸마다 치지직 채팅을 따로 띄운다. 채팅 1(x)은 위의 기존 채팅.
+  // 칸마다 채널 고르기(라이브만 — 다시보기 채팅은 채팅 1 에서만)·분리(치지직 채팅창)·숨기기를 둔다.
+  // 배지 채팅 모아보기는 채팅 프레임 안(content script)에서 돌아 칸마다 따로 적용된다. 크기는 칸 경계를 끌어 바꾼다.
+  const extraChats = new Map(); // area → { el, frame, channelId, generation, ready, hidden, popup }
+  let extraChatGeneration = 0;
+  const extraChatNumber = (area) => LAYOUTS.CHAT_CELLS.indexOf(area) + 1;
+
+  function liveChatChoices() {
+    return state.chosen.filter((c) => c.mediaType !== "video" && HASH_RE.test(c.channelId));
+  }
+
+  function postExtraChatView(pane) {
+    if (!pane.ready || pane.popup || pane.hidden || !pane.frame.contentWindow) return;
+    try {
+      pane.frame.contentWindow.postMessage({
+        source: MULTIVIEW_MESSAGE, ...FRAME_TOKEN_FIELD,
+        type: "SET_MULTIVIEW_CHAT_VIEW",
+        dark: document.documentElement.dataset.theme === "dark",
+      }, CHZZK_ORIGIN);
+    } catch {}
+  }
+
+  function createExtraChat(area) {
+    const n = extraChatNumber(area);
+    const el = document.createElement("section");
+    el.className = "mv-extra-chat";
+    el.dataset.mvExtraChat = area;
+    el.innerHTML =
+      `<div class="mv-extra-chat-head"><span class="mv-extra-chat-label">채팅 ${n}</span>` +
+      `<select class="mv-extra-chat-select" aria-label="채팅 ${n} 채널"></select>` +
+      `<button type="button" class="mv-extra-chat-button mv-custom-tooltip" data-mv-extra-chat-popout data-tooltip="치지직 채팅창으로 분리">분리</button>` +
+      `<button type="button" class="mv-extra-chat-button" data-mv-extra-chat-hide>숨기기</button></div>` +
+      `<div class="mv-extra-chat-body"><iframe title="채팅 ${n}" allow="autoplay" referrerpolicy="origin"></iframe>` +
+      `<div class="mv-extra-chat-note" hidden><span></span><button type="button" class="mv-extra-chat-button" data-mv-extra-chat-restore></button></div></div>`;
+    const pane = { area, el, frame: el.querySelector("iframe"), channelId: null, loaded: null, generation: 0, ready: false, hidden: false, popup: null };
+    el.querySelector("select").addEventListener("change", (event) => {
+      state.extraChatChannels[area] = event.target.value;
+      setExtraChatChannel(pane, event.target.value);
+      scheduleHandoffSave();
+    });
+    el.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-mv-extra-chat-popout]")) void popoutExtraChat(pane);
+      else if (target?.closest("[data-mv-extra-chat-hide]")) setExtraChatHidden(pane, !pane.hidden);
+      else if (target?.closest("[data-mv-extra-chat-restore]")) {
+        if (pane.popup) restoreExtraChat(pane);
+        else setExtraChatHidden(pane, false);
+      }
+    });
+    $("mvFrames").append(el);
+    extraChats.set(area, pane);
+    return pane;
+  }
+
+  function extraChatUrl(channelId, generation) {
+    const url = new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN);
+    url.searchParams.set("cheeseMultiChat", "1");
+    url.searchParams.set("cheeseMultiChatGeneration", String(generation));
+    return url.toString();
+  }
+
+  // 칸 안 프레임을 지금 상태(채널·숨김·분리)에 맞춘다. 숨겼거나 분리했으면 프레임을 비워 자원을 아낀다.
+  // pane.loaded: 프레임에 띄운 채널(비웠으면 ""). 배치를 다시 그릴 때마다 불려도 바뀐 게 없으면 그대로 둔다.
+  function loadExtraChatFrame(pane, force = false) {
+    const want = pane.channelId && !pane.hidden && !pane.popup ? pane.channelId : "";
+    if (!force && pane.loaded === want) return;
+    pane.ready = false;
+    pane.loaded = want;
+    if (!want) {
+      pane.frame.src = "about:blank";
+      return;
+    }
+    pane.generation = ++extraChatGeneration;
+    loadFrame(pane.frame, extraChatUrl(want, pane.generation));
+  }
+
+  function setExtraChatChannel(pane, channelId) {
+    const changed = pane.channelId !== channelId;
+    pane.channelId = channelId;
+    // 분리해 둔 채팅창은 채널을 바꿀 때만 옮긴다.
+    if (changed && pane.popup && channelId) {
+      EXT.updateTabUrl(pane.popup.tabId, new URL(`/live/${channelId}/chat`, CHZZK_ORIGIN).toString()).catch(() => {});
+    }
+    loadExtraChatFrame(pane);
+    if (changed) renderExtraChat(pane);
+  }
+
+  function setExtraChatHidden(pane, hidden) {
+    pane.hidden = hidden;
+    loadExtraChatFrame(pane);
+    renderExtraChat(pane);
+  }
+
+  async function popoutExtraChat(pane) {
+    if (pane.popup) {
+      EXT.focusWindow(pane.popup.windowId).catch(() => {});
+      return;
+    }
+    if (!pane.channelId) return;
+    let popupWindow = null;
+    try {
+      popupWindow = await EXT.createWindow({
+        url: new URL(`/live/${pane.channelId}/chat`, CHZZK_ORIGIN).toString(), type: "popup", width: 420, height: 760,
+      });
+    } catch {}
+    const tabId = popupWindow?.tabs?.[0]?.id;
+    if (!Number.isInteger(popupWindow?.id) || !Number.isInteger(tabId)) {
+      if (Number.isInteger(popupWindow?.id)) EXT.removeWindow(popupWindow.id).catch(() => {});
+      showChatPopoutFeedback("치지직 채팅창을 열지 못했습니다.");
+      return;
+    }
+    pane.popup = { windowId: popupWindow.id, tabId };
+    loadExtraChatFrame(pane);
+    renderExtraChat(pane);
+  }
+
+  function restoreExtraChat(pane, closePopup = true) {
+    const popup = pane.popup;
+    if (!popup) return;
+    pane.popup = null;
+    if (closePopup) EXT.removeWindow(popup.windowId).catch(() => {});
+    loadExtraChatFrame(pane);
+    renderExtraChat(pane);
+  }
+
+  EXT.onWindowRemoved((windowId) => {
+    for (const pane of extraChats.values()) if (pane.popup?.windowId === windowId) restoreExtraChat(pane, false);
+  });
+
+  function removeExtraChat(area) {
+    const pane = extraChats.get(area);
+    if (!pane) return;
+    if (pane.popup) EXT.removeWindow(pane.popup.windowId).catch(() => {});
+    pane.el.remove();
+    extraChats.delete(area);
+  }
+
+  function renderExtraChat(pane) {
+    const select = pane.el.querySelector("select");
+    const choices = liveChatChoices();
+    const html = (choices.length ? "" : `<option value="">라이브 채널 없음</option>`) +
+      choices.map((c) => `<option value="${esc(c.channelId)}"${c.channelId === pane.channelId ? " selected" : ""}>${esc(c.channelName || c.channelId)}</option>`).join("");
+    if (select.innerHTML !== html) select.innerHTML = html;
+    select.value = pane.channelId;
+    pane.el.classList.toggle("is-hidden", pane.hidden);
+    pane.el.classList.toggle("is-popped-out", Boolean(pane.popup));
+    const hide = pane.el.querySelector("[data-mv-extra-chat-hide]");
+    hide.textContent = pane.hidden ? "보이기" : "숨기기";
+    hide.setAttribute("aria-pressed", String(pane.hidden));
+    pane.el.querySelector("[data-mv-extra-chat-popout]").disabled = !pane.channelId;
+    const note = pane.el.querySelector(".mv-extra-chat-note");
+    const message = pane.popup ? "치지직 채팅창으로 분리해 보는 중입니다." : pane.hidden ? "채팅을 숨겼습니다." :
+      !pane.channelId ? "채팅을 볼 라이브 채널이 없습니다." : "";
+    note.hidden = !message;
+    note.querySelector("span").textContent = message;
+    const restore = note.querySelector("[data-mv-extra-chat-restore]");
+    restore.hidden = !pane.popup && !pane.hidden;
+    restore.textContent = pane.popup ? "되돌리기" : "보이기";
+    pane.frame.hidden = Boolean(message);
+  }
+
+  // 배치에 맞춰 채팅 2~4 칸을 만들고 치운다. 채널은 고른 값이 아직 있으면 그대로, 아니면 채팅 1 과
+  // 다른 라이브 채널을 앞에서부터 고른다.
+  function syncExtraChats(layout, inset) {
+    const areas = inset && Array.isArray(layout?.extraChats) ? layout.extraChats : [];
+    for (const area of [...extraChats.keys()]) if (!areas.includes(area)) removeExtraChat(area);
+    const choices = liveChatChoices();
+    const taken = new Set([state.chatChannelId]);
+    for (const area of areas) {
+      const pane = extraChats.get(area) || createExtraChat(area);
+      if (pane.el.style.gridArea !== area) pane.el.style.gridArea = area;
+      let id = state.extraChatChannels[area];
+      if (!choices.some((c) => c.channelId === id)) id = choices.find((c) => !taken.has(c.channelId))?.channelId || choices[0]?.channelId || "";
+      taken.add(id);
+      state.extraChatChannels[area] = id;
+      setExtraChatChannel(pane, id);
+      renderExtraChat(pane);
+    }
+  }
+
   // 칸(iframe)은 채널마다 하나씩 만들어 두고 배치가 바뀌어도 '자리'만 옮긴다.
   // ⚠ 다시 만들면 src 가 새로 걸려 방송이 처음부터 다시 로드된다. 메인 변경·배치
   //   변경은 화면을 재배치할 뿐이므로 기존 프레임을 그대로 살려 둔다.
@@ -1540,10 +1726,13 @@
     if (status === "ready" && frameStates.get(channelId) !== "ready") {
       syncReadyAt.set(channelId, Date.now());
     }
+    if (status === "ended" && frameStates.get(channelId) !== "ended") endedSince.set(channelId, Date.now());
+    if (status !== "ended") endedSince.delete(channelId);
     frameStates.set(channelId, status);
     refreshSyncPanel();
     // 라이브 따라잡기는 싱크 패널이 닫혀 있어도 측정이 필요하다.
     updateSyncPolling();
+    updateEndedRecheck();
     const cell = cells.get(channelId);
     if (cell) {
       cell.dataset.status = status;
@@ -1635,6 +1824,61 @@
       return;
     }
     setCellStatus(channelId, "ended", "아직 방송이 꺼져 있습니다.");
+  }
+
+  // 종료 칸 자동 확인: 방송이 다시 켜졌으면 그 칸만 다시 불러온다.
+  // ⚠ 치지직이 칸 안에서 재생을 스스로 이으면 프레임이 FRAME_ENDED_CANCEL 로 알린다. 이건
+  //   그러지 않는 경우(종료 화면에 멈춤)를 위한 것이다. 종료 직후의 API 지연을 피해 잠시 기다리고,
+  //   다시 불러와도 종료 화면이면 되풀이하지 않게 채널마다 10분에 3번까지만 다시 불러온다.
+  const ENDED_RECHECK_MS = 30000;
+  const ENDED_RECHECK_MIN_AGE_MS = 20000;
+  const ENDED_AUTO_RELOAD_WINDOW_MS = 10 * 60 * 1000;
+  const ENDED_AUTO_RELOAD_LIMIT = 3;
+  const endedSince = new Map(); // channelId -> 종료로 바뀐 시각
+  const endedAutoReloads = new Map(); // channelId -> [자동으로 다시 불러온 시각]
+  let endedRecheckTimer = 0;
+  let endedRechecking = false;
+  function updateEndedRecheck() {
+    const any = [...endedSince.keys()].some((id) => !isVideoSlot(id));
+    if (any && !endedRecheckTimer) endedRecheckTimer = setInterval(autoRecheckEnded, ENDED_RECHECK_MS);
+    else if (!any && endedRecheckTimer) {
+      clearInterval(endedRecheckTimer);
+      endedRecheckTimer = 0;
+    }
+  }
+  async function autoRecheckEnded() {
+    if (document.hidden || endedRechecking) return;
+    endedRechecking = true;
+    try {
+      for (const channelId of [...endedSince.keys()]) {
+        if (isVideoSlot(channelId) || !HASH_RE.test(channelId) || currentStatus(channelId) !== "ended") continue;
+        if (!state.chosen.some((channel) => channel.channelId === channelId)) {
+          endedSince.delete(channelId);
+          continue;
+        }
+        const now = Date.now();
+        if (now - (endedSince.get(channelId) || now) < ENDED_RECHECK_MIN_AGE_MS) continue;
+        const recent = (endedAutoReloads.get(channelId) || []).filter((at) => now - at < ENDED_AUTO_RELOAD_WINDOW_MS);
+        endedAutoReloads.set(channelId, recent);
+        if (recent.length >= ENDED_AUTO_RELOAD_LIMIT) continue;
+        let detail = null;
+        try {
+          detail = await SOURCES?.getJson(
+            `https://api.chzzk.naver.com/service/v3/channels/${channelId}/live-detail`,
+          );
+        } catch {
+          detail = null;
+        }
+        if (currentStatus(channelId) !== "ended") continue; // 그 사이 상태가 바뀌었다
+        if (detail?.status === "OPEN" && !detail.closeDate) {
+          recent.push(Date.now());
+          reloadFrame(channelId);
+        }
+      }
+    } finally {
+      endedRechecking = false;
+      updateEndedRecheck();
+    }
   }
 
   function armReadyTimeout(channelId) {
@@ -2034,6 +2278,7 @@
       if (cell.style.gridArea) elementOf.set(cell.style.gridArea.split("/")[0].trim(), cell);
     }
     if (ctx.inset && !ctx.hideChat) elementOf.set("x", $("mvChat"));
+    for (const [area, pane] of extraChats) elementOf.set(area, pane.el);
     const base = stage.getBoundingClientRect();
     const out = [];
     for (const axis of LAYOUTS.resizableAxes(ctx.layout)) {
@@ -2256,6 +2501,8 @@
       }
     });
 
+    // 내 배치의 채팅 2~4 칸(칸 자리를 정한 뒤, 크게 보기보다 먼저).
+    syncExtraChats(layout, inset);
     applyExpandedCell(layout, side, hideChat);
 
     stage.style.flexDirection = direction;
@@ -2330,11 +2577,72 @@
     applyLayout();
   }
 
+  // 내 배치(고르기 화면에서 만든 배치)도 배치 메뉴에 보인다. 지금 쓰는 배치는 목록에서 지워져도 남긴다.
+  const CUSTOM_LAYOUTS_KEY = "cheeseMultiviewCustomLayouts";
+  function applyCustomLayouts(list) {
+    LAYOUTS.setCustomLayouts(list, { keepId: state.layoutId });
+    if (typeof renderTopbar === "function" && LAYOUTS.layoutById(state.layoutId)) renderTopbar();
+  }
+  void chrome.storage?.local?.get(CUSTOM_LAYOUTS_KEY)
+    ?.then((data) => applyCustomLayouts(data?.[CUSTOM_LAYOUTS_KEY]))
+    .catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area === "local" && changes[CUSTOM_LAYOUTS_KEY]) applyCustomLayouts(changes[CUSTOM_LAYOUTS_KEY].newValue);
+  });
+  // 기본 배치 설정(고르기 화면): 숨긴 배치는 배치 메뉴에서 빼고, 채널 수가 바뀌면 그 수의 기본 배치로.
+  function applyLayoutPrefs(raw) {
+    LAYOUTS.setLayoutPrefs(raw);
+    if (typeof renderTopbar === "function" && LAYOUTS.layoutById(state.layoutId)) renderTopbar();
+  }
+  void chrome.storage?.local?.get(LAYOUTS.LAYOUT_PREFS_KEY)
+    ?.then((data) => applyLayoutPrefs(data?.[LAYOUTS.LAYOUT_PREFS_KEY]))
+    .catch(() => {});
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area === "local" && changes[LAYOUTS.LAYOUT_PREFS_KEY]) applyLayoutPrefs(changes[LAYOUTS.LAYOUT_PREFS_KEY].newValue);
+  });
+
+  // 직접 고른 채팅 자리는 기억해 다음 멀티뷰에도 쓴다(고르기 화면 start → LAYOUTS.preferredChatSide).
+  const CHAT_SIDE_PREF_KEY = "cheeseMultiviewChatSide";
+  // J: 치지직 화면처럼 바로 채팅을 친다(채팅 칸 입력창, 다시보기 메인이면 다시보기 채팅 입력창).
+  //   시청 화면에서 누르면 여기서, 영상 칸에서 누르면 칸이 FRAME_FOCUS_CHAT 으로 알린다(content.js).
+  //   채팅 칸은 같은 출처(치지직 페이지 위)일 때만 안을 만질 수 있다.
+  function focusMultiviewChatInput() {
+    const vodInput = document.querySelector("textarea.mv-vod-chat-compose-input");
+    if (vodInput && vodInput.offsetParent && !vodInput.disabled) {
+      vodInput.focus();
+      return true;
+    }
+    const frame = $("mvChatFrame");
+    if (!frame || frame.hidden) return false;
+    try {
+      const input = frame.contentDocument?.querySelector("textarea[class*='_input_'], textarea[placeholder*='채팅']");
+      if (!input || input.disabled) return false;
+      frame.focus();
+      input.focus();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  // ⚠ 창(window) 캡처 단계에서 먼저 받는다 — 치지직 페이지 위에서는 숨겨 둔 치지직 앱의 J(채팅 접기)가
+  //   함께 돌지 않게 처리했으면 멈춘다.
+  window.addEventListener("keydown", (e) => {
+    if (!e.isTrusted || e.code !== "KeyJ" || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ""))) return;
+    if (!focusMultiviewChatInput()) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+
   function setChatSide(side) {
     const layout = LAYOUTS.layoutById(state.layoutId);
     if (!LAYOUTS.chatSidesFor(layout).includes(side)) return;
     state.chatSide = side;
     applyLayout();
+    try {
+      void chrome.storage?.local?.set({ [CHAT_SIDE_PREF_KEY]: side })?.catch?.(() => {});
+    } catch {}
   }
 
   // ── 최상단 조작 막대 ───────────────────────────────────────────────────
@@ -2525,7 +2833,7 @@
       .map((l) => {
         const on = l.id === state.layoutId;
         const preview = LAYOUTS.previewGrid(l);
-        const group = portrait ? (LAYOUTS.isPortraitGroup(l) ? "세로 화면" : "가로 화면") : "";
+        const group = l.custom ? "내 배치" : portrait ? (LAYOUTS.isPortraitGroup(l) ? "세로 화면" : "가로 화면") : "";
         const heading = group && group !== lastGroup
           ? `<div class="mv-layout-group-label" role="presentation">${group}</div>` : "";
         lastGroup = group;
@@ -6339,6 +6647,7 @@
     state.mainHighQuality = setup.mainHighQuality;
     state.startMainMuted = setup.startMainMuted;
     state.startMainVolume = setup.startMainVolume;
+    state.extraChatChannels = { ...(setup.extraChats || {}) };
     if (!channelAudio.has(state.mainId)) {
       channelAudio.set(state.mainId, {
         volume: state.startMainVolume,
@@ -6389,6 +6698,8 @@
       .slice(0, MAX_CHANNELS);
     if (chosen.length < 2) return null;
 
+    // 내 배치면 구성에 담겨 온 모양을 먼저 건다(저장값이 그사이 바뀌었어도 그 모양으로 연다).
+    if (raw.customLayout) LAYOUTS.registerCustomLayout(raw.customLayout);
     // 배치는 '지금 채널 수에 허용되는 것' 중에서만 고른다. 어긋나면 첫 배치로.
     // 세로 전용 배치도 받는다(창 방향이 바뀌어도 쓰던 배치는 그대로 둔다).
     const allowed = LAYOUTS.layoutsFor(chosen.length, { all: true });
@@ -6406,6 +6717,10 @@
       startMainVolume: typeof raw.startMainVolume === "number" && Number.isFinite(raw.startMainVolume)
         ? Math.round(Math.min(1, Math.max(0, raw.startMainVolume)) * 100) / 100
         : 1,
+      // 채팅 2~4 칸의 채널(고른 라이브 채널만).
+      extraChats: Object.fromEntries(Object.entries(raw.extraChats && typeof raw.extraChats === "object" ? raw.extraChats : {})
+        .filter(([area, id]) => LAYOUTS.CHAT_CELLS.slice(1).includes(area) && HASH_RE.test(String(id || "")) &&
+          chosen.some((c) => c.channelId === id))),
     };
   }
 
@@ -6823,6 +7138,8 @@
       quickFolder = "";
       quickSearchPager = null;
       quickSearchKeyword = "";
+      quickSearchFilter = null;
+      quickSearchMode = "channel";
       $("mvQuickSearch").value = "";
       $("mvQuickVideoChannelSearchInput").value = "";
       $("mvQuickVideoRerankSearchInput").value = "";
@@ -6830,6 +7147,7 @@
     }
     $("mvQuick").hidden = false;
     clampQuickSize();
+    refreshQuickThumbToken(); // 라이브 썸네일도 열 때마다 새로(30초 안에 다시 열면 캐시)
     renderQuick();
     // 열 때마다 새로 받는다(제목·시청자 수·방송 상태가 바뀐다). 캐시를 쓰지 않는다.
     void loadQuickCandidates({ refresh: true });
@@ -7161,13 +7479,64 @@
     return quickLivePager;
   }
 
+  // 검색 탭의 목록: 카테고리·태그 필터가 있으면 그 라이브, 아니면 검색 종류에 따라 채널·태그 검색 또는
+  // 카테고리 목록(고르기 화면과 같은 규칙). 셋 다 같은 pager 모양이다.
+  let quickSearchMode = "channel"; // "channel" | "title"(방송 제목) | "category"
+  const QUICK_SEARCH_MODES = new Set(["channel", "title", "category"]);
+  const QUICK_SEARCH_PLACEHOLDERS = { channel: "채널 이름 또는 태그로 찾기", title: "방송 제목으로 찾기", category: "카테고리 이름으로 찾기" };
+  let quickSearchFilter = null; // multiviewSources.normalizeSearchFilter 모양
+  let quickSearchPagerKey = "";
   function getQuickSearchPager(keyword) {
     const query = String(keyword || "").trim();
-    if (!quickSearchPager || quickSearchKeyword !== query) {
+    const key = quickSearchFilter
+      ? `filter:${SOURCES.searchFilterKey(quickSearchFilter)}`
+      : `${quickSearchMode}:${query}`;
+    if (!quickSearchPager || quickSearchPagerKey !== key) {
+      quickSearchPagerKey = key;
       quickSearchKeyword = query;
-      quickSearchPager = SOURCES.createSearchPager(query);
+      quickSearchPager = quickSearchFilter
+        ? SOURCES.createFilterPager(quickSearchFilter)
+        : quickSearchMode === "category"
+          ? SOURCES.createCategorySearchPager(query)
+          : quickSearchMode === "title"
+            ? SOURCES.createTitleSearchPager(query)
+            : SOURCES.createSearchPager(query);
     }
     return quickSearchPager;
+  }
+
+  const isQuickCategoryListView = () => quickSource === "search" && !quickSearchFilter && quickSearchMode === "category";
+
+  function syncQuickSearchTools() {
+    const search = quickSource === "search";
+    const modeBox = $("mvQuickSearchMode");
+    if (modeBox) {
+      modeBox.hidden = !search;
+      for (const button of modeBox.querySelectorAll("[data-mv-quick-search-mode]"))
+        button.setAttribute("aria-pressed", String(button.dataset.mvQuickSearchMode === quickSearchMode));
+    }
+    const input = $("mvQuickSearch");
+    if (input) input.placeholder = QUICK_SEARCH_PLACEHOLDERS[quickSearchMode] || QUICK_SEARCH_PLACEHOLDERS.channel;
+    const pill = $("mvQuickSearchFilter");
+    if (pill) {
+      const html = search && quickSearchFilter ? SOURCES.searchFilterPillHtml(quickSearchFilter, esc) : "";
+      pill.hidden = !html;
+      if (pill.innerHTML !== html) pill.innerHTML = html;
+    }
+  }
+
+  // 카드의 카테고리·태그 칩, 카테고리 카드 → 검색 탭에서 그 라이브를 본다.
+  function applyQuickSearchFilter(filter) {
+    const next = SOURCES.normalizeSearchFilter(filter);
+    if (!next) return;
+    quickSearchFilter = next;
+    // 검색 종류 버튼도 필터에 맞춘다(태그 → 채널·태그, 카테고리 → 카테고리).
+    quickSearchMode = next.kind === "category" ? "category" : "channel";
+    quickSource = "search";
+    quickFolder = "";
+    resetQuickScroll();
+    saveQuickState();
+    void loadQuickCandidates();
   }
 
   function getQuickVideoPager() {
@@ -7279,7 +7648,7 @@
 
   // 지금 보이는 후보 목록이 어떤 원천·검색어의 것인지(새로 받을 때 그대로 둘 수 있는지 본다).
   function quickCandidatesKey() {
-    return [quickSource, quickKeyword, quickVideoSource, quickVideoChannel?.channelId || "",
+    return [quickSource, quickKeyword, quickSearchMode, SOURCES?.searchFilterKey?.(quickSearchFilter) || "", quickVideoSource, quickVideoChannel?.channelId || "",
       quickVideoChannelView, quickVideoChannelKeyword, quickVideoRerankSearchKeyword].join("|");
   }
   let quickCandidatesFor = "";
@@ -7407,8 +7776,30 @@
     return section ? section.rows || [] : [];
   }
 
+  // 라이브 썸네일은 같은 주소에서 이미지 내용만 바뀐다. 브라우저 캐시에 남은 옛 화면이 보이지
+  // 않게 패널을 열 때 주소에 시각 표시를 붙인다. 30초 안에 다시 열면 같은 표시라 캐시를 그대로
+  // 쓴다. 열어 둔 동안의 30초 자동 갱신에서는 바꾸지 않는다(바꾸면 썸네일이 모두 깜빡인다).
+  // 다시보기 썸네일은 바뀌지 않으므로 그대로 둔다.
+  const QUICK_THUMB_FRESH_MS = 30000;
+  let quickThumbToken = 0;
+  function refreshQuickThumbToken() {
+    const now = Date.now();
+    if (now - quickThumbToken >= QUICK_THUMB_FRESH_MS) quickThumbToken = now;
+  }
+  function quickThumbUrl(r) {
+    const url = safeImageUrl(r.liveImageUrl);
+    if (!url || r.mediaType === "video" || !quickThumbToken) return url;
+    try {
+      const parsed = new URL(url);
+      parsed.searchParams.set("cheeseT", String(Math.floor(quickThumbToken / 1000)));
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }
+
   function quickCard(r, full) {
-    const thumb = safeImageUrl(r.liveImageUrl);
+    const thumb = quickThumbUrl(r);
     const tags = Array.isArray(r.tags) ? r.tags : [];
     const isVideo = r.mediaType === "video";
     const watchTimelinePercent = isVideo ? SOURCES.getWatchTimelinePercent(r) : null;
@@ -7449,14 +7840,7 @@
         : "") +
       `</span></span>` +
       (r.category || tags.length
-        ? `<span class="mv-card-meta mv-quick-card-meta">` +
-          (r.category
-            ? `<span class="mv-card-category-chip">${esc(r.category)}</span>`
-            : "") +
-          tags
-            .map((tag) => `<span class="mv-card-tag-chip">${esc(tag)}</span>`)
-            .join("") +
-          `</span>`
+        ? `<span class="mv-card-meta mv-quick-card-meta">${SOURCES.cardFilterChipsHtml(r, esc)}</span>`
         : "") +
       `</button>`
     );
@@ -7579,7 +7963,7 @@
         source === "following" ||
         (source === "custom" && (mode === "recent" || mode === "oldest")),
     )).filter((row) => row.mediaType === "channel" || !have.has(row.channelId));
-    const full = !quickReplaceId && state.chosen.length >= MAX_CHANNELS;
+    const full = !quickReplaceId && !canAddChannel();
     let next = null;
     for (let index = rows.length - 1; index >= 0; index -= 1) {
       const row = rows[index];
@@ -7628,6 +8012,12 @@
       return "다시보기가 없습니다.";
     }
     if (quickSource === "search") {
+      if (quickSearchFilter)
+        return quickSearchFilter.kind === "category" ? "이 카테고리로 지금 방송 중인 채널이 없습니다." : "이 태그로 지금 방송 중인 채널이 없습니다.";
+      if (quickSearchMode === "category")
+        return quickKeyword.trim() ? "찾는 카테고리가 없습니다." : "카테고리 이름으로 찾아보세요.";
+      if (quickSearchMode === "title")
+        return quickKeyword.trim() ? "제목에 검색어가 든 방송이 없습니다." : "방송 제목으로 찾아보세요.";
       return quickKeyword.trim()
         ? "찾는 채널이나 태그의 방송이 없습니다."
         : "채널 이름 또는 태그로 찾아보세요.";
@@ -7657,6 +8047,7 @@
     const videoChannelSearch = quickSource === "videos" && isQuickVideoChannelSearchView();
     const videoRerankSearch = quickSource === "videos" && !quickVideoChannel && quickVideoSource === "platter-search";
     if (searchBox) searchBox.hidden = quickSource !== "search";
+    syncQuickSearchTools();
     $("mvQuickVideoChannelSearch").hidden = !videoChannelSearch;
     $("mvQuickVideoRerankSearch").hidden = !videoRerankSearch;
     quickVideoRerankControls.setPager(videoRerankSearch ? quickVideoRerankPager : null);
@@ -7676,7 +8067,8 @@
     }
     renderQuickFolders();
     const sort = $("mvQuickSort");
-    sort.closest(".mv-sort-row").hidden = quickSource === "videos";
+    const categoryList = isQuickCategoryListView();
+    sort.closest(".mv-sort-row").hidden = quickSource === "videos" || categoryList;
     const hasCustom =
       quickSource === "custom" &&
       SOURCES.hasCustomOrder(quickSections, quickFolder);
@@ -7691,8 +8083,9 @@
     const oldest = sort.querySelector('[value="oldest"]');
     oldest.textContent =
       quickSource === "live" ? "오래된순 (불러온 방송)" : "오래된순";
+    // 카테고리 목록은 이름이 맞는 순서(받은 순서) 그대로 둔다.
     const mode =
-      quickSource === "videos"
+      quickSource === "videos" || categoryList
         ? "custom"
         : quickSortBySource[quickSource] === "custom" && !hasCustom
         ? "viewers"
@@ -7703,6 +8096,7 @@
 
     const box = $("mvQuickAdd");
     if (!box) return;
+    box.classList.toggle("is-categories", categoryList);
     const rail = box.closest(".mv-quick-rail");
     if (rail) rail.hidden = videoChannelSearch;
     const previousScrollTop = box.scrollTop;
@@ -7741,10 +8135,30 @@
       return;
     }
     // 교체 모드가 아니고 자리가 다 찼으면 더 담을 수 없다.
-    const full = !quickReplaceId && state.chosen.length >= MAX_CHANNELS;
-    box.innerHTML = rest.map((r) => r.mediaType === "channel"
-      ? quickVideoChannelCard(r)
-      : quickCard(r, full)).join("");
+    const full = !quickReplaceId && !canAddChannel();
+    // 전용 팔로잉 '전체'는 고르기 화면처럼 구역(즐겨찾기·그룹·…)마다 제목을 달아 나눠 보인다.
+    // 정렬은 구역 안에서만, 같은 채널은 앞 구역에 한 번만(예전에는 한 목록으로 합쳐 정렬해 구역이 사라졌다).
+    const grouped = quickSource === "custom" && !quickFolder && quickSections.some((section) => section.label);
+    if (grouped) {
+      const sorted = SOURCES.sortSections(quickSections, mode, mode === "recent" || mode === "oldest");
+      const seen = new Set();
+      box.innerHTML = sorted.map((section) => {
+        const rows = (section.rows || []).filter((r) => !have.has(r.channelId) && !seen.has(r.channelId));
+        rows.forEach((r) => seen.add(r.channelId));
+        if (!rows.length) return "";
+        const head = section.label
+          ? `<div class="mv-quick-section-head" role="heading" aria-level="3"><span class="mv-section-name">${esc(section.label)}</span>` +
+            `<span class="mv-section-count">${fmtCount(rows.length)}</span></div>`
+          : "";
+        return head + rows.map((r) => quickCard(r, full)).join("");
+      }).join("");
+    } else {
+      box.innerHTML = rest.map((r) => r.mediaType === "channel"
+        ? quickVideoChannelCard(r)
+        : r.mediaType === "category"
+          ? SOURCES.categoryCardHtml(r, esc)
+          : quickCard(r, full)).join("");
+    }
     syncQuickPagedRetry();
     box.scrollTop = Math.min(
       previousScrollTop,
@@ -7825,9 +8239,52 @@
     renderQuick();
   }
 
+  // 멀티뷰 탭은 여러 개 열 수 있다. 같은 채널을 두 탭에서 재생하면 소리가 겹치고 시청자 수가 두 번
+  // 잡히므로, 다른 멀티뷰 탭이 보고 있는 채널을 넣으려 하면 먼저 묻는다(치지직 페이지 위에서만 —
+  // 다른 탭 목록은 배경이 안다). 물어볼 수 없으면 그냥 넣는다.
+  async function confirmElsewhereChannel(row) {
+    if (!HOSTED_ON_CHZZK || !row?.channelId) return true;
+    let others = [];
+    try {
+      others = await hostApi("others.channels");
+    } catch {
+      return true;
+    }
+    if (!Array.isArray(others) || !others.some((o) => o?.channelId === row.channelId)) return true;
+    const name = row.channelName || others.find((o) => o.channelId === row.channelId)?.channelName || "이 채널";
+    return askElsewhereChannel(name);
+  }
+
+  function askElsewhereChannel(name) {
+    document.getElementById("mvElsewhereDialog")?.remove();
+    const dialog = document.createElement("dialog");
+    dialog.id = "mvElsewhereDialog";
+    dialog.className = "mv-dialog";
+    dialog.setAttribute("aria-labelledby", "mvElsewhereTitle");
+    dialog.innerHTML =
+      `<form method="dialog"><h2 class="mv-dialog-title" id="mvElsewhereTitle">이미 시청 중인 채널</h2>` +
+      `<p class="mv-dialog-desc mv-dialog-warn">${esc(name)} 채널은 다른 멀티뷰 탭에서 이미 시청 중입니다.</p>` +
+      `<p class="mv-dialog-desc">같은 채널을 두 곳에서 재생하면 소리가 겹치고 시청자 수가 중복으로 잡힐 수 있습니다. 그래도 추가할까요?</p>` +
+      `<div class="mv-dialog-actions"><button type="submit" value="cancel" class="mv-dialog-button">취소</button>` +
+      `<button type="submit" value="add" class="mv-dialog-button is-primary" autofocus>그래도 추가</button></div></form>`;
+    document.body.append(dialog);
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => {
+        resolve(dialog.returnValue === "add");
+        dialog.remove();
+      }, { once: true });
+      try {
+        dialog.showModal();
+      } catch {
+        dialog.remove();
+        resolve(true);
+      }
+    });
+  }
+
   // 채널 더하기: 새 칸만 만든다(기존 칸은 건드리지 않는다).
   function addChannel(channelId) {
-    if (state.chosen.length >= MAX_CHANNELS) return;
+    if (!canAddChannel()) return;
     const found = quickCandidates?.find((r) => r.channelId === channelId);
     if (!found || cells.has(channelId)) return;
     state.chosen = [...state.chosen, { ...found }];
@@ -7869,6 +8326,7 @@
   async function saveHandoff() {
     if (!state.handoffId) return;
     try {
+      const layout = LAYOUTS.layoutById(state.layoutId);
       await writeHandoff(state.handoffId, {
         chosen: state.chosen,
         layoutId: state.layoutId,
@@ -7877,6 +8335,9 @@
         mainHighQuality: state.mainHighQuality,
         startMainMuted: state.startMainMuted,
         startMainVolume: state.startMainVolume,
+        // 내 배치면 모양을 함께 둔다(고르기 화면으로 돌아가 고칠 때·다시 불러올 때 같은 모양).
+        ...(layout?.custom && layout.source ? { customLayout: layout.source } : {}),
+        ...(extraChats.size ? { extraChats: Object.fromEntries([...extraChats].map(([area, pane]) => [area, pane.channelId]).filter(([, id]) => id)) } : {}),
       });
     } catch {}
   }
@@ -7925,6 +8386,40 @@
 
   document.addEventListener("click", (event) => {
     const target = event.target;
+    // 채널 관리: 카드의 카테고리·태그 칩(카드 추가보다 먼저), 카테고리 카드, 필터 해제, 검색 종류.
+    if (target?.closest?.("#mvQuick")) {
+      const chipFilter = target.closest("#mvQuickAdd") ? SOURCES.searchFilterFromChip(target) : null;
+      if (chipFilter) {
+        event.preventDefault();
+        event.stopPropagation();
+        applyQuickSearchFilter(chipFilter);
+        return;
+      }
+      const categoryFilter = SOURCES.categoryFromCard(target);
+      if (categoryFilter) {
+        applyQuickSearchFilter(categoryFilter);
+        return;
+      }
+      if (target.closest("[data-mv-filter-clear]")) {
+        quickSearchFilter = null;
+        resetQuickScroll();
+        void loadQuickCandidates();
+        $("mvQuickSearch")?.focus();
+        return;
+      }
+      const searchMode = target.closest("[data-mv-quick-search-mode]");
+      if (searchMode) {
+        const mode = QUICK_SEARCH_MODES.has(searchMode.dataset.mvQuickSearchMode) ? searchMode.dataset.mvQuickSearchMode : "channel";
+        if (mode !== quickSearchMode || quickSearchFilter) {
+          quickSearchMode = mode;
+          quickSearchFilter = null;
+          resetQuickScroll();
+          void loadQuickCandidates();
+        }
+        $("mvQuickSearch")?.focus();
+        return;
+      }
+    }
     const groupAssignmentOption = target.closest?.(
       "[data-mv-group-assign-option]",
     );
@@ -8229,15 +8724,22 @@
     if (add) {
       const id = add.dataset.mvQuickAdd;
       const picked = quickCandidates?.find((r) => r.channelId === id);
-      if (quickReplaceId) {
-        // 교체 모드: 그 자리만 갈아 끼운다.
-        replaceChannel(quickReplaceId, picked || { channelId: id });
-        quickReplaceId = "";
-        quickReplaceOrigin = "";
-        renderQuick();
-        return;
-      }
-      addChannel(id);
+      const replaceId = quickReplaceId;
+      const run = () => {
+        if (replaceId) {
+          // 교체 모드: 그 자리만 갈아 끼운다.
+          if (quickReplaceId !== replaceId) return; // 묻는 사이 교체를 그만뒀다
+          replaceChannel(replaceId, picked || { channelId: id });
+          quickReplaceId = "";
+          quickReplaceOrigin = "";
+          renderQuick();
+          return;
+        }
+        addChannel(id);
+      };
+      // 다른 멀티뷰 탭에서 이미 보고 있는 채널이면 먼저 묻는다(다른 탭 목록은 치지직 페이지 위에서만 안다).
+      if (!HOSTED_ON_CHZZK) run();
+      else void confirmElsewhereChannel(picked || { channelId: id }).then((ok) => ok && run());
       return;
     }
     const retry = target.closest?.("[data-mv-retry]");
@@ -8488,6 +8990,11 @@
   let quickSearchTimer = 0;
   $("mvQuickSearch")?.addEventListener("input", (event) => {
     quickKeyword = event.target.value;
+    // 새로 찾으면 카테고리·태그 필터는 푼다.
+    if (quickSearchFilter) {
+      quickSearchFilter = null;
+      syncQuickSearchTools();
+    }
     clearTimeout(quickSearchTimer);
     quickSearchTimer = window.setTimeout(() => void loadQuickCandidates(), 300);
   });
@@ -8894,6 +9401,7 @@
     "FRAME_VOD_SYNC_STATS",
     "FRAME_VOD_SYNC_RESULT",
     "FRAME_AD_STATUS",
+    "FRAME_FOCUS_CHAT",
     "FRAME_LOG_POWER",
   ]);
   window.addEventListener("message", (event) => {
@@ -8908,6 +9416,11 @@
     //   보내는 것을 막는다.
     const frame = cells.get(channelId)?.querySelector("iframe");
     if (!frame || event.source !== frame.contentWindow) return;
+
+    if (data.type === "FRAME_FOCUS_CHAT") {
+      focusMultiviewChatInput();
+      return;
+    }
 
     if (data.type === "FRAME_LOG_POWER") {
       if (isVideoSlot(channelId)) return;
@@ -9019,7 +9532,10 @@
       frameTimers.delete(channelId);
       // ⚠ 여기서 덮개를 걷지 않는다. FRAME_READY 는 '지시를 받을 수 있게 됨' 일 뿐
       //   화면 정리(채팅 접기·넓은 화면)는 아직 끝나지 않았다.
-      if (currentStatus(channelId) === "ended") return; // 종료된 칸은 그대로 둔다
+      // 다시보기 칸의 종료는 그대로 둔다. 라이브 칸에 FRAME_READY 가 다시 왔으면 프레임이 새로
+      // 떴다는 뜻이다(종료 화면이 그대로면 프레임이 곧 FRAME_ENDED 를 다시 보낸다).
+      // ⚠ 예전엔 라이브 칸도 그대로 둬, 다시 켜진 방송을 새로 불러와도 종료 덮개가 남았다.
+      if (currentStatus(channelId) === "ended" && isVideoSlot(channelId)) return;
       // ⚠ 프레임이 준비되기 전에 보낸 지시는 (리스너가 붙기 전이라) 유실됐을 수 있다.
       //   주소의 쿼리는 '처음 상태' 일 뿐이고 최종 기준은 지금 부모 상태다.
       // ⚠ 이때만 화질 재확인을 함께 요청한다. 볼륨 조작 같은 평상시 지시에서는
@@ -9054,7 +9570,9 @@
     }
     if (data.type === "FRAME_ENDED_CANCEL") {
       // 장비 재정비 안내였다(방송은 이어진다). 라이브 칸만 되돌린다.
+      // 방송이 다시 켜져 칸 안에서 재생이 이어진 경우도 같은 신호다.
       if (isVideoSlot(channelId) || currentStatus(channelId) !== "ended") return;
+      // 화질은 새 송출이 붙을 때 프레임이 스스로 다시 맞춘다(onMultiviewSourceReady).
       setCellStatus(channelId, "ready");
       requestMixerState(channelId);
       return;
@@ -9379,6 +9897,15 @@
     if (!isTrustedFrameMessage(event)) return;
     const data = event.data;
     if (data?.source !== MULTIVIEW_MESSAGE) return;
+    // 추가 채팅(채팅 2~4) 칸이 보낸 준비 신호.
+    for (const pane of extraChats.values()) {
+      if (event.source !== pane.frame.contentWindow) continue;
+      if (data.type === "CHAT_FRAME_READY" && data.generation === pane.generation && data.channelId === pane.channelId) {
+        pane.ready = true;
+        postExtraChatView(pane);
+      }
+      return;
+    }
     // ⚠ 정말 채팅 프레임이 보낸 것인지 확인한다.
     const frame = $("mvChatFrame");
     if (

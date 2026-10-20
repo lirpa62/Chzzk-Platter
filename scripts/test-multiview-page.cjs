@@ -60,7 +60,9 @@ function call(method, params = {}, sessionId) {
   });
 }
 
-const deadline = setTimeout(() => browser.kill("SIGTERM"), 150000);
+// 검사가 늘어 혼자 돌려도 2분을 넘긴다. 전체 실행 중(다른 브라우저가 막 닫힌 직후)에는 더 걸려 150초 한도에서
+// 브라우저가 꺼지며 간헐적으로 실패했다.
+const deadline = setTimeout(() => browser.kill("SIGTERM"), 240000);
 const checks = [];
 (async () => {
   const { targetId } = await call("Target.createTarget", {
@@ -120,7 +122,10 @@ const checks = [];
           (window.hostOpens=window.hostOpens||[]).push(msg);
           return {ok:true,tabId:1,windowId:1};
         }
-        if(msg?.type==='MULTIVIEW_HOST_FIND')return {ok:true,host:window.__runningHost||null};
+        if(msg?.type==='MULTIVIEW_HOST_FIND'){
+          const hosts=window.__runningHosts||(window.__runningHost?[window.__runningHost]:[]);
+          return {ok:true,host:hosts[0]||null,hosts};
+        }
         if(msg?.type==='MULTIVIEW_HOST_FOCUS'){
           (window.hostFocuses=window.hostFocuses||[]).push(msg);
           return {ok:true,tabId:msg.tabId,windowId:2};
@@ -155,7 +160,8 @@ const checks = [];
           window.storageListeners.forEach(listener=>listener(changes,'local'));
         }},
         session:{get:async(k)=>({[k]:window.sessionStore[k]}),
-          set:async(o)=>{Object.assign(window.sessionStore,o);}},
+          // 실제 저장소처럼 값을 복사해 둔다(같은 배열을 담으면 나중에 고친 내용이 저장값까지 바꾼다).
+          set:async(o)=>{Object.assign(window.sessionStore,JSON.parse(JSON.stringify(o)));}},
         onChanged:{addListener:listener=>window.storageListeners.push(listener)}},
       tabs:{create:(o)=>{window.openedTabs.push(o.url);}}};
     // 치지직 API 스텁: 팔로잉 3채널.
@@ -190,7 +196,7 @@ const checks = [];
         adult:c.channelId.endsWith('1'),
         liveInfo:{liveTitle:c.liveTitle,concurrentUserCount:c.concurrentUserCount,
           openDate:'2026-09-24 10:0'+c.channelId.at(-1)+':00',
-          liveCategoryValue:'게임',
+          liveCategoryValue:'게임',categoryType:'GAME',liveCategory:'talk_game',
           tags:c.tags||[],
           liveImageUrl:'https://example.invalid/'+c.channelId+'/image_{type}.jpg'}}))};
       }
@@ -232,6 +238,29 @@ const checks = [];
           livePv:67890,publishDateAt:Date.now()-4*60*60*1000,duration:930},
         channel:{...channels[1],verifiedMark:true},
       }]};
+      // 카테고리·태그 라이브(다음 묶음은 concurrentUserCount·liveId 짝)와 카테고리 찾기.
+      if(p==='/service/v2/categories/GAME/talk_game/lives'){
+        (window.__categoryCalls=window.__categoryCalls||[]).push(parsed.search);
+        const next=parsed.searchParams.has('liveId');
+        const base=next?810:800;
+        return {data:Array.from({length:next?1:2},(_,i)=>({liveId:base+i,liveTitle:'카테고리 방송 '+(base+i),
+          concurrentUserCount:900-i-(next?10:0),liveCategoryValue:'게임',categoryType:'GAME',liveCategory:'talk_game',tags:[],
+          channel:{channelId:(base+i).toString(16).padStart(32,'0'),channelName:'카테고리 '+(base+i)}})),
+          page:{next:next?null:{concurrentUserCount:899,liveId:801}}};
+      }
+      if(p.endsWith('/service/v1/tag/lives')&&parsed.searchParams.get('tags')==='태그1')return {data:[{liveId:820,
+        liveTitle:'태그 방송',concurrentUserCount:50,liveCategoryValue:'게임',tags:['태그1'],
+        channel:{channelId:(820).toString(16).padStart(32,'0'),channelName:'태그 채널'}}],page:{next:null}};
+      if(p==='/service/v1/search/lives'){
+        window.__titleSearch=(window.__titleSearch||[]).concat(parsed.searchParams.get('keyword'));
+        return {data:[{live:{liveTitle:'롤 제목 방송',concurrentUserCount:77,liveCategoryValue:'게임',tags:[]},
+          channel:{channelId:(830).toString(16).padStart(32,'0'),channelName:'제목 채널'}}],page:{next:null}};
+      }
+      if(p==='/manage/v1/auto-complete/categories'){
+        window.__categorySearch=parsed.searchParams.get('keyword');
+        return {results:[{categoryType:'GAME',categoryId:'talk_game',categoryValue:'게임 토크',posterImageUrl:'https://example.invalid/poster.png'},
+          {categoryType:'ETC',categoryId:'talk',categoryValue:'토크',posterImageUrl:''}]};
+      }
       if(p.endsWith('/service/v1/tag/lives')&&parsed.searchParams.get('tags')==='페이지')return {data:[]};
       if(p.endsWith('/service/v2/home/following/videos')){
         const nextNo=parsed.searchParams.get('nextNo')||'';
@@ -844,6 +873,70 @@ const checks = [];
   );
 
   await test(
+    "카드의 카테고리·태그 칩을 누르면 검색 탭에서 그 라이브를, 카테고리 검색은 카테고리 카드로 보인다",
+    `document.querySelector('[data-mv-source="following"]').click();
+     await wait(250);
+     const list=document.getElementById('mvChannelList');
+     const card=list.querySelector('[data-mv-pick="aaaa0000000000000000000000000001"]');
+     const chip=card.querySelector('.mv-card-category-chip.is-filter');
+     check(chip&&chip.dataset.mvFilterType==='GAME'&&chip.dataset.mvFilterId==='talk_game','카테고리 칩을 누를 수 없다');
+     const chosenBefore=[...document.querySelectorAll('[data-mv-chosen]')].map(n=>n.dataset.mvChosen).join();
+     chip.click();
+     await wait(250);
+     check(document.querySelector('[data-mv-source="search"]').getAttribute('aria-pressed')==='true','칩을 눌렀는데 검색 탭으로 가지 않았다');
+     check([...document.querySelectorAll('[data-mv-chosen]')].map(n=>n.dataset.mvChosen).join()===chosenBefore,'칩을 눌렀는데 고른 채널이 바뀌었다: '+chosenBefore);
+     const pill=document.getElementById('mvSearchFilter');
+     check(!pill.hidden&&pill.textContent.includes('카테고리 · 게임'),'필터 표시가 없다: '+pill.textContent);
+     const pressedMode=()=>document.querySelector('[data-mv-search-mode][aria-pressed="true"]')?.dataset.mvSearchMode;
+     check(pressedMode()==='category','카테고리 칩인데 검색 종류가 카테고리가 아니다: '+pressedMode());
+     check(list.querySelectorAll('[data-mv-pick]').length>=2&&list.textContent.includes('카테고리 방송 800'),'카테고리 라이브가 아니다: '+list.textContent);
+     for(let i=0;i<6&&list.querySelectorAll('[data-mv-pick]').length<3;i++){
+       list.scrollTop=list.scrollHeight;list.dispatchEvent(new Event('scroll'));await wait(120);
+     }
+     check(list.querySelectorAll('[data-mv-pick]').length===3&&window.__categoryCalls.some(q=>q.includes('concurrentUserCount=899')&&q.includes('liveId=801')),
+       '카테고리 다음 묶음을 커서로 잇지 않았다: '+window.__categoryCalls);
+     // 태그 칩
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(250);
+     list.querySelector('[data-mv-pick="aaaa0000000000000000000000000001"] .mv-card-tag-chip[data-mv-filter-tag="태그1"]').click();
+     await wait(250);
+     check(pill.textContent.includes('태그 · #태그1')&&list.querySelector('[data-mv-pick="00000000000000000000000000000334"]'),
+       '태그 칩: '+pill.textContent+' / '+list.textContent);
+     check(pressedMode()==='channel','태그 칩인데 검색 종류가 채널·태그가 아니다: '+pressedMode());
+     // 필터 해제 → 원래 검색
+     pill.querySelector('[data-mv-filter-clear]').click();
+     await wait(400);
+     check(pill.hidden&&!list.querySelector('[data-mv-pick="00000000000000000000000000000334"]'),'필터를 풀지 않았다');
+     // 방제 검색 → 방송 제목으로 찾은 라이브
+     const input=document.getElementById('mvSearch');
+     document.querySelector('[data-mv-search-mode="title"]').click();
+     input.value='롤';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(400);
+     check(pressedMode()==='title'&&input.placeholder==='방송 제목으로 찾기'&&window.__titleSearch?.includes('롤')&&
+       list.querySelector('[data-mv-pick="0000000000000000000000000000033e"]'),'방제 검색: '+list.textContent);
+     // 카테고리 검색 → 카테고리 카드 → 누르면 그 카테고리 라이브
+     document.querySelector('[data-mv-search-mode="category"]').click();
+     input.value='게임';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(400);
+     const cats=[...list.querySelectorAll('[data-mv-category-pick]')];
+     check(cats.length===2&&window.__categorySearch==='게임'&&input.placeholder==='카테고리 이름으로 찾기'&&
+       document.getElementById('mvSort').closest('.mv-sort-row').hidden&&cats[0].querySelector('img'),
+       '카테고리 카드가 아니다: '+list.textContent);
+     check(cats[0].textContent.includes('게임 토크')&&cats[0].textContent.includes('게임'),'카테고리 카드 이름·종류');
+     cats[0].click();
+     await wait(250);
+     check(pill.textContent.includes('카테고리 · 게임 토크')&&list.querySelectorAll('[data-mv-pick]').length>=2,'카테고리 카드를 눌러도 그 라이브가 아니다');
+     pill.querySelector('[data-mv-filter-clear]').click();
+     await wait(250);
+     check(list.querySelectorAll('[data-mv-category-pick]').length===2,'필터를 풀면 카테고리 목록으로 돌아가야 한다');
+     document.querySelector('[data-mv-search-mode="channel"]').click();
+     input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(350);
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(200);`,
+  );
+
+  await test(
     "다시보기 선택은 팔로잉·전체·채널 검색·보관함 경로를 제공한다",
     `const tabs=document.querySelectorAll('[data-mv-source]');
      const source='videos';
@@ -1155,13 +1248,307 @@ const checks = [];
      check(!dialog.open&&window.hostFocuses?.length===1&&window.hostFocuses[0].tabId===7,
        '멀티뷰 이동을 눌렀는데 그 탭으로 옮기지 않았다');
      check((window.hostOpens||[]).length===opensBefore,'멀티뷰 이동인데 새로 불러왔다');
-     // 배치가 다르면 같은 구성이 아니다 → 묻지 않고 그 탭을 새 구성으로 다시 연다.
+     // 배치가 다르면 같은 구성이 아니다 → 멀티뷰 탭 추가 안내(부담·겹치는 채널, 탭이 하나면 '기존 멀티뷰 바꾸기').
      document.querySelector('[data-mv-layout]:not(.is-on)').click();
      start.click();
      await wait(150);
-     check(!dialog.open&&(window.hostOpens||[]).length===opensBefore+1,
-       '구성이 다른데 확인 창을 띄우거나 열지 않았다');
+     const multi=document.getElementById('mvMultiTabDialog');
+     check(!dialog.open&&multi.open,'구성이 다른데 멀티뷰 탭 추가 안내가 뜨지 않았다');
+     check(!document.getElementById('mvMultiTabLoad').hidden&&multi.textContent.includes('PC·네트워크 환경에 따라'),'부담 안내가 없다');
+     const dupText=document.getElementById('mvMultiTabDup');
+     check(!dupText.hidden&&dupText.textContent.includes('다른 멀티뷰 탭에서 이미 시청 중인 채널이 있습니다'),'겹치는 채널 안내가 없다: '+dupText.textContent);
+     const multiButtons=[...multi.querySelectorAll('button')].filter(b=>!b.hidden).map(b=>b.textContent.trim());
+     check(multiButtons.join(',')==='취소,기존 멀티뷰 바꾸기,새 탭으로 열기','버튼: '+multiButtons);
+     multi.querySelector('button[value="replace"]').click();
+     await wait(100);
+     check((window.hostOpens||[]).length===opensBefore+1&&window.hostOpens.at(-1).reuseTabId===7,
+       '기존 멀티뷰 바꾸기인데 그 탭(reuseTabId)으로 열지 않았다: '+JSON.stringify(window.hostOpens.at(-1)));
+     start.click();
+     await wait(150);
+     multi.querySelector('button[value="open"]').click();
+     await wait(100);
+     check((window.hostOpens||[]).length===opensBefore+2&&!('reuseTabId' in window.hostOpens.at(-1)),'새 탭으로 열기인데 기존 탭을 지정했다');
+     start.click();
+     await wait(150);
+     multi.querySelector('button[value="cancel"]').click();
+     await wait(80);
+     check((window.hostOpens||[]).length===opensBefore+2,'취소했는데 열었다');
+     // 멀티뷰가 둘 이상이면 어느 탭을 바꿀지 모르므로 '기존 멀티뷰 바꾸기'는 없다. 겹치는 채널이 없으면 그 안내도 없다.
+     window.sessionStore['cheeseMultiviewSetup:other-tab']={chosen:[{channelId:'ffff0000000000000000000000000009',channelName:'다른채널'}]};
+     window.__runningHosts=[{tabId:8,windowId:2,setupId:'other-tab'},{tabId:9,windowId:2,setupId:'other-tab'}];
+     start.click();
+     await wait(150);
+     check(multi.open&&document.getElementById('mvMultiTabReplace').hidden&&document.getElementById('mvMultiTabDup').hidden,
+       '탭이 둘 이상이면 바꾸기 버튼이 없고, 겹치지 않으면 겹침 안내가 없다');
+     multi.querySelector('button[value="cancel"]').click();
+     await wait(50);
+     window.__runningHosts=null;
      window.__runningHost=null;`,
+  );
+
+  // 편집 창 모습 확인용(MV_SHOT=폴더 일 때만). 대칭 5칸(위 2 + 아래 3)을 그려 찍고 닫는다.
+  if (process.env.MV_SHOT) {
+    await evaluate(`(()=>{document.getElementById('mvCustomLayoutNew').click();
+      const dialog=document.getElementById('mvCustomLayoutDialog');
+      dialog.querySelector('[data-mv-custom-size="cols:1"]').click();dialog.querySelector('[data-mv-custom-size="cols:1"]').click();
+      const grid=document.getElementById('mvCustomGrid');
+      const at=(r,c)=>{const b=grid.getBoundingClientRect();return {clientX:b.left+(c+0.5)*b.width/6,clientY:b.top+(r+0.5)*b.height/2};};
+      const fire=(t,pt)=>grid.dispatchEvent(new PointerEvent(t,{bubbles:true,button:0,pointerId:1,...pt}));
+      const drag=(a,b)=>{fire('pointerdown',at(...a));fire('pointermove',at(...b));fire('pointerup',at(...b));};
+      drag([0,0],[0,2]);drag([0,3],[0,5]);drag([1,0],[1,1]);drag([1,2],[1,3]);drag([1,4],[1,5]);
+      fire('pointerdown',at(1,2));fire('pointerup',at(1,2));
+      dialog.querySelector('[data-mv-custom-chattop-add]').click();
+      document.getElementById('mvCustomLayoutName').value='대칭 2+3';return true;})()`);
+    await evaluate("new Promise(r=>setTimeout(r,100))");
+    const box = await evaluate("(()=>{const b=document.getElementById('mvCustomLayoutDialog').getBoundingClientRect();return {x:b.left,y:b.top,width:b.width,height:b.height};})()");
+    const shot = await command("Page.captureScreenshot", { format: "png", clip: { ...box, scale: 1 } });
+    require("node:fs").writeFileSync(require("node:path").join(process.env.MV_SHOT, "custom-layout-editor.png"), Buffer.from(shot.data, "base64"));
+    await evaluate("document.querySelector('[data-mv-custom-close]').click(); true");
+  }
+
+  // 기본 배치 설정 창 모습 확인용(MV_SHOT=폴더 일 때만).
+  if (process.env.MV_SHOT) {
+    const head = await evaluate("(()=>{const b=document.querySelector('.mv-layout-pick').getBoundingClientRect();return {x:b.left,y:b.top,width:b.width,height:Math.min(80,b.height)};})()");
+    const headShot = await command("Page.captureScreenshot", { format: "png", clip: { ...head, scale: 1 } });
+    require("node:fs").writeFileSync(require("node:path").join(process.env.MV_SHOT, "layout-pick-head.png"), Buffer.from(headShot.data, "base64"));
+    await evaluate(`(()=>{document.getElementById('mvLayoutPrefsOpen').click();
+      const d=document.getElementById('mvLayoutPrefsDialog');
+      const ids=[...d.querySelectorAll('[data-mv-layout-prefs-toggle]')].map(b=>b.dataset.mvLayoutPrefsToggle);
+      d.querySelector('[data-mv-layout-prefs-toggle="'+ids[1]+'"]').click();
+      d.querySelector('[data-mv-layout-prefs-default="'+ids[2]+'"]').click();return true;})()`);
+    await evaluate("new Promise(r=>setTimeout(r,150))");
+    const box = await evaluate("(()=>{const b=document.getElementById('mvLayoutPrefsDialog').getBoundingClientRect();return {x:b.left,y:b.top,width:b.width,height:b.height};})()");
+    const shot = await command("Page.captureScreenshot", { format: "png", clip: { ...box, scale: 1 } });
+    require("node:fs").writeFileSync(require("node:path").join(process.env.MV_SHOT, "layout-prefs.png"), Buffer.from(shot.data, "base64"));
+    await evaluate("(async()=>{const d=document.getElementById('mvLayoutPrefsDialog');d.querySelector('[data-mv-layout-prefs-reset]').click();await new Promise(r=>setTimeout(r,60));d.querySelector('[data-mv-layout-prefs-close]').click();return true})()");
+  }
+
+  await test(
+    "기본 배치 설정: 채널 수마다 배치를 숨기고 기본 배치를 정하면 목록과 채널 수 변경에 따른다",
+    `const count=Number(document.getElementById('mvChosenCount').textContent.split('/')[0]);
+     check(count>=2&&count<=8,'고른 채널 수: '+count);
+     // 배치 머리 버튼 셋: 글자가 줄바꿈되지 않는다(기본 배치 설정은 톱니 아이콘 + 툴팁).
+     const headButtons=[...document.querySelectorAll('.mv-layout-pick-head button:not([hidden])')];
+     check(headButtons.length>=2&&headButtons.every(b=>b.getBoundingClientRect().height<30)&&
+       document.querySelector('.mv-layout-pick-head > strong').getBoundingClientRect().height<24&&
+       document.getElementById('mvLayoutPrefsOpen').dataset.tooltip==='기본 배치 설정',
+       '배치 머리 버튼이 한 줄로: '+headButtons.map(b=>Math.round(b.getBoundingClientRect().height)).join(','));
+     document.getElementById('mvLayoutPrefsOpen').click();
+     const dlg=document.getElementById('mvLayoutPrefsDialog');
+     check(dlg.open&&dlg.querySelector('[data-mv-layout-prefs-count="'+count+'"]')?.getAttribute('aria-pressed')==='true',
+       '지금 채널 수 탭으로 열린다');
+     const cards=()=>[...dlg.querySelectorAll('.mv-layout-prefs-card')];
+     check(cards().length===window.CheeseMultiviewLayouts.layoutsFor(count,{all:true}).length,'그 채널 수의 배치 전부');
+     // 숨기기: 지금 고른 배치가 아닌 첫 기본 배치
+     const current=document.querySelector('#mvLayoutGrid .mv-layout.is-on')?.dataset.mvLayout;
+     const hideId=[...dlg.querySelectorAll('[data-mv-layout-prefs-toggle]')].map(b=>b.dataset.mvLayoutPrefsToggle).find(id=>id!==current);
+     dlg.querySelector('[data-mv-layout-prefs-toggle="'+hideId+'"]').click();
+     await wait(40);
+     check(window.localStore.cheeseMultiviewLayoutPrefs?.hidden?.includes(hideId)&&!document.querySelector('#mvLayoutGrid [data-mv-layout="'+hideId+'"]'),
+       '숨긴 배치는 배치 목록에서 빠진다: '+JSON.stringify(window.localStore.cheeseMultiviewLayoutPrefs));
+     check(dlg.querySelector('[data-mv-layout-prefs-toggle="'+hideId+'"]').closest('.mv-layout-prefs-card').classList.contains('is-off'),'카드는 흐리게');
+     // 기본 배치: 숨긴 배치를 기본으로 고르면 다시 보인다
+     dlg.querySelector('[data-mv-layout-prefs-default="'+hideId+'"]').click();
+     await wait(40);
+     const prefs=window.localStore.cheeseMultiviewLayoutPrefs;
+     check(prefs.defaults[count]===hideId&&!prefs.hidden.includes(hideId)&&document.querySelector('#mvLayoutGrid [data-mv-layout="'+hideId+'"]'),
+       '기본 배치로 고르면 다시 보이고 저장: '+JSON.stringify(prefs));
+     check(document.getElementById('mvLayoutPrefsSummary').textContent.includes('기본 배치')&&dlg.querySelector('[data-mv-layout-prefs-auto]'),'요약과 자동으로 버튼');
+     // 마지막 하나는 숨길 수 없다
+     for(const b of [...dlg.querySelectorAll('[data-mv-layout-prefs-toggle][aria-pressed="true"]')]){
+       if(!b.disabled&&dlg.querySelectorAll('[data-mv-layout-prefs-toggle][aria-pressed="true"]').length>1){
+         dlg.querySelector('[data-mv-layout-prefs-toggle="'+b.dataset.mvLayoutPrefsToggle+'"]').click();await wait(20);}
+     }
+     const still=[...dlg.querySelectorAll('[data-mv-layout-prefs-toggle][aria-pressed="true"]')];
+     check(still.length===1&&still[0].disabled,'마지막 하나는 숨길 수 없다');
+     check(!window.localStore.cheeseMultiviewLayoutPrefs.defaults[count]||window.localStore.cheeseMultiviewLayoutPrefs.defaults[count]===still[0].dataset.mvLayoutPrefsToggle,
+       '기본 배치를 숨기면 기본도 풀린다');
+     // 되돌리기
+     dlg.querySelector('[data-mv-layout-prefs-reset]').click();
+     await wait(40);
+     check(!window.localStore.cheeseMultiviewLayoutPrefs.hidden.length&&!window.localStore.cheeseMultiviewLayoutPrefs.defaults[count],
+       '이 채널 수 되돌리기: '+JSON.stringify(window.localStore.cheeseMultiviewLayoutPrefs));
+     dlg.querySelector('[data-mv-layout-prefs-close]').click();
+     check(!dlg.open,'닫기');`,
+  );
+
+  await test(
+    "내 배치: 끌어서 칸을 만들고 저장하면 배치 목록 '내 배치'에 나오고, 시작 구성에 모양을 담는다",
+    `const count=Number(document.getElementById('mvChosenCount').textContent.split('/')[0]);
+     check(count>=2&&count<=8,'고른 채널 수: '+count);
+     document.getElementById('mvCustomLayoutNew').click();
+     const dialog=document.getElementById('mvCustomLayoutDialog');
+     check(dialog.open&&document.getElementById('mvCustomLayoutTitle').textContent==='내 배치 만들기','편집기가 열리지 않았다');
+     const grid=document.getElementById('mvCustomGrid');
+     dialog.querySelector('[data-mv-custom-size="cols:-1"]').click();
+     dialog.querySelector('[data-mv-custom-size="rows:1"]').click();
+     check(document.getElementById('mvCustomCols').textContent==='3'&&document.getElementById('mvCustomRows').textContent==='3','격자 크기 3×3');
+     const at=(r,c)=>{const b=grid.getBoundingClientRect();return {clientX:b.left+(c+0.5)*b.width/3,clientY:b.top+(r+0.5)*b.height/3};};
+     const fire=(type,pt)=>grid.dispatchEvent(new PointerEvent(type,{bubbles:true,button:0,pointerId:1,...pt}));
+     const drag=(from,to)=>{fire('pointerdown',at(...from));fire('pointermove',at(...to));fire('pointerup',at(...to));};
+     drag([0,0],[0,1]);
+     const singles=[[0,2],[1,0],[1,1],[1,2],[2,0],[2,1],[2,2]];
+     for(let i=0;i<count-1;i++)drag(singles[i],singles[i]);
+     const labels=[...grid.querySelectorAll('[data-mv-custom-slot]')].map(n=>n.textContent);
+     check(labels[0]==='메인'&&labels.length===count,'끌어서 칸 만들기(처음이 메인): '+labels);
+     drag([0,0],[1,0]);
+     check(grid.querySelectorAll('[data-mv-custom-slot]').length===count,'이미 있는 칸에 겹치게 끌었는데 칸을 만들었다');
+     const status=document.getElementById('mvCustomLayoutStatus').textContent;
+     check(status.includes('채널 '+count+'개 배치'),'상태 안내: '+status);
+     fire('pointerdown',at(0,2));fire('pointerup',at(0,2));
+     check(grid.querySelector('.mv-custom-slot.is-selected')?.dataset.mvCustomSlot==='a'&&
+       grid.querySelectorAll('.mv-custom-slot.is-selected [data-mv-custom-handle]').length===4,'칸을 누르면 고르고 모서리 손잡이 넷');
+     dialog.querySelector('[data-mv-custom-tool="main"]').click();
+     check(grid.querySelector('[data-mv-custom-slot="m"]').style.gridArea.startsWith('1 / 3'),'메인으로 바꾸기: '+grid.querySelector('[data-mv-custom-slot="m"]').style.gridArea);
+     // 옮기기·크기: 빈 격자에 칸 둘을 만들고 끌어 본다(검사 뒤 원래 칸으로 되돌린다).
+     const snapshot=[...grid.querySelectorAll('[data-mv-custom-slot]')].map(n=>n.dataset.mvCustomSlot+'@'+n.style.gridArea).join();
+     dialog.querySelector('[data-mv-custom-tool="clear"]').click();
+     drag([0,0],[0,0]);drag([2,2],[2,2]);
+     const areaOf=(slot)=>grid.querySelector('[data-mv-custom-slot="'+slot+'"]').style.gridArea;
+     drag([0,0],[1,1]);
+     check(areaOf('m').startsWith('2 / 2'),'칸을 끌면 같은 크기로 옮긴다: '+areaOf('m'));
+     fire('pointerdown',at(1,1));fire('pointermove',at(2,2));
+     check(grid.querySelector('.mv-custom-pick.is-invalid'),'다른 칸과 겹치는 자리는 빨갛게');
+     fire('pointerup',at(2,2));
+     check(areaOf('m').startsWith('2 / 2'),'겹치는 자리에 놓으면 그대로 둔다');
+     check(grid.querySelector('.mv-custom-slot.is-selected')?.dataset.mvCustomSlot==='m','옮긴 칸은 고른 채로 둔다');
+     const se=grid.querySelector('[data-mv-custom-slot="m"] [data-mv-custom-handle="se"]');
+     se.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:1,...at(1,1)}));
+     fire('pointermove',at(2,1));
+     check(grid.querySelector('.mv-custom-pick span')?.textContent==='1×2','끄는 동안 크기를 보인다: '+grid.querySelector('.mv-custom-pick span')?.textContent);
+     fire('pointerup',at(2,1));
+     check(areaOf('m')==='2 / 2 / 4 / 3','오른쪽 아래 손잡이로 크기를 바꾼다: '+areaOf('m'));
+     const nw=grid.querySelector('[data-mv-custom-slot="m"] [data-mv-custom-handle="nw"]');
+     nw.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:1,...at(1,1)}));
+     fire('pointermove',at(0,0));fire('pointerup',at(0,0));
+     check(areaOf('m')==='1 / 1 / 4 / 3','왼쪽 위 손잡이는 오른쪽 아래를 두고 늘린다: '+areaOf('m'));
+     // 채팅 막대 위 영상: '+ 영상' 으로 채팅 위에 영상 칸(기본 '채팅 위' 배치처럼, 2개까지)
+     const stage=document.getElementById('mvCustomStage');
+     const chatbar=stage.querySelector('.mv-custom-chatbar');
+     const topAdd=dialog.querySelector('[data-mv-custom-chattop-add]');
+     const topVideos=()=>[...document.querySelectorAll('#mvCustomChatTop .mv-custom-chattop-video')].map(n=>n.firstElementChild.textContent);
+     const drawChat=dialog.querySelector('[data-mv-custom-draw="chat"]');
+     check(stage.dataset.chat==='right'&&getComputedStyle(chatbar).display!=='none'&&!topAdd.hidden,'오른쪽 채팅 막대와 + 영상');
+     topAdd.click();
+     check(topVideos().join()==='2'&&document.getElementById('mvCustomLayoutStatus').textContent.includes('채널 3개 배치')&&drawChat.disabled,
+       '채팅 위 영상 하나(격자 칸 다음 번호), 격자 안 채팅은 막는다: '+topVideos()+' / '+document.getElementById('mvCustomLayoutStatus').textContent);
+     topAdd.click();
+     check(topVideos().join()==='2,3'&&topAdd.disabled,'채팅 위 영상은 2개까지: '+topVideos());
+     document.querySelector('#mvCustomChatTop [data-mv-custom-chattop-remove]').click();
+     check(topVideos().join()==='2'&&!topAdd.disabled,'× 로 채팅 위 영상 빼기');
+     dialog.querySelector('[data-mv-custom-chat="bottom"]').click();
+     check(stage.dataset.chat==='bottom'&&topAdd.hidden&&topVideos().length===0&&!drawChat.disabled,'아래 채팅이면 채팅 위 영상은 없다');
+     dialog.querySelector('[data-mv-custom-chat="right"]').click();
+     // 격자 안 채팅: '채팅 칸' 으로 그리면 채팅 1·2…, 바깥 채팅 자리는 잠근다
+     drawChat.click();
+     check(drawChat.getAttribute('aria-pressed')==='true','채팅 칸 그리기');
+     drag([0,2],[1,2]);
+     check(grid.querySelector('[data-mv-custom-slot="x"]')?.textContent.includes('채팅 1')&&areaOf('x')==='1 / 3 / 3 / 4'&&
+       stage.dataset.chat==='inset'&&getComputedStyle(chatbar).display==='none'&&dialog.querySelector('[data-mv-custom-chat="right"]').disabled&&
+       !document.getElementById('mvCustomLayoutSave').disabled,'끈 곳이 채팅 칸, 막대는 숨기고 바깥 자리는 잠근다: '+(grid.querySelector('[data-mv-custom-slot="x"]')&&areaOf('x')));
+     fire('pointerdown',at(2,2));fire('pointerup',at(2,2));
+     dialog.querySelector('[data-mv-custom-tool="remove"]').click();
+     drag([2,2],[2,2]);
+     check(grid.querySelector('[data-mv-custom-slot="q"]')?.textContent.includes('채팅 2')&&drawChat.textContent.includes('2/4'),
+       '채팅 칸 두 개(채팅 1·2): '+drawChat.textContent);
+     // 방금 그린 채팅 2 는 골라진 채로 있다 → 지우고, 채팅 1 도 골라 지운다
+     check(grid.querySelector('.mv-custom-slot.is-selected')?.dataset.mvCustomSlot==='q','그린 채팅 칸은 고른 채로');
+     dialog.querySelector('[data-mv-custom-tool="remove"]').click();
+     fire('pointerdown',at(0,2));fire('pointerup',at(0,2));
+     dialog.querySelector('[data-mv-custom-tool="remove"]').click();
+     check(stage.dataset.chat==='right'&&getComputedStyle(chatbar).display!=='none','채팅 칸을 다 지우면 바깥 채팅(오른쪽)으로: '+stage.dataset.chat+' '+[...grid.querySelectorAll('[data-mv-custom-slot]')].map(n=>n.dataset.mvCustomSlot+'@'+n.style.gridArea).join());
+     dialog.querySelector('[data-mv-custom-draw="video"]').click();
+     // 원래 칸으로 되돌린다
+     dialog.querySelector('[data-mv-custom-tool="clear"]').click();
+     drag([0,0],[0,1]);
+     for(let i=0;i<count-1;i++)drag(singles[i],singles[i]);
+     fire('pointerdown',at(0,2));fire('pointerup',at(0,2));
+     dialog.querySelector('[data-mv-custom-tool="main"]').click();
+     check(grid.querySelector('[data-mv-custom-slot="m"]').style.gridArea.startsWith('1 / 3'),'되돌리기: '+snapshot);
+     const name=document.getElementById('mvCustomLayoutName');
+     name.value='시험 배치';name.dispatchEvent(new Event('input'));
+     document.getElementById('mvCustomLayoutSave').click();
+     await wait(60);
+     check(!dialog.open,'저장했는데 편집기가 닫히지 않았다');
+     const saved=window.localStore.cheeseMultiviewCustomLayouts;
+     check(Array.isArray(saved)&&saved.length===1&&saved[0].name==='시험 배치'&&saved[0].cells[0][2]==='m'&&/^custom-/.test(saved[0].id),
+       '저장값: '+JSON.stringify(saved));
+     const card=document.querySelector('#mvLayoutGrid [data-mv-layout="'+saved[0].id+'"]');
+     check(card&&card.classList.contains('is-on')&&card.closest('.mv-layout-custom')?.querySelector('[data-mv-custom-edit]'),
+       '저장한 내 배치를 고르고, 카드에 수정 버튼');
+     check([...document.querySelectorAll('#mvLayoutGrid .mv-layout-group-label')].some(n=>n.textContent==='내 배치'),'내 배치 머리말');
+     const before=(window.hostOpens||[]).length;
+     document.getElementById('mvStart').click();
+     await wait(150);
+     check((window.hostOpens||[]).length===before+1,'시작하지 않았다');
+     const setup=window.sessionStore['cheeseMultiviewSetup:'+window.hostOpens.at(-1).setupId];
+     check(setup.layoutId===saved[0].id&&setup.customLayout?.id===saved[0].id&&setup.customLayout.cells[0][2]==='m',
+       '시작 구성에 내 배치 모양을 담지 않았다');
+     // 내 배치 관리: 칸 수와 상관없이 전체 — 복제·삭제(두 번)
+     const manageButton=document.getElementById('mvCustomLayoutManage');
+     check(!manageButton.hidden,'내 배치가 있으면 관리 버튼');
+     manageButton.click();
+     const manage=document.getElementById('mvCustomManageDialog');
+     const items=()=>[...manage.querySelectorAll('.mv-custom-manage-item')];
+     check(manage.open&&items().length===1&&items()[0].textContent.includes('채널 '+count+'개')&&items()[0].querySelector('.mv-layout-preview'),
+       '관리 창 목록: '+manage.textContent);
+     manage.querySelector('[data-mv-custom-manage-copy]').click();
+     await wait(60);
+     check(items().length===2&&window.localStore.cheeseMultiviewCustomLayouts.length===2&&
+       window.localStore.cheeseMultiviewCustomLayouts[1].name==='시험 배치 복사본','복제');
+     const copyId=window.localStore.cheeseMultiviewCustomLayouts[1].id;
+     manage.querySelector('[data-mv-custom-manage-delete="'+copyId+'"]').click();
+     check(manage.querySelector('[data-mv-custom-manage-delete="'+copyId+'"]').textContent==='한 번 더 누르면 삭제','관리 창 삭제 확인');
+     manage.querySelector('[data-mv-custom-manage-delete="'+copyId+'"]').click();
+     await wait(60);
+     check(items().length===1&&window.localStore.cheeseMultiviewCustomLayouts.length===1,'관리 창 삭제');
+     manage.querySelector('[data-mv-custom-manage-close]').click();
+     document.querySelector('[data-mv-custom-edit="'+saved[0].id+'"]').click();
+     check(dialog.open&&document.getElementById('mvCustomLayoutTitle').textContent==='내 배치 수정'&&name.value==='시험 배치'&&
+       !document.getElementById('mvCustomLayoutDelete').hidden,'수정 창');
+     check([...document.querySelectorAll('#mvCustomManageList [data-mv-custom-manage-edit]')].every(b=>b.textContent==='수정'),'관리 창 버튼은 수정');
+     const del=document.getElementById('mvCustomLayoutDelete');
+     del.click();
+     check(dialog.open&&del.textContent==='한 번 더 누르면 삭제','삭제는 한 번 더 확인');
+     del.click();
+     await wait(60);
+     check(!dialog.open&&window.localStore.cheeseMultiviewCustomLayouts.length===0&&document.getElementById('mvCustomLayoutManage').hidden,
+       '삭제(남은 배치가 없으면 관리 버튼도 숨긴다)');
+     // 10칸 내 배치가 있으면 10채널까지 고를 수 있다(안내 문구, 그 칸 수의 내 배치만 목록에)
+     const keep=[...document.querySelectorAll('[data-mv-chosen]')].map(n=>n.dataset.mvChosen);
+     const ten=[['m','a','b','c','d'],['e','f','g','h','i']];
+     await chrome.storage.local.set({cheeseMultiviewCustomLayouts:[{id:'custom-ten10',name:'열 칸',cells:ten,chat:'right'}]});
+     await wait(30);
+     document.querySelector('[data-mv-source="search"]').click();
+     const input=document.getElementById('mvSearch');
+     input.value='페이지';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(450);
+     const list=document.getElementById('mvChannelList');
+     for(const card of [...list.querySelectorAll('[data-mv-pick]')]){
+       if(document.querySelectorAll('[data-mv-chosen]').length>=10)break;
+       if(!card.classList.contains('is-on'))card.click();
+     }
+     await wait(60);
+     check(document.querySelectorAll('[data-mv-chosen]').length===10&&document.getElementById('mvChosenCount').textContent==='10 / 10',
+       '10칸 내 배치가 있으면 10채널까지: '+document.getElementById('mvChosenCount').textContent);
+     const manyNote=document.getElementById('mvManyChannelsNote');
+     const noteColor=getComputedStyle(manyNote).color.match(/[0-9]+/g).map(Number);
+     check(!manyNote.hidden&&manyNote.textContent.includes('PC·네트워크 부담')&&noteColor[0]>noteColor[1]+60&&noteColor[0]>noteColor[2]+60,
+       '10채널 이상이면 붉은 부담 안내: '+getComputedStyle(manyNote).color);
+     check([...document.querySelectorAll('#mvLayoutGrid [data-mv-layout]')].map(n=>n.dataset.mvLayout).join()==='custom-ten10',
+       '10채널이면 10칸 내 배치만 목록에');
+     check([...list.querySelectorAll('[data-mv-pick]:not(.is-on)')].every(n=>n.disabled),'상한이면 더 고를 수 없다');
+     // 되돌리기
+     for(const id of [...document.querySelectorAll('[data-mv-chosen]')].map(n=>n.dataset.mvChosen))
+       if(!keep.includes(id))document.querySelector('[data-mv-remove="'+id+'"]').click();
+     await chrome.storage.local.set({cheeseMultiviewCustomLayouts:[]});
+     await wait(30);
+     check(document.getElementById('mvChosenCount').textContent===keep.length+' / 9'&&document.getElementById('mvManyChannelsNote').hidden,
+       '내 배치를 지우면 다시 9채널: '+document.getElementById('mvChosenCount').textContent);
+     input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(350);
+     document.querySelector('[data-mv-source="following"]').click();
+     await wait(200);`,
   );
 
   assert.deepEqual(await evaluate("errors"), [], "고르기 화면 조작 중 오류");
@@ -1267,6 +1654,19 @@ const checks = [];
           video:{videoNo:'902',videoTitle:'검색어 인기 업로드',videoType:'UPLOAD',readCount:1800},
           channel:{...quickChannels[1],verifiedMark:true},
         }]}};
+        if(parsed.pathname==='/service/v2/categories/GAME/talk_game/lives'){
+          (window.__quickCategoryCalls=window.__quickCategoryCalls||[]).push(parsed.search);
+          return {ok:true,content:{data:[0,1].map(i=>({liveId:900+i,liveTitle:'퀵 카테고리 방송 '+i,concurrentUserCount:90-i,
+            liveCategoryValue:'게임',categoryType:'GAME',liveCategory:'talk_game',tags:[],
+            channel:{channelId:(900+i).toString(16).padStart(32,'0'),channelName:'퀵 카테고리 '+i}})),page:{next:null}}};
+        }
+        if(parsed.pathname.endsWith('/service/v1/tag/lives')&&window.__quickTagFixture&&parsed.searchParams.get('tags')===window.__quickTagFixture)return {ok:true,content:{data:[{liveId:920,
+          liveTitle:'퀵 태그 방송',concurrentUserCount:40,liveCategoryValue:'게임',tags:[window.__quickTagFixture],
+          channel:{channelId:(920).toString(16).padStart(32,'0'),channelName:'퀵 태그 채널'}}],page:{next:null}}};
+        if(parsed.pathname==='/service/v1/search/lives')return {ok:true,content:{data:[{live:{liveTitle:'퀵 제목 방송',concurrentUserCount:66,
+          liveCategoryValue:'게임',tags:[]},channel:{channelId:(930).toString(16).padStart(32,'0'),channelName:'퀵 제목 채널'}}],page:{next:null}}};
+        if(parsed.pathname==='/manage/v1/auto-complete/categories')return {ok:true,content:{results:[
+          {categoryType:'GAME',categoryId:'talk_game',categoryValue:'게임 토크',posterImageUrl:'https://example.invalid/poster.png'}]}};
         if(parsed.pathname.endsWith('/service/v1/tag/lives'))return {ok:true,content:{data:[]}};
         if(parsed.pathname.endsWith('/service/v2/home/following/videos'))return {ok:true,content:{
           data:[{video:{videoNo:'101',videoTitle:'팔로잉 다시보기',
@@ -1306,7 +1706,7 @@ const checks = [];
         return {ok:true,content:{followingList:quickChannels.map(c=>({
           channelId:c.channelId,channel:c,streamer:{openLive:true},
           liveInfo:{liveTitle:window.__followingTitle||'방송',concurrentUserCount:window.__followingViewers||1,
-            liveCategoryValue:'게임',tags:c.tags||[]}}))}};
+            liveCategoryValue:'게임',categoryType:'GAME',liveCategory:'talk_game',tags:c.tags||[]}}))}};
       }},
       storage:{session:{
         get:async(k)=>({[k]:window.sessionStore[k]}),
@@ -1859,6 +2259,202 @@ const checks = [];
      document.getElementById('mvQuickClose').click();`,
   );
 
+  // J: 치지직 화면처럼 바로 채팅 입력(시청 화면에서 누르거나, 영상 칸이 FRAME_FOCUS_CHAT 으로 알리거나).
+  {
+    const prepared = await evaluate(`(()=>{const f=document.getElementById('mvChatFrame');
+      if(!f||f.hidden)return 'chat-hidden';const d=f.contentDocument;if(!d)return 'no-doc';
+      d.body.innerHTML='<aside id="aside-chatting"><textarea class="live_chatting_input_input__x" placeholder="채팅을 입력해주세요"></textarea></aside>';
+      document.activeElement?.blur?.();return 'ok';})()`);
+    assert.equal(prepared, "ok", `J 시험 준비 실패: ${prepared}`);
+    const pressJ = async (text = "") => {
+      await command("Input.dispatchKeyEvent", { type: "keyDown", code: "KeyJ", key: "j", windowsVirtualKeyCode: 74, nativeVirtualKeyCode: 74, ...(text ? { text } : {}) });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", code: "KeyJ", key: "j", windowsVirtualKeyCode: 74, nativeVirtualKeyCode: 74 });
+      await evaluate("new Promise(r=>setTimeout(r,50))");
+    };
+    await pressJ("j");
+    const top = await evaluate(`(()=>{const f=document.getElementById('mvChatFrame');
+      return {top:document.activeElement===f,inner:f.contentDocument.activeElement?.tagName,value:f.contentDocument.querySelector('textarea').value};})()`);
+    assert.ok(top.top && top.inner === "TEXTAREA" && top.value === "", `J 를 누르면 채팅 입력창으로 가야 한다 ${JSON.stringify(top)}`);
+    checks.push("J: 시청 화면에서 누르면 채팅 칸 입력창으로 간다(글자 j 는 들어가지 않는다)");
+    // 영상 칸에서 누른 J(칸 content.js 가 FRAME_FOCUS_CHAT 으로 알린다)
+    const fromCell = await evaluate(`(async()=>{const f=document.getElementById('mvChatFrame');
+      f.contentDocument.querySelector('textarea').blur();document.body.focus();
+      const cell=document.querySelector('.mv-cell[data-channel-id]');
+      const e=new MessageEvent('message',{origin:'https://chzzk.naver.com',data:{source:'cheese-platter-multiview',type:'FRAME_FOCUS_CHAT',channelId:cell.dataset.channelId}});
+      Object.defineProperty(e,'source',{value:cell.querySelector('iframe').contentWindow});
+      window.dispatchEvent(e);
+      await new Promise(r=>setTimeout(r,30));
+      return {top:document.activeElement===f,inner:f.contentDocument.activeElement?.tagName};})()`);
+    assert.ok(fromCell.top && fromCell.inner === "TEXTAREA", `영상 칸의 J 알림으로 채팅 입력창으로 가야 한다 ${JSON.stringify(fromCell)}`);
+    checks.push("J: 영상 칸에서 누르면(FRAME_FOCUS_CHAT) 채팅 칸 입력창으로 간다");
+    // 글자 입력 중이면 J 는 글자다
+    await evaluate(`(()=>{const f=document.getElementById('mvChatFrame');f.contentDocument.querySelector('textarea').blur();
+      const i=document.createElement('input');i.id='jProbe';document.body.append(i);i.focus();return true;})()`);
+    await pressJ("j");
+    const typing = await evaluate(`(()=>{const i=document.getElementById('jProbe');const r={value:i.value,still:document.activeElement===i};i.remove();return r;})()`);
+    assert.ok(typing.value === "j" && typing.still, `입력 중인 J 는 글자여야 한다 ${JSON.stringify(typing)}`);
+    checks.push("J: 다른 입력칸에서 글자를 치는 중이면 단축키로 쓰지 않는다");
+    const contentSrc = readFileSync("src/content.js", "utf8");
+    const jBlock = contentSrc.slice(contentSrc.indexOf("  // 멀티뷰 J:"), contentSrc.indexOf("  // 우리 팝업 플레이어 iframe 안인지"));
+    assert.match(jBlock, /if \(IS_MULTIVIEW_FRAME \|\| IS_MULTIVIEW_CHAT_FRAME\) \{\s*window\.addEventListener\("keydown"/);
+    assert.match(jBlock, /e\.preventDefault\(\);\s*e\.stopImmediatePropagation\(\);\s*try \{\s*window\.parent\.postMessage\(\{\s*source: MULTIVIEW_MESSAGE,\s*type: "FRAME_FOCUS_CHAT"/);
+    assert.match(jBlock, /\}, true\);/);
+    checks.push("J: 영상 칸은 치지직 J(칸 안 채팅 펼치기)를 막고 시청 화면에 알린다, 채팅 칸은 제 입력창으로");
+  }
+
+  await test(
+    "내 배치 채팅 2: 칸마다 채팅을 따로 띄우고, 채널·숨기기·분리를 칸마다 한다",
+    `window.__nativeChatPopups=window.__nativeChatPopups||[];
+     const cellIds=[...document.querySelectorAll('.mv-cell')].map(c=>c.dataset.channelId);
+     const count=cellIds.length;
+     const slots=['m','a','b','c','d','e','f','g','h'].slice(0,count);
+     const originalId=document.querySelector('[data-mv-pop-toggle="layout"]')&&[...document.querySelectorAll('[data-mv-set-layout].is-on')].map(n=>n.dataset.mvSetLayout)[0];
+     await chrome.storage.local.set({cheeseMultiviewCustomLayouts:[{id:'custom-chat2x',name:'채팅 둘',chat:'inset',
+       cells:[[...slots,'x'],[...slots,'q']]}]});
+     await wait(50);
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     const option=document.querySelector('[data-mv-set-layout="custom-chat2x"]');
+     check(option,'내 배치가 시청 화면 배치 메뉴에 없다');
+     const beforeSrcs=window.frameSrcs.length;
+     option.click();
+     await wait(120);
+     const pane=document.querySelector('[data-mv-extra-chat="q"]');
+     check(pane&&pane.style.gridArea.startsWith('q')&&pane.querySelector('.mv-extra-chat-label').textContent==='채팅 2','채팅 2 칸이 생기지 않았다');
+     const frame=pane.querySelector('iframe');
+     const src=frame.getAttribute('data-test-src')||'';
+     const chosen=pane.querySelector('select').value;
+     check(/\\/live\\/[0-9a-f]{32}\\/chat\\?/.test(src)&&src.includes('cheeseMultiChat=1')&&src.includes(chosen),'채팅 2 프레임: '+src);
+     check(window.frameSrcs.slice(beforeSrcs).filter(x=>x.includes('cheeseMulti=1')).length===0,'배치를 바꾸며 영상 칸을 다시 불렀다');
+     const options=[...pane.querySelectorAll('select option')].map(o=>o.value);
+     check(options.length>=1&&options.every(v=>/^[0-9a-f]{32}$/.test(v)),'채팅 2 채널 고르기(라이브만): '+options);
+     // 다른 채널로 바꾸면 그 채팅을 새로 띄운다
+     if(options.length>1){
+       const other=options.find(v=>v!==chosen);
+       const sel=pane.querySelector('select');sel.value=other;sel.dispatchEvent(new Event('change',{bubbles:true}));
+       await wait(30);
+       check((frame.getAttribute('data-test-src')||'').includes(other),'채팅 2 채널 바꾸기');
+     }
+     // 숨기기 → 프레임 비우고 안내, 보이기 → 다시
+     pane.querySelector('[data-mv-extra-chat-hide]').click();
+     check(pane.classList.contains('is-hidden')&&frame.hidden&&!pane.querySelector('.mv-extra-chat-note').hidden&&
+       pane.querySelector('[data-mv-extra-chat-hide]').textContent==='보이기','채팅 2 숨기기');
+     const srcsBeforeLayout=window.frameSrcs.length;
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     await wait(30);
+     check(window.frameSrcs.length===srcsBeforeLayout,'배치를 다시 그려도 숨긴 채팅을 다시 부르지 않는다');
+     pane.querySelector('[data-mv-extra-chat-restore]').click();
+     check(!pane.classList.contains('is-hidden')&&!frame.hidden,'채팅 2 보이기');
+     // 분리 → 치지직 채팅창, 칸은 안내·되돌리기
+     pane.querySelector('[data-mv-extra-chat-popout]').click();
+     await wait(60);
+     const popup=window.__nativeChatPopups.at(-1);
+     check(popup&&popup.url.includes('/chat')&&pane.classList.contains('is-popped-out')&&frame.hidden,'채팅 2 분리');
+     check(!document.getElementById('mvStage').classList.contains('is-chat-popped-out'),'채팅 2 를 분리해도 채팅 1 은 그대로');
+     pane.querySelector('[data-mv-extra-chat-restore]').click();
+     await wait(30);
+     check(popup.closed&&!pane.classList.contains('is-popped-out')&&!frame.hidden,'채팅 2 되돌리기(분리 창 닫기)');
+     // 구성에 채팅 2 채널을 담는다
+     await wait(350);
+     const stored=window.sessionStore['cheeseMultiviewSetup:'+window.__handoffId];
+     check(stored?.extraChats?.q===pane.querySelector('select').value,'구성에 채팅 2 채널을 담는다: '+JSON.stringify(stored?.extraChats));
+     // 다른 배치로 바꾸면 채팅 2 칸을 치운다
+     document.querySelector('[data-mv-pop-toggle="layout"]').click();
+     const back=[...document.querySelectorAll('[data-mv-set-layout]')].find(o=>o.dataset.mvSetLayout!=='custom-chat2x');
+     back.click();
+     await wait(80);
+     check(!document.querySelector('[data-mv-extra-chat]'),'다른 배치면 채팅 2 칸을 치운다');
+     await chrome.storage.local.set({cheeseMultiviewCustomLayouts:[]});
+     await wait(30);`,
+  );
+
+  await test(
+    "채널 관리 전용 팔로잉 '전체'는 고르기 화면처럼 구역(즐겨찾기·그룹) 제목으로 나눠 보인다",
+    `const quick=document.getElementById('mvQuick');
+     const wasHidden=quick.hidden;
+     if(wasHidden)document.getElementById('mvBack').click();
+     const rail=document.getElementById('mvQuickAdd');
+     quick.querySelector('[data-mv-quick-source="following"]').click();
+     await wait(300);
+     const ids=[...rail.querySelectorAll('[data-mv-quick-add]')].map(n=>n.dataset.mvQuickAdd);
+     check(ids.length>=2,'팔로잉 후보가 2개 미만이다: '+ids);
+     const saved={...window.localStore};
+     Object.assign(window.localStore,{cheeseFollowFavorites:[ids[0]],cheeseFollowFavOrder:[ids[0]],
+       cheeseFollowCustomGroups:[{id:'qg1',name:'퀵 그룹',channelIds:[ids[1],ids[0]]}],cheeseFollowGroupOrder:['qg1']});
+     quick.querySelector('[data-mv-quick-source="custom"]').click();
+     await wait(450);
+     const nodes=[...rail.children];
+     const heads=nodes.filter(n=>n.classList.contains('mv-quick-section-head')).map(n=>n.querySelector('.mv-section-name').textContent);
+     check(heads[0]==='즐겨찾기'&&heads[1]==='퀵 그룹','구역 제목이 없다: '+heads+' / '+rail.textContent.slice(0,200));
+     const at=(sel)=>nodes.findIndex(n=>n.matches(sel));
+     check(at('[data-mv-quick-add="'+ids[0]+'"]')>at('.mv-quick-section-head')&&
+       at('[data-mv-quick-add="'+ids[1]+'"]')>nodes.findIndex((n,i)=>i>0&&n.classList.contains('mv-quick-section-head')),
+       '채널이 자기 구역 제목 아래에 있지 않다');
+     check(rail.querySelectorAll('[data-mv-quick-add="'+ids[0]+'"]').length===1,'두 구역에 든 채널은 앞 구역에 한 번만');
+     const head=rail.querySelector('.mv-quick-section-head');
+     check(getComputedStyle(head).gridColumnStart==='1'&&getComputedStyle(head).gridColumnEnd==='-1','구역 제목이 격자 한 줄을 다 쓰지 않는다');
+     window.localStore=saved;
+     quick.querySelector('[data-mv-quick-source="following"]').click();
+     await wait(200);
+     if(wasHidden&&!quick.hidden)document.getElementById('mvBack').click();`,
+  );
+
+  await test(
+    "채널 관리: 카드의 카테고리·태그 칩과 카테고리 검색",
+    `const quick=document.getElementById('mvQuick');
+     const wasHidden=quick.hidden;
+     if(wasHidden)document.getElementById('mvBack').click();
+     const rail=document.getElementById('mvQuickAdd');
+     quick.querySelector('[data-mv-quick-source="following"]').click();
+     await wait(300);
+     const chip=rail.querySelector('.mv-card-category-chip.is-filter');
+     check(chip,'채널 관리 카드에 누를 수 있는 카테고리 칩이 없다: '+rail.innerHTML.slice(0,300));
+     const before=document.querySelectorAll('.mv-cell').length;
+     chip.click();
+     await wait(300);
+     check(quick.querySelector('[data-mv-quick-source="search"]').getAttribute('aria-pressed')==='true','검색 탭으로 가지 않았다');
+     check(document.querySelectorAll('.mv-cell').length===before,'칩을 눌렀는데 채널을 추가했다');
+     const pill=document.getElementById('mvQuickSearchFilter');
+     check(!pill.hidden&&pill.textContent.includes('카테고리 · 게임')&&rail.querySelectorAll('[data-mv-quick-add]').length===2,
+       '채널 관리 카테고리 라이브: '+pill.textContent+' / '+rail.textContent);
+     const quickMode=()=>quick.querySelector('[data-mv-quick-search-mode][aria-pressed="true"]')?.dataset.mvQuickSearchMode;
+     check(quickMode()==='category','채널 관리: 카테고리 칩인데 검색 종류가 카테고리가 아니다: '+quickMode());
+     pill.querySelector('[data-mv-filter-clear]').click();
+     await wait(300);
+     quick.querySelector('[data-mv-quick-source="live"]').click();
+     await wait(400);
+     const tagChip=rail.querySelector('.mv-card-tag-chip.is-filter');
+     check(tagChip,'채널 관리 카드에 누를 수 있는 태그 칩이 없다');
+     window.__quickTagFixture=tagChip.dataset.mvFilterTag;
+     tagChip.click();
+     await wait(300);
+     check(pill.textContent.includes('태그 · #'+window.__quickTagFixture)&&rail.querySelector('[data-mv-quick-add="00000000000000000000000000000398"]'),
+       '채널 관리 태그 칩: '+rail.textContent);
+     check(quickMode()==='channel','채널 관리: 태그 칩인데 검색 종류가 채널·태그가 아니다: '+quickMode());
+     window.__quickTagFixture='';
+     const input=document.getElementById('mvQuickSearch');
+     quick.querySelector('[data-mv-quick-search-mode="title"]').click();
+     input.value='롤';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(400);
+     check(quickMode()==='title'&&input.placeholder==='방송 제목으로 찾기'&&rail.querySelector('[data-mv-quick-add="000000000000000000000000000003a2"]'),
+       '채널 관리 방제 검색: '+rail.textContent);
+     quick.querySelector('[data-mv-quick-search-mode="category"]').click();
+     input.value='게임';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(400);
+     const cat=rail.querySelector('[data-mv-category-pick]');
+     check(cat&&rail.classList.contains('is-categories')&&pill.hidden,'채널 관리 카테고리 카드: '+rail.textContent);
+     cat.click();
+     await wait(300);
+     check(pill.textContent.includes('카테고리 · 게임 토크')&&rail.querySelectorAll('[data-mv-quick-add]').length===2&&!rail.classList.contains('is-categories'),
+       '채널 관리 카테고리 카드를 눌러도 그 라이브가 아니다');
+     quick.querySelector('[data-mv-quick-search-mode="channel"]').click();
+     input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));
+     await wait(350);
+     quick.querySelector('[data-mv-quick-source="following"]').click();
+     await wait(200);
+     if(wasHidden&&!quick.hidden)document.getElementById('mvBack').click();`,
+  );
+
   await test(
     "Quick 검색은 빈 상태에서도 손잡이를 유지하고 다음 채널 페이지를 읽는다",
     `document.getElementById('mvBack').click();
@@ -1950,8 +2546,9 @@ const checks = [];
      check(popOf('sync').hidden && popOf('stats').hidden,'Escape 로 팝오버가 닫히지 않았다');
 
      // Quick 상태(교체 대상·탭)는 패널 전환만으로 초기화되지 않는다
-     check(window.frameSrcs.length===beforeSrcs,
-       '패널 전환으로 iframe src 가 바뀌었다: '+(window.frameSrcs.length-beforeSrcs));
+     // 채팅 칸의 자동 재연결(응답 없는 테스트 채팅이 주기적으로 cheeseRetry 로 다시 건다)은 패널 전환과 무관하다.
+     const panelReloads=window.frameSrcs.slice(beforeSrcs).filter(src=>!(src.includes('/chat?')&&src.includes('cheeseRetry=')));
+     check(panelReloads.length===0,'패널 전환으로 iframe src 가 바뀌었다: '+panelReloads.join(' | '));
      const afterFrames=[...document.querySelectorAll('iframe')];
      check(afterFrames.length===beforeFrames.length &&
        afterFrames.every((f,i)=>f===beforeFrames[i]),'iframe 노드가 교체됐다');
@@ -1973,8 +2570,10 @@ const checks = [];
      }
      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
      await wait(40);
-     check(window.frameSrcs.length===beforeSrcs,
-       '반복 전환으로 iframe src 가 바뀌었다: '+(window.frameSrcs.length-beforeSrcs));
+     // 채팅 칸의 자동 재연결(응답 없는 테스트 채팅이 주기적으로 cheeseRetry 로 다시 건다)은 패널 전환과 무관하다.
+     const reloaded=window.frameSrcs.slice(beforeSrcs).filter(src=>!(src.includes('/chat?')&&src.includes('cheeseRetry=')));
+     check(reloaded.length===0,
+       '반복 전환으로 iframe src 가 바뀌었다: '+reloaded.length+' '+reloaded.join(' | '));
      const afterFrames=[...document.querySelectorAll('iframe')];
      check(afterFrames.length===beforeFrames.length &&
        afterFrames.every((f,i)=>f===beforeFrames[i]),'반복 전환으로 iframe 노드가 교체됐다');
@@ -3273,7 +3872,12 @@ const checks = [];
      check(videoSrcs().length===before,'종료 취소로 프레임이 다시 걸렸다');
      endedSignal('FRAME_ENDED');
      await wait(50);
-     check(target.dataset.status==='ended','종료 신호가 다시 반영되지 않았다');`,
+     check(target.dataset.status==='ended','종료 신호가 다시 반영되지 않았다');
+     // 라이브 칸 프레임이 새로 떠 FRAME_READY 를 보내면 종료 덮개를 거둔다.
+     endedSignal('FRAME_READY');
+     await wait(50);
+     check(target.dataset.status==='ready'&&!target.querySelector('.mv-cell-status-text')?.textContent?.includes('종료'),
+       '새로 뜬 라이브 프레임인데 종료 덮개가 남았다: '+target.dataset.status);`,
   );
 
   await test(

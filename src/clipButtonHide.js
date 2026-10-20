@@ -515,6 +515,141 @@
 
   setInterval(ensureClipFavButton, 700);
 
+  // ── 클립 재생 화면의 '재생목록에 담기' 버튼 ───────────────────────────────────
+  // 즐겨찾기 버튼과 같은 자리·모양(좋아요 버튼 위). uid 를 이 프레임은 모르므로 상위(content.js)가
+  // 보이기 여부·담김 상태를 알려 주고, 누르면 버튼 위치를 상위에 보내 상위가 팝오버를 띄운다.
+  const CLIP_PLAYLIST_BTN_CLASS = "cheese-clip-playlist-btn";
+  const PLAYLIST_CLIP_STATE_MSG = "cheese-playlist-clip-state";
+  const PLAYLIST_CLIP_ADD_MSG = "cheese-playlist-clip-add";
+  let clipPlaylistState = null; // { on, uid, inList, playing }
+
+  function clipPlaylistSvg(on, iconClass = "") {
+    // lucide list-plus(담겼으면 list-checks 모양으로 바꾼다)
+    const paths = on
+      ? '<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>'
+      : '<path d="M11 12H3"/><path d="M16 6H3"/><path d="M16 18H3"/><path d="M18 9v6"/><path d="M21 12h-6"/>';
+    return (
+      '<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" ' +
+      (iconClass ? `class="${iconClass}" ` : "") +
+      'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      paths +
+      "</svg>"
+    );
+  }
+
+  function paintClipPlaylistButton(btn) {
+    const on = clipPlaylistState?.inList === true;
+    if (btn.dataset.on === String(on)) return; // 멱등(노드 교체로 클릭 유실 방지)
+    btn.dataset.on = String(on);
+    const label = on ? "재생목록에 담김" : "재생목록에 담기";
+    btn.setAttribute("aria-label", label);
+    btn.title = label;
+    btn.innerHTML = "";
+    const wrap = document.createElement("span");
+    if (btn.dataset.iconWrapClass) wrap.className = btn.dataset.iconWrapClass;
+    wrap.innerHTML = clipPlaylistSvg(on, btn.dataset.iconClass || "");
+    const svg = wrap.firstElementChild;
+    if (svg) svg.style.color = on ? "#25df97" : "";
+    btn.append(wrap);
+    if (btn.dataset.textClass) {
+      const text = document.createElement("span");
+      text.className = btn.dataset.textClass;
+      text.textContent = "재생목록";
+      btn.append(text);
+    }
+  }
+
+  function ensureClipPlaylistButton() {
+    if (!clipPlaylistState?.on || !clipPlaylistState.uid) {
+      document.querySelectorAll(`.${CLIP_PLAYLIST_BTN_CLASS}-slot`).forEach((n) => n.remove());
+      return;
+    }
+    const card = currentClipCard();
+    if (!card) return;
+    const like = card.querySelector('[class*="type_like"]');
+    const likeBox = like?.parentElement;
+    if (!likeBox || !likeBox.parentElement) return;
+    let slot = likeBox.parentElement.querySelector(`.${CLIP_PLAYLIST_BTN_CLASS}-slot`);
+    if (!slot) {
+      document.querySelectorAll(`.${CLIP_PLAYLIST_BTN_CLASS}-slot`).forEach((n) => n.remove());
+      slot = document.createElement("div");
+      slot.className = `${likeBox.className} ${CLIP_PLAYLIST_BTN_CLASS}-slot`;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `${like.className.replace(/\S*type_like\S*/g, "").trim()} ${CLIP_PLAYLIST_BTN_CLASS}`;
+      const harvestClass = (selector) => like.querySelector(selector)?.getAttribute("class") || "";
+      btn.dataset.iconWrapClass = harvestClass('[class*="icon_wrap"]');
+      btn.dataset.iconClass = harvestClass('[class*="ToolButtonView-module__icon__"]');
+      btn.dataset.textClass = harvestClass('[class*="ToolButtonView-module__text__"]');
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const r = btn.getBoundingClientRect();
+        try {
+          window.parent.postMessage(
+            {
+              type: PLAYLIST_CLIP_ADD_MSG,
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+              ...readClipFrameMeta(),
+            },
+            "https://chzzk.naver.com",
+          );
+        } catch {}
+      });
+      slot.appendChild(btn);
+      likeBox.parentElement.insertBefore(slot, likeBox);
+    }
+    const btn = slot.querySelector(`.${CLIP_PLAYLIST_BTN_CLASS}`);
+    if (btn) paintClipPlaylistButton(btn);
+  }
+
+  window.addEventListener("message", (e) => {
+    if (e.origin !== "https://chzzk.naver.com") return;
+    const d = e.data;
+    if (!d || d.type !== PLAYLIST_CLIP_STATE_MSG) return;
+    clipPlaylistState = { on: d.on === true, uid: String(d.uid || ""), inList: d.inList === true, playing: d.playing === true };
+    ensureClipPlaylistButton();
+  });
+
+  setInterval(ensureClipPlaylistButton, 700);
+
+  // ── 재생목록 재생 중: 지금 클립이 끝나면 상위에 알린다 ───────────────────────
+  // 쇼츠 플레이어는 반복 재생이라 ended 가 안 올 수 있다 → 끝 근처에서 처음으로 되감기는 것도 끝으로 본다.
+  // 화면 가운데 카드(지금 보는 클립)의 video 만 본다(앞뒤 카드는 미리 불러 둔 것).
+  const PLAYLIST_CLIP_ENDED_MSG = "cheese-playlist-clip-ended";
+  const clipLastTime = new WeakMap();
+  let clipEndedSentAt = 0;
+  function reportClipEnded(video) {
+    if (!clipPlaylistState?.playing) return;
+    const card = currentClipCard();
+    if (card && !card.contains(video)) return;
+    if (Date.now() - clipEndedSentAt < 3000) return;
+    clipEndedSentAt = Date.now();
+    try {
+      window.parent.postMessage({ type: PLAYLIST_CLIP_ENDED_MSG }, "https://chzzk.naver.com");
+    } catch {}
+  }
+  document.addEventListener(
+    "ended",
+    (e) => {
+      if (e.target instanceof HTMLVideoElement) reportClipEnded(e.target);
+    },
+    true,
+  );
+  document.addEventListener(
+    "timeupdate",
+    (e) => {
+      const video = e.target;
+      if (!(video instanceof HTMLVideoElement)) return;
+      const previous = clipLastTime.get(video) || 0;
+      const now = Number(video.currentTime) || 0;
+      clipLastTime.set(video, now);
+      const duration = Number(video.duration) || 0;
+      if (duration > 1 && previous >= duration - 1.2 && now < 1) reportClipEnded(video);
+    },
+    true,
+  );
+
   // ── 좋아요한 클립 수집 ─────────────────────────────────────────────────────
   // 치지직에는 '내가 좋아요한 클립 목록' API 가 없다. 그래서 좋아요하는 순간을 잡아
   // 우리가 직접 모은다.

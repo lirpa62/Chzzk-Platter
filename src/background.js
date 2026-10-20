@@ -218,6 +218,26 @@ async function hideLiveSeekButtonsOnce(reason) {
   await chrome.storage.local.set(update);
 }
 
+// 오디오 믹서·외부 임베드 클립 믹서의 게인 슬라이더 최소 기본값을 50%에서 10%로 내렸다.
+// 예전 기본값(50%)을 그대로 둔 이용자도 10%가 되도록 업데이트 때 한 번만 바꾼다(저장값이
+// 없으면 코드 기본값 10%를 쓴다). 한 번만 한다 — 그 뒤에 직접 50%를 고르면 유지된다.
+const MIXER_GAIN_MIN_STORAGE_KEYS = ["cheeseMixerGainMin", "cheeseEmbedClipGainMin"];
+const MIXER_GAIN_MIN_DEFAULT_ONCE_KEY = "cheeseMixerGainMinDefault10Applied";
+async function lowerMixerGainMinOnce(reason) {
+  const stored = await chrome.storage.local.get([
+    ...MIXER_GAIN_MIN_STORAGE_KEYS,
+    MIXER_GAIN_MIN_DEFAULT_ONCE_KEY,
+  ]);
+  if (stored?.[MIXER_GAIN_MIN_DEFAULT_ONCE_KEY] === true) return;
+  const update = { [MIXER_GAIN_MIN_DEFAULT_ONCE_KEY]: true };
+  if (reason === "update") {
+    for (const key of MIXER_GAIN_MIN_STORAGE_KEYS) {
+      if (Number(stored?.[key]) === 0.5) update[key] = 0.1;
+    }
+  }
+  await chrome.storage.local.set(update);
+}
+
 // 새 설치에서만 꺼 두는 옵션: 수신함 통나무파워 표시, 통나무파워 지우개, 헤더 바로가기
 // 4개(전체 방송·인기 클립·카테고리·팔로잉). 이미 저장된 값(설정 불러오기 등)은 건드리지 않는다.
 async function applyFreshInstallDefaults() {
@@ -297,6 +317,12 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     await hideLiveSeekButtonsOnce(details.reason);
   } catch (error) {
     console.warn("되감기·따라잡기 버튼 기본값을 바꾸지 못했습니다.", error);
+  }
+
+  try {
+    await lowerMixerGainMinOnce(details.reason);
+  } catch (error) {
+    console.warn("게인 슬라이더 최소 기본값을 바꾸지 못했습니다.", error);
   }
 
   // 새 설치만 꺼짐으로 시작하는 옵션. 코드의 미설정 기본값(켜짐)은 그대로 둬서, 저장값이
@@ -4044,6 +4070,32 @@ const LP_LOG_DAYS_DEFAULT = 90;
 const LP_LOG_DAYS_MIN = 7;
 const LP_LOG_DAYS_MAX = 3650;
 
+// 내역 기록 켜기/끄기(설정 > 통나무파워 '내역 기록', 기본 켜짐). 끄면 새 기록을 남기지
+// 않고 보유량 비교(자동 감지)도 멈춘다. 이미 있는 내역·직접 추가·삭제·불러오기는 그대로.
+// ⚠ 다시 켜면 비교 기준(보유량 스냅샷)을 지운다. 그대로 두면 꺼 둔 동안 늘어난 보유량이
+//   '설명되지 않는 변동'이 되어 기타 적립으로 한꺼번에 기록된다.
+const LP_LOG_ENABLED_KEY = "cheeseLogPowerLogEnabled";
+let lpLogEnabled = true;
+// 서비스 워커가 메시지로 깨어난 직후에도 저장값을 읽은 뒤에 판단한다.
+const lpLogEnabledReady = chrome.storage.local
+  .get(LP_LOG_ENABLED_KEY)
+  .then((data) => {
+    lpLogEnabled = data?.[LP_LOG_ENABLED_KEY] !== false;
+  })
+  .catch(() => {});
+async function lpLogRecordingOn() {
+  await lpLogEnabledReady;
+  return lpLogEnabled;
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[LP_LOG_ENABLED_KEY]) return;
+  const was = lpLogEnabled;
+  lpLogEnabled = changes[LP_LOG_ENABLED_KEY].newValue !== false;
+  if (!was && lpLogEnabled) {
+    void lpEnqueueWrite(() => chrome.storage.local.remove(LP_SNAP_KEY)).catch(() => {});
+  }
+});
+
 function lpNormalizeLogDays(value) {
   if (value == null || value === "") return LP_LOG_DAYS_DEFAULT;
   const n = Math.round(Number(value));
@@ -4224,6 +4276,7 @@ async function lpAccountFor(hint) {
 // keepAll: 백업 불러오기처럼 보관기간 정리를 적용하면 안 되는 경우.
 // ⚠ 1년 전 백업을 90일 설정으로 불러오면 저장 직후 절반이 지워진다.
 async function lpMutateLog(apply, keepAll) {
+  await lpLogEnabledReady; // 기록 꺼짐 판단(LP_RECORD_OPS)이 저장값을 본 뒤에 돈다
   const data = await chrome.storage.local.get([LP_LOG_KEY, LP_LOG_DAYS_KEY]);
   const days = keepAll ? 0 : lpNormalizeLogDays(data?.[LP_LOG_DAYS_KEY]);
   const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
@@ -4588,9 +4641,38 @@ const LP_WRITE_OPS = {
     list.splice(i, 1);
     return true;
   },
+
+  // 설정·내역 페이지의 '기록 관리': 채널별 선택 삭제 또는 전체 삭제(계정 무관).
+  // channelIds 의 "" 는 채널 없는 기록(기타 적립 등)이다.
+  DELETE_CHANNELS(list, p) {
+    const all = p?.all === true;
+    const ids = new Set((Array.isArray(p?.channelIds) ? p.channelIds : []).map((id) => String(id || "")));
+    if (!all && !ids.size) return false;
+    const before = list.length;
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      if (all || ids.has(String(list[i]?.channelId || ""))) list.splice(i, 1);
+    }
+    return list.length !== before;
+  },
 };
 
+// 새 기록을 남기는 작업. 내역 기록이 꺼져 있으면 아무것도 바꾸지 않는다('변경 없음'이라
+// 호출부는 완료로 처리하고 재시도·보류하지 않는다). 직접 추가·삭제·불러오기는 막지 않는다.
+const LP_RECORD_OPS = [
+  "APPEND_CLAIM",
+  "UPSERT_WATCH_RUN",
+  "UPSERT_PREDICTION_BET",
+  "APPEND_PREDICTION_RESULT",
+  "MARK_PREDICTION_RESULT",
+  "APPEND_AUTO_BATCH",
+];
+for (const op of LP_RECORD_OPS) {
+  const run = LP_WRITE_OPS[op];
+  LP_WRITE_OPS[op] = (...args) => (lpLogEnabled ? run(...args) : false);
+}
+
 async function lpAppendLog(entry) {
+  if (!(await lpLogRecordingOn())) return;
   const id = String(entry?.id || "").trim();
   const amount = Number(entry?.amount) || 0;
   if (!id || !Number.isFinite(amount) || amount === 0) return;
@@ -5087,6 +5169,8 @@ async function lpReconcile() {
   // ⚠ 캐시된 계정으로 비교하면 전환 직후 이전 계정 기준과 대조해 큰 허위 기록이
   //   생긴다. 보정 전에는 항상 새로 확인한다.
   // 수동 보정은 캐시와 실패 기록을 건너뛰고 새로 확인한다.
+  // 내역 기록이 꺼져 있으면 비교하지 않는다(기준도 옮기지 않는다 — 다시 켤 때 새로 잡는다).
+  if (!(await lpLogRecordingOn())) return { ok: false, reason: "recording-off" };
   lpInvalidateAccount();
   const accountId = await lpFetchAccountId();
   // 계정을 모르면 비교하지 않는다 — 남의 계정 기준과 대조하면 허위 기록이 된다.
@@ -6228,8 +6312,12 @@ const MULTIVIEW_API_PATHS = new Set([
   //   지금 방송 중인 채널 이름을 정확히 넣어도 0건이 온다(실측).
   "/service/v1/search/channels",
   "/service/v1/search/videos",
+  // 멀티뷰 '방제' 검색: 방송 제목으로 라이브를 찾는다.
+  "/service/v1/search/lives",
   // 전용 팔로잉의 '구독' 자동 그룹을 멀티뷰에서도 보여 주려면 구독 목록이 필요하다.
   "/commercial/v1/subscribe/channels",
+  // 멀티뷰 '카테고리' 검색: 이름이 맞는 카테고리 목록.
+  "/manage/v1/auto-complete/categories",
 ]);
 
 // 검색 결과 채널의 방송 정보는 live-detail 로 하나씩 받는다. 채널 id 가 경로에
@@ -6238,6 +6326,15 @@ const MULTIVIEW_LIVE_DETAIL_RE =
   /^\/service\/v3\/channels\/[0-9a-f]{32}\/live-detail$/i;
 const MULTIVIEW_CHANNEL_VIDEOS_RE =
   /^\/service\/v1\/channels\/[0-9a-f]{32}\/videos$/i;
+// 재생목록 편집 화면: 보관함 항목에 빠진 채널 프로필·파트너 표시를 채널 정보로 채운다.
+const MULTIVIEW_CHANNEL_INFO_RE =
+  /^\/service\/v1\/channels\/[0-9a-f]{32}$/i;
+// 재생목록 편집 화면의 '클립' 탭: 고른 채널의 클립 목록.
+const MULTIVIEW_CHANNEL_CLIPS_RE =
+  /^\/service\/v1\/channels\/[0-9a-f]{32}\/clips$/i;
+// 멀티뷰: 카드의 카테고리 칩·카테고리 검색 → 그 카테고리의 라이브(시청자순).
+const MULTIVIEW_CATEGORY_LIVES_RE =
+  /^\/service\/v2\/categories\/(?:GAME|SPORTS|ETC)\/[A-Za-z0-9_.~%-]{1,180}\/lives$/;
 
 function validMultiviewApiQuery(url) {
   const keys = [...url.searchParams.keys()];
@@ -6259,12 +6356,27 @@ function validMultiviewApiQuery(url) {
         ["POPULAR", "UNPOPULAR", "LATEST", "RECOMMEND"].includes(url.searchParams.get("sortType"))) &&
       uint("concurrentUserCount") && uint("liveId", 1);
   }
+  // 다음 묶음은 concurrentUserCount·liveId 짝으로 잇는다(태그·카테고리 라이브 공통).
+  const cursorPair = () => {
+    const hasCount = url.searchParams.has("concurrentUserCount");
+    return hasCount === url.searchParams.has("liveId") && uint("concurrentUserCount") && uint("liveId", 1);
+  };
   if (url.pathname === "/service/v1/tag/lives") {
-    if (!only(new Set(["size", "sortType", "tags"]))) return false;
+    if (!only(new Set(["size", "sortType", "tags", "concurrentUserCount", "liveId"]))) return false;
     const tag = url.searchParams.get("tags");
     return url.searchParams.has("size") && uint("size", 1, 100) &&
       url.searchParams.get("sortType") === "POPULAR" &&
-      typeof tag === "string" && tag.trim().length > 0 && tag.length <= 80;
+      typeof tag === "string" && tag.trim().length > 0 && tag.length <= 80 && cursorPair();
+  }
+  if (MULTIVIEW_CATEGORY_LIVES_RE.test(url.pathname)) {
+    return only(new Set(["size", "concurrentUserCount", "liveId"])) &&
+      url.searchParams.has("size") && uint("size", 1, 50) && cursorPair();
+  }
+  if (url.pathname === "/manage/v1/auto-complete/categories") {
+    const keyword = url.searchParams.get("keyword");
+    return only(new Set(["keyword", "size"])) &&
+      typeof keyword === "string" && keyword.trim().length > 0 && keyword.length <= 50 &&
+      url.searchParams.has("size") && uint("size", 1, 50);
   }
   if (url.pathname === "/service/v2/nickname/color/codes") {
     return keys.length === 0;
@@ -6306,6 +6418,13 @@ function validMultiviewApiQuery(url) {
     return only(new Set(["keyword", "offset", "size"])) &&
       url.searchParams.has("keyword") && uint("offset", 0, 10000) && uint("size", 1, 100);
   }
+  if (url.pathname === "/service/v1/search/lives") {
+    const keyword = url.searchParams.get("keyword");
+    return only(new Set(["keyword", "offset", "size"])) &&
+      typeof keyword === "string" && keyword.trim().length > 0 && keyword.length <= 100 &&
+      url.searchParams.has("offset") && uint("offset", 0, 10000) &&
+      url.searchParams.has("size") && uint("size", 1, 50);
+  }
   if (url.pathname === "/service/v1/search/videos") {
     const keyword = url.searchParams.get("keyword");
     return only(new Set(["keyword", "offset", "size"])) &&
@@ -6316,7 +6435,18 @@ function validMultiviewApiQuery(url) {
   if (url.pathname === "/commercial/v1/subscribe/channels") {
     return only(new Set(["page", "size"])) && uint("page", 0, 10000) && uint("size", 1, 100);
   }
+  if (MULTIVIEW_CHANNEL_CLIPS_RE.test(url.pathname)) {
+    const clipUID = url.searchParams.get("clipUID");
+    const readCount = url.searchParams.get("readCount");
+    return only(new Set(["clipUID", "readCount", "filterType", "orderType", "size"])) &&
+      (clipUID === null || /^[A-Za-z0-9_-]{0,64}$/.test(clipUID)) &&
+      (readCount === null || /^\d{0,12}$/.test(readCount)) &&
+      ["ALL", "WITHIN_SEVEN_DAYS", "WITHIN_THIRTY_DAYS"].includes(url.searchParams.get("filterType")) &&
+      ["RECENT", "POPULAR"].includes(url.searchParams.get("orderType")) &&
+      url.searchParams.has("size") && uint("size", 1, 50);
+  }
   if (MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname)) return keys.length === 0;
+  if (MULTIVIEW_CHANNEL_INFO_RE.test(url.pathname)) return keys.length === 0;
   return false;
 }
 
@@ -6385,7 +6515,10 @@ async function fetchMultiviewApi(rawUrl) {
     url.origin !== MULTIVIEW_API_ORIGIN ||
     (!MULTIVIEW_API_PATHS.has(url.pathname) &&
       !MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname) &&
-      !MULTIVIEW_CHANNEL_VIDEOS_RE.test(url.pathname)) ||
+      !MULTIVIEW_CHANNEL_VIDEOS_RE.test(url.pathname) &&
+      !MULTIVIEW_CHANNEL_CLIPS_RE.test(url.pathname) &&
+      !MULTIVIEW_CATEGORY_LIVES_RE.test(url.pathname) &&
+      !MULTIVIEW_CHANNEL_INFO_RE.test(url.pathname)) ||
     !validMultiviewApiQuery(url)
   ) {
     throw new Error("not-allowed");
@@ -6503,20 +6636,22 @@ async function injectMultiviewHost(tabId, info) {
 // ⚠ 팝업 창(type: popup)은 macOS 에서 화면 밖·뒤에 떠 보이지 않는 일이 있었다(소리만 났다).
 //   고르기 화면 옆에 일반 새 탭으로 연다.
 //
-// 멀티뷰는 탭 하나만 쓴다(한 탭에 최대 9채널). 이미 열린 멀티뷰 탭이 있으면 새 탭을 만들지
-// 않고 그 탭으로 옮겨 새 구성으로 다시 연다.
-// ⚠ 시작할 때마다 새 탭을 만들면 같은 채널이 두 탭에서 재생돼(한 사람이 시청자 2명) 소리가
-//   겹치고, '고르기 화면 열기' 로 고친 뒤 다시 시작하면 두 탭이 같은 구성 id 의 저장값을
-//   서로 덮어썼다.
+// 멀티뷰 탭은 여러 개 열 수 있다(2026-10-19, 탭마다 최대 9채널). 탭마다 구성 id 가 따로라 서로 덮어쓰지
+// 않는다. 이미 열린 탭을 다시 쓰는 경우는 두 가지뿐이다:
+//   - 같은 구성 id: 그 탭의 '고르기 화면 열기' 로 들어와 고친 구성 → 그 탭을 새 구성으로 다시 연다
+//   - reuseTabId: 고르기 화면의 안내 창에서 '기존 멀티뷰 바꾸기' 를 골랐다
+// 같은 채널이 두 탭에서 재생되는 것(소리 겹침·시청자 2명)은 고르기 화면·채널 관리가 미리 알린다.
 const MULTIVIEW_SETUP_PREFIX = "cheeseMultiviewSetup:";
 
-async function findMultiviewHostTab(hosts) {
+// 살아 있는 멀티뷰 탭들(닫혔거나 다른 페이지로 떠난 탭 기록은 hosts 에서 지운다).
+async function liveMultiviewHostTabs(hosts) {
+  const tabs = [];
   for (const id of Object.keys(hosts)) {
     const tab = await chrome.tabs.get(Number(id)).catch(() => null);
-    if (tab && (isMultiviewHostUrl(tab.url) || isPendingHostTab(tab))) return tab;
-    delete hosts[id];
+    if (tab && (isMultiviewHostUrl(tab.url) || isPendingHostTab(tab))) tabs.push(tab);
+    else delete hosts[id];
   }
-  return null;
+  return tabs;
 }
 
 async function reuseMultiviewHost(tab, hosts, setupId, theme) {
@@ -6536,12 +6671,30 @@ async function reuseMultiviewHost(tab, hosts, setupId, theme) {
   return { windowId: tab.windowId, tabId: tab.id, reused: true };
 }
 
-// 실행 중인 멀티뷰 탭(고르기 화면이 같은 구성인지 확인할 때 쓴다).
-async function runningMultiviewHost() {
+// 실행 중인 멀티뷰 탭들(고르기 화면이 같은 구성·겹치는 채널을 확인할 때 쓴다).
+async function runningMultiviewHosts() {
   const hosts = await readMultiviewHosts();
-  const tab = await findMultiviewHostTab(hosts);
+  const tabs = await liveMultiviewHostTabs(hosts);
   await writeMultiviewHosts(hosts); // 닫혔거나 떠난 탭 기록은 지운다
-  return tab ? { tabId: tab.id, windowId: tab.windowId, setupId: hosts[tab.id]?.setupId || "" } : null;
+  return tabs.map((tab) => ({ tabId: tab.id, windowId: tab.windowId, setupId: hosts[tab.id]?.setupId || "" }));
+}
+
+// 다른 멀티뷰 탭들이 보고 있는 채널(같은 채널을 또 넣으려 할 때 알린다). [{ channelId, channelName }]
+async function otherMultiviewChannels(exceptTabId) {
+  const hosts = await readMultiviewHosts();
+  const tabs = await liveMultiviewHostTabs(hosts);
+  const keys = tabs.filter((tab) => tab.id !== exceptTabId && hosts[tab.id]?.setupId)
+    .map((tab) => MULTIVIEW_SETUP_PREFIX + hosts[tab.id].setupId);
+  if (!keys.length) return [];
+  const data = await chrome.storage.session.get(keys).catch(() => ({}));
+  const seen = new Map();
+  for (const key of keys) {
+    for (const entry of Array.isArray(data?.[key]?.chosen) ? data[key].chosen : []) {
+      const channelId = String(entry?.channelId || "").toLowerCase();
+      if (channelId && !seen.has(channelId)) seen.set(channelId, String(entry?.channelName || "").slice(0, 100));
+    }
+  }
+  return [...seen].map(([channelId, channelName]) => ({ channelId, channelName }));
 }
 
 // 다시 불러오지 않고 그 멀티뷰 탭으로 옮긴다.
@@ -6556,9 +6709,11 @@ async function focusMultiviewHost(tabId) {
   return { tabId: tab.id, windowId: tab.windowId };
 }
 
-async function openMultiviewHost(setupId, theme, openerTab) {
+async function openMultiviewHost(setupId, theme, openerTab, reuseTabId = null) {
   const existingHosts = await readMultiviewHosts();
-  const existing = await findMultiviewHostTab(existingHosts);
+  const live = await liveMultiviewHostTabs(existingHosts);
+  const existing = live.find((tab) => existingHosts[tab.id]?.setupId === setupId) ||
+    (Number.isInteger(reuseTabId) ? live.find((tab) => tab.id === reuseTabId) : null);
   if (existing) return reuseMultiviewHost(existing, existingHosts, setupId, theme);
   await writeMultiviewHosts(existingHosts); // 닫혔거나 떠난 탭 기록은 지운다
   const tab = await chrome.tabs.create({
@@ -6669,6 +6824,9 @@ async function handleMultiviewHostApi(message, sender) {
       await chrome.tabs.create({ url: href });
       return true;
     }
+    // 다른 멀티뷰 탭들이 보고 있는 채널(채널 관리에서 같은 채널을 넣으려 하면 알린다).
+    case "others.channels":
+      return otherMultiviewChannels(hostTabId);
     // 시청 화면(content script)의 구성 읽기·쓰기. 파이어폭스는 content script 가 세션 저장소를
     // 읽지 못한다(setAccessLevel 미지원). 이 탭 자신의 구성 id 만 다룬다.
     case "setup.get": {
@@ -6678,7 +6836,8 @@ async function handleMultiviewHostApi(message, sender) {
     case "setup.set": {
       const setup = args.setup;
       if (!setup || typeof setup !== "object" || Array.isArray(setup) ||
-          !Array.isArray(setup.chosen) || setup.chosen.length > 9 ||
+          // 기본 배치는 9채널, 내 배치는 16채널까지.
+          !Array.isArray(setup.chosen) || setup.chosen.length > 16 ||
           JSON.stringify(setup).length > 65536) throw new Error("invalid-setup");
       await chrome.storage.session.set({ [MULTIVIEW_SETUP_PREFIX + host.setupId]: setup });
       return true;
@@ -6788,6 +6947,71 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "PLAYLIST_PLAY") {
+    // 편집 페이지는 새 탭, 치지직 탭(패널·담기 팝오버)은 inTab 이면 자기 탭을 옮긴다.
+    const tabId = message.inTab === true ? sender?.tab?.id : undefined;
+    playPlaylist(message.listId, message.index, tabId, { shuffle: message.shuffle === true })
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, reason: String(error?.message || error) }));
+    return true;
+  }
+
+  if (message.type === "PLAYLIST_SESSION") {
+    // 치지직 탭의 content 만. 자기 탭 세션만 읽고 쓴다.
+    const tabId = sender?.tab?.id;
+    if (!Number.isInteger(tabId)) return false;
+    const op = String(message.op || "get");
+    mutatePlaylistSessions((sessions) => {
+      if (op === "clear") {
+        delete sessions[tabId];
+        return null;
+      }
+      const current = sessions[tabId] || null;
+      if (op === "set") {
+        const patch = message.session && typeof message.session === "object" ? message.session : {};
+        const next = { ...(current || {}) };
+        if (typeof patch.listId === "string") next.listId = patch.listId;
+        if (Number.isInteger(patch.index) && patch.index >= 0) next.index = patch.index;
+        if (typeof patch.itemId === "string") next.itemId = patch.itemId;
+        if (typeof patch.repeat === "boolean") next.repeat = patch.repeat;
+        if (typeof patch.paused === "boolean") next.paused = patch.paused;
+        if (typeof patch.collapsed === "boolean") next.collapsed = patch.collapsed;
+        if (typeof patch.shuffle === "boolean") next.shuffle = patch.shuffle;
+        if (typeof patch.minimized === "boolean") next.minimized = patch.minimized;
+        // 섞어 재생 순서(항목 id). 목록 한도(1000)를 넘거나 모양이 다르면 받지 않는다.
+        if (Array.isArray(patch.order) && patch.order.length <= 1000 &&
+          patch.order.every((id) => typeof id === "string" && /^[a-z0-9]{6,32}$/.test(id))) next.order = patch.order;
+        if (!next.listId) return current;
+        sessions[tabId] = next;
+        return next;
+      }
+      return current;
+    })
+      .then((session) => sendResponse({ ok: true, session }))
+      .catch(() => sendResponse({ ok: false, session: null }));
+    return true;
+  }
+
+  if (message.type === "PLAYLIST_META") {
+    const items = (Array.isArray(message.items) ? message.items : []).slice(0, PLAYLIST_META_MAX);
+    let cursor = 0;
+    const results = new Array(items.length).fill(null);
+    const worker = async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        try {
+          results[index] = await playlistFetchMeta(items[index]);
+        } catch {
+          results[index] = null;
+        }
+      }
+    };
+    Promise.all([worker(), worker(), worker(), worker()])
+      .then(() => sendResponse({ ok: true, results }))
+      .catch(() => sendResponse({ ok: false, results }));
+    return true;
+  }
+
   if (message.type === "CHEESE_WATCH_TIME_DELETE") {
     // 시청 시간 화면(확장 페이지)에서만. 쓰기와 같은 줄에 세워 지운 뒤 되살아나지 않게 한다.
     if (!String(sender?.url || "").startsWith(chrome.runtime.getURL(""))) return false;
@@ -6814,7 +7038,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse?.({ ok: false, reason: "invalid-setup" });
       return false;
     }
-    openMultiviewHost(setupId, message.theme, sender?.tab)
+    const reuseTabId = Number.isInteger(message.reuseTabId) ? message.reuseTabId : null;
+    openMultiviewHost(setupId, message.theme, sender?.tab, reuseTabId)
       .then((result) => sendResponse?.({ ok: true, ...result }))
       .catch((error) => sendResponse?.({ ok: false, reason: String(error?.message || error) }));
     return true;
@@ -6824,7 +7049,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 우리 확장 페이지(고르기 화면)만 부른다.
     if (!String(sender?.url || "").startsWith(chrome.runtime.getURL(""))) return false;
     const work = message.type === "MULTIVIEW_HOST_FIND"
-      ? runningMultiviewHost().then((host) => ({ host }))
+      ? runningMultiviewHosts().then((hosts) => ({ hosts, host: hosts[0] || null }))
       : focusMultiviewHost(Number(message.tabId));
     work
       .then((result) => sendResponse?.({ ok: true, ...result }))
@@ -7010,6 +7235,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { accountId, verified, mismatch } = await lpAccountFor(
           message.accountHint,
         );
+        // 기록 관리(채널별·전체 삭제)는 계정과 무관하게 지운다.
+        // ⚠ 지운 뒤 비교 기준(보유량 스냅샷)도 지운다. 그대로 두면 다음 보유량 비교가
+        //   지운 금액을 '설명되지 않는 변동'으로 보고 기타 적립으로 다시 채운다.
+        if (op === "DELETE_CHANNELS") {
+          const applied = await lpEnqueueWrite(async () => {
+            const changed = await lpMutateLog((list) => run(list, message.payload || {}));
+            if (changed) await chrome.storage.local.remove(LP_SNAP_KEY);
+            return changed;
+          });
+          sendResponse?.({ ok: true, applied });
+          return;
+        }
         // 백업 불러오기는 파일에 담긴 계정 정보를 그대로 쓴다 → 계정 확인 불필요.
         if (op === "IMPORT_LOG") {
           const applied = await lpEnqueueWrite(() =>
@@ -7294,6 +7531,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 스크린샷 저장 — 콘텐츠/MAIN은 chrome.downloads를 못 쓰므로 background에서 처리한다.
   // saveAs:false 로 브라우저 '저장 위치 확인' 설정과 무관하게 바로 저장하고, 실제
   // 완료/취소(state)를 downloads.onChanged로 감지해 정확히 응답한다.
+  // 다시보기 '내 채팅 기록' PNG 캡처: html-to-image 를 쓸 때만 그 탭·프레임에 넣는다
+  // (모든 치지직 페이지·멀티뷰 칸에 미리 싣지 않는다). 콘텐츠 스크립트와 같은 격리 세계.
+  if (message.type === "CHEESE_LOAD_CAPTURE_LIB") {
+    const tabId = sender?.tab?.id;
+    if (typeof tabId !== "number") {
+      sendResponse({ ok: false, reason: "no-tab" });
+      return false;
+    }
+    chrome.scripting
+      .executeScript({
+        target: { tabId, frameIds: [Number(sender.frameId) || 0] },
+        files: ["src/html-to-image.min.js"],
+      })
+      .then(
+        () => sendResponse({ ok: true }),
+        (error) => sendResponse({ ok: false, reason: String(error?.message || error) }),
+      );
+    return true;
+  }
+
   if (message.type === "CHEESE_SCREENSHOT_SAVE") {
     const { url, filename } = message;
     const saveAs = message.saveAs === true; // 기본 false=바로 저장
@@ -7569,3 +7826,144 @@ async function peekCacheValue(payload) {
   }
   return { ...cached.value, fromCache: true };
 }
+
+// ── 나만의 재생목록(playlist.html·content.js) ─────────────────────────────────
+// 재생은 치지직 페이지 그대로 한다. 어느 탭이 어느 목록의 몇 번째를 재생 중인지는 배경이 탭별로
+// 들고 있는다(세션 저장소, 탭이 닫히면 지움). content 는 SPA 이동·새로고침 뒤에 묻기만 하면 된다.
+// 저장 구조는 src/playlistStore.js 와 같다(여기서는 읽기만 한다). 메시지 처리(PLAYLIST_*)는 위 onMessage 안.
+const PLAYLIST_KEY = "cheesePlaylists";
+const PLAYLIST_SESSIONS_KEY = "cheesePlaylistSessions";
+const PLAYLIST_META_MAX = 50;
+let playlistSessionQueue = Promise.resolve();
+
+async function readPlaylistSessions() {
+  try {
+    const data = await chrome.storage.session.get(PLAYLIST_SESSIONS_KEY);
+    const sessions = data?.[PLAYLIST_SESSIONS_KEY];
+    return sessions && typeof sessions === "object" ? sessions : {};
+  } catch {
+    return {};
+  }
+}
+
+// 세션 쓰기는 한 줄로 세운다(다음 항목 이동과 패널 조작이 겹쳐도 서로 덮지 않게).
+function mutatePlaylistSessions(change) {
+  const run = playlistSessionQueue.then(async () => {
+    const sessions = await readPlaylistSessions();
+    const result = change(sessions);
+    await chrome.storage.session.set({ [PLAYLIST_SESSIONS_KEY]: sessions });
+    return result;
+  });
+  playlistSessionQueue = run.catch(() => {});
+  return run;
+}
+
+function playlistItemUrl(item) {
+  if (item?.type === "video" && /^\d{1,12}$/.test(String(item.videoNo || ""))) {
+    const start = Math.max(0, Math.floor(Number(item.start) || 0));
+    return `https://chzzk.naver.com/video/${item.videoNo}${start ? `?currentTime=${start}` : ""}`;
+  }
+  if (item?.type === "clip" && /^[A-Za-z0-9_-]{4,64}$/.test(String(item.clipUID || ""))) {
+    // 새 탭 클립 자동재생 요청(content.js captureClipPageAutoplayRequest 가 읽고 지운다).
+    return `https://chzzk.naver.com/clips/${item.clipUID}?cheesePlatterAutoplay=1`;
+  }
+  return "";
+}
+
+async function findPlaylist(listId) {
+  const data = await chrome.storage.local.get(PLAYLIST_KEY);
+  const lists = Array.isArray(data?.[PLAYLIST_KEY]?.lists) ? data[PLAYLIST_KEY].lists : [];
+  return lists.find((list) => list?.id === listId) || null;
+}
+
+// 목록의 index 번째부터 재생한다. tabId 가 있으면 그 탭을 옮기고, 없으면 새 탭을 연다.
+async function playPlaylist(listId, index, tabId, { shuffle = false } = {}) {
+  const list = await findPlaylist(String(listId || ""));
+  const items = Array.isArray(list?.items) ? list.items : [];
+  if (!items.length) throw new Error("빈 재생목록입니다.");
+  // 섞어 재생: 순서를 섞어 두고 그 첫 항목부터.
+  const order = shuffle ? items.map((item) => String(item.id)) : [];
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const at = shuffle
+    ? Math.max(0, items.findIndex((item) => item.id === order[0]))
+    : Math.min(items.length - 1, Math.max(0, Math.floor(Number(index) || 0)));
+  const url = playlistItemUrl(items[at]);
+  if (!url) throw new Error("재생할 수 없는 항목입니다.");
+  const tab = Number.isInteger(tabId) && tabId >= 0
+    ? await chrome.tabs.update(tabId, { url, active: true })
+    : await chrome.tabs.create({ url, active: true });
+  await mutatePlaylistSessions((sessions) => {
+    const previous = sessions[tab.id];
+    sessions[tab.id] = {
+      listId: list.id,
+      index: at,
+      itemId: items[at].id,
+      repeat: previous?.listId === list.id && previous.repeat === true,
+      shuffle,
+      order,
+      paused: false,
+      startedAt: Date.now(),
+    };
+  });
+  return { tabId: tab.id, url };
+}
+
+async function playlistFetchJson(url) {
+  const response = await fetchWithTimeout(url, { credentials: "include", headers: { accept: "application/json" } }, 8000);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = await response.json();
+  return body?.content ?? null;
+}
+
+async function playlistFetchMeta(item) {
+  if (item?.type === "video" && /^\d{1,12}$/.test(String(item.videoNo || ""))) {
+    const content = await playlistFetchJson(`https://api.chzzk.naver.com/service/v2/videos/${item.videoNo}`);
+    if (!content) return null;
+    const channel = content.channel || content.ownerChannel || {};
+    return {
+      title: String(content.videoTitle || "").trim(),
+      thumb: String(content.thumbnailImageUrl || "").trim(),
+      channelId: String(channel.channelId || "").trim(),
+      channelName: String(channel.channelName || "").trim(),
+      channelImageUrl: String(channel.channelImageUrl || "").trim(),
+      verifiedMark: channel.verifiedMark === true,
+      duration: Number(content.duration) || 0,
+      adult: content.adult === true,
+      views: Number(content.readCount) || 0,
+      date: content.publishDateAt || content.publishDate || "",
+    };
+  }
+  if (item?.type === "clip" && /^[A-Za-z0-9_-]{4,64}$/.test(String(item.clipUID || ""))) {
+    const uid = encodeURIComponent(item.clipUID);
+    const [detail, play] = await Promise.allSettled([
+      playlistFetchJson(`https://api.chzzk.naver.com/service/v1/clips/${uid}/detail`),
+      playlistFetchJson(`https://api.chzzk.naver.com/service/v1/play-info/clip/${uid}`),
+    ]);
+    const d = detail.status === "fulfilled" ? detail.value : null;
+    const p = play.status === "fulfilled" ? play.value : null;
+    if (!d && !p) return null;
+    const owner = p?.ownerChannel || d?.ownerChannel || {};
+    return {
+      title: String(d?.clipTitle || p?.contentTitle || "").trim(),
+      thumb: String(d?.thumbnailImageUrl || "").trim(),
+      channelId: String(owner.channelId || d?.ownerChannelId || "").trim(),
+      channelName: String(owner.channelName || "").trim(),
+      channelImageUrl: String(owner.channelImageUrl || "").trim(),
+      verifiedMark: owner.verifiedMark === true,
+      duration: Number(d?.duration ?? p?.duration) || 0,
+      adult: d?.adult === true || p?.adult === true,
+      views: Number(d?.readCount) || 0,
+      date: d?.createdDate || "",
+    };
+  }
+  return null;
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void mutatePlaylistSessions((sessions) => {
+    delete sessions[tabId];
+  }).catch(() => {});
+});

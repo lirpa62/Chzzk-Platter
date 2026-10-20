@@ -28,20 +28,21 @@ const managePanel = html.slice(
 );
 ok(/id="crcPurgeList"/.test(managePanel), "다시보기 관리 탭 안에 있다");
 
-console.log("[삭제] 세 갈래를 함께 지운다");
+console.log("[삭제] 세 갈래를 함께 지운다(설정과 같은 공용 처리 recordManage.js)");
 const purge = src.slice(
   src.indexOf("  async function purgeRecapChannels(ids)"),
   src.indexOf("  // ⚠ 선택 삭제는 목록 전체를 다시 그리지 않는다."),
 );
+ok(/CheeseRecordManage\.chatRecap\.remove\(groups\)/.test(purge), "공용 처리에 맡긴다");
+const shared = fs.readFileSync(path.join(__dirname, "..", "src", "recordManage.js"), "utf8");
+const sharedRemove = shared.slice(shared.indexOf("    async remove(groups) {"), shared.indexOf("    async clearAll() {"));
+ok(/chrome\.storage\.local\.remove\(keys\)/.test(sharedRemove), "본문·통계 키를 지운다");
+ok(/chatRecapCatalog:\$\{accountId\}/.test(sharedRemove), "카탈로그에서도 뺀다");
 ok(
-  /chrome\.storage\.local\.remove\(keys\)/.test(purge),
-  "본문·통계 키를 지운다",
-);
-ok(/chatRecapCatalog:\$\{accountId\}/.test(purge), "카탈로그에서도 뺀다");
-ok(
-  !/try\s*\{\s*await chrome\.storage\.local\.remove\(keys\)/.test(purge),
+  !/try\s*\{\s*await chrome\.storage\.local\.remove\(keys\)/.test(sharedRemove),
   "본문 삭제 실패를 삼키지 않는다",
 );
+ok(/<script src="src\/recordManage\.js"><\/script>/.test(html), "리캡 화면이 공용 처리를 불러온다");
 
 console.log("[선택 삭제] 전체를 다시 그리지 않는다");
 const handler = src.slice(
@@ -61,13 +62,15 @@ ok(
   "실패하면 숨김을 되돌린다",
 );
 
-console.log("[전체 삭제] 두 번 눌러야 하고 표식까지 비운다");
+console.log("[전체 삭제] 확인 모달을 거치고 표식까지 비운다");
 const clearAll = src.slice(
   src.indexOf('$("crcPurgeAll")?.addEventListener'),
   src.indexOf("  function openImportModal()"),
 );
-ok(/dataset\.armed/.test(clearAll), "한 번 더 눌러야 실행한다");
-ok(/chatRecapImportedVideos/.test(clearAll), "가져오기 완료 표식도 비운다");
+ok(/await confirmPurge\(/.test(clearAll) && /if \(!ok\) return;/.test(clearAll), "확인 모달에서 확인해야 실행한다");
+ok(/CheeseRecordManage\.chatRecap\.clearAll\(\)/.test(clearAll) && /"chatRecapImportedVideos"/.test(shared),
+  "가져오기 완료 표식도 비운다(공용 clearAll)");
+ok(/await confirmPurge\(/.test(handler), "선택 삭제도 확인 모달을 거친다");
 
 console.log("[성능] 관리 탭을 볼 때만 저장소를 훑는다");
 ok(
