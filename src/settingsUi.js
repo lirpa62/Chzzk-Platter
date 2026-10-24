@@ -117,7 +117,7 @@
     ["[data-chat-recap-enabled]", "[data-chat-recap-retention], [data-recap-manage-list]"],
     ['[data-feature="chatEmoticonAltClick"]', "[data-emoticon-block-input]"],
     ['[data-feature="clipVault"]', "[data-clip-vault-limit]"],
-    ["[data-clip-audio-mixer-enabled]", "[data-clip-audio-mixer-always-on], [data-settings-clip-mixer-preset]"],
+    ["[data-clip-audio-mixer-enabled]", "[data-clip-audio-mixer-always-on], [data-settings-clip-mixer-preset], [data-clip-audio-mixer-wheel-action], [data-clip-audio-mixer-gain-min], [data-clip-audio-mixer-gain-max], [data-clip-audio-mixer-gain-step]"],
     ["[data-clip-video-filter-enabled]", "[data-clip-video-filter-always-on], [data-settings-clip-filter-preset]"],
     ["[data-embed-clip-default-preset-enabled]", '[data-global-default-picker="embed"]'],
     ["[data-embed-clip-default-gain-enabled]", "[data-embed-clip-default-gain]"],

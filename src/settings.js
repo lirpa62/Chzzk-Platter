@@ -57,6 +57,11 @@
     "cheeseClipAudioMixerEnabled",
     "cheeseClipAudioMixerAlwaysOn",
     "cheeseClipAudioMixerPreset",
+    "cheeseClipAudioMixerGain",
+    "cheeseClipAudioMixerWheelAction",
+    "cheeseClipAudioMixerGainMin",
+    "cheeseClipAudioMixerGainMax",
+    "cheeseClipAudioMixerGainStep",
     "cheeseEmbedClipMixerHidden",
     "cheeseEmbedClipMixerAlwaysOn",
     "cheeseEmbedClipMixerDefaultOn",
@@ -6108,6 +6113,49 @@
     ["preset", "gain"],
     "preset",
   );
+
+  // 클립 페이지 오디오 믹서 게인(라이브·임베드와 별개 키).
+  bindStringSegmented(
+    document.querySelector("[data-clip-audio-mixer-wheel-action]"),
+    "clip-audio-mixer-wheel-action-value",
+    "cheeseClipAudioMixerWheelAction",
+    ["preset", "gain"],
+    "preset",
+  );
+  bindGainRangeSegmented(
+    document.querySelector("[data-clip-audio-mixer-gain-min]"),
+    "clip-audio-mixer-gain-min-value",
+    "cheeseClipAudioMixerGainMin",
+    [0.5, 0.25, 0.1, 0],
+    0.1,
+  );
+  bindGainRangeSegmented(
+    document.querySelector("[data-clip-audio-mixer-gain-max]"),
+    "clip-audio-mixer-gain-max-value",
+    "cheeseClipAudioMixerGainMax",
+    [2, 3],
+    2,
+  );
+  const clipMixerGainStepInput = document.querySelector("[data-clip-audio-mixer-gain-step]");
+  if (clipMixerGainStepInput) {
+    (async () => {
+      try {
+        const data = await cachedStorageGet("cheeseClipAudioMixerGainStep");
+        clipMixerGainStepInput.value = String(clampMixerGainStep(data?.cheeseClipAudioMixerGainStep ?? 5));
+      } catch {
+        clipMixerGainStepInput.value = "5";
+      }
+    })();
+    const saveClipMixerGainStep = () => {
+      const value = clampMixerGainStep(clipMixerGainStepInput.value);
+      clipMixerGainStepInput.value = String(value);
+      try {
+        cachedStorageSet({ cheeseClipAudioMixerGainStep: value });
+      } catch {}
+    };
+    clipMixerGainStepInput.addEventListener("change", saveClipMixerGainStep);
+    clipMixerGainStepInput.addEventListener("blur", saveClipMixerGainStep);
+  }
 
   bindGainRangeSegmented(
     document.querySelector("[data-embed-clip-gain-min]"),

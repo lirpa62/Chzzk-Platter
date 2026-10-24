@@ -146,7 +146,8 @@ button.cheese-clip-video-filter-button > svg {
 }
 
 .cheese-clip-video-filter-tooltip-title,
-.cheese-clip-video-filter-tooltip-preset {
+.cheese-clip-video-filter-tooltip-preset,
+.cheese-clip-video-filter-tooltip-hint {
   display: block;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   white-space: nowrap;
@@ -158,7 +159,8 @@ button.cheese-clip-video-filter-button > svg {
   line-height: 16px;
 }
 
-.cheese-clip-video-filter-tooltip-preset {
+.cheese-clip-video-filter-tooltip-preset,
+.cheese-clip-video-filter-tooltip-hint {
   margin-top: 2px;
   color: rgba(255, 255, 255, 0.7);
   font-size: 11px;

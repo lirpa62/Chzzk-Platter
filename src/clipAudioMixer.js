@@ -14,6 +14,16 @@
   const ENABLED_KEY = "cheeseClipAudioMixerEnabled";
   const ALWAYS_ON_KEY = "cheeseClipAudioMixerAlwaysOn";
   const SELECTED_PRESET_KEY = "cheeseClipAudioMixerPreset";
+  // 게인(클립 페이지 전용 키 — 라이브·임베드 믹서와 따로 정한다).
+  const LAST_GAIN_KEY = "cheeseClipAudioMixerGain"; // 마지막으로 조절한 게인(null = 프리셋 값)
+  const WHEEL_ACTION_KEY = "cheeseClipAudioMixerWheelAction"; // preset | gain
+  const GAIN_MIN_KEY = "cheeseClipAudioMixerGainMin";
+  const GAIN_MAX_KEY = "cheeseClipAudioMixerGainMax";
+  const GAIN_STEP_KEY = "cheeseClipAudioMixerGainStep";
+  const GAIN_MIN_ALLOWED = [0.5, 0.25, 0.1, 0];
+  const GAIN_MAX_ALLOWED = [2, 3];
+  const GAIN_SLIDER_CLASS = "cheese-clip-gain-slider";
+  const GAIN_SLIDER_WIDTH = 26;
   const EQ_BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
   const BUTTON_CLASS = "cheese-clip-audio-mixer-button";
   const SLOT_CLASS = "cheese-clip-audio-mixer-slot";
@@ -262,6 +272,19 @@
   let lastRoute = location.href;
   let graphError = "";
   let frameActive = false;
+  // 사용자가 조절한 게인. 프리셋 gain 위에 곱하지 않고 대체한다(라이브·임베드 믹서와 같은 규약).
+  // 프리셋을 바꾸면 그 프리셋의 게인부터 다시 시작한다. 클립을 넘겨도 마지막 값을 이어 쓴다.
+  let userGain = null;
+  let lastGain = null;
+  let lastGainSaveTimer = 0;
+  let wheelAction = "preset";
+  let gainMin = 0.1;
+  let gainMax = 2;
+  let gainStep = 5; // %
+  let gainSlider = null;
+  let gainOpen = false;
+  let gainDragging = false;
+  let gainHideTimer = 0;
   let frameActivityKnown = false;
   let frameActivityFallbackTimer = 0;
 
@@ -428,7 +451,18 @@
     selectedPreset = nextPreset.key;
     presetLabel = nextPreset.label;
     presetSnapshot = cloneSnapshot(nextPreset.snapshot);
+    // 프리셋을 바꾸면 그 프리셋의 게인부터 시작한다(마지막 게인도 지운다).
+    userGain = null;
+    lastGain = null;
+    if (lastGainSaveTimer) {
+      clearTimeout(lastGainSaveTimer);
+      lastGainSaveTimer = 0;
+    }
+    try {
+      void chrome.storage.local.set({ [LAST_GAIN_KEY]: null });
+    } catch {}
     applySnapshot();
+    syncGainSlider();
     updateButton();
   }
 
@@ -441,6 +475,17 @@
       hidden.audioMixer === true;
     featureEnabled = data?.[ENABLED_KEY] !== false;
     alwaysOn = data?.[ALWAYS_ON_KEY] === true;
+    wheelAction = data?.[WHEEL_ACTION_KEY] === "gain" ? "gain" : "preset";
+    gainMin = GAIN_MIN_ALLOWED.includes(Number(data?.[GAIN_MIN_KEY]))
+      ? Number(data[GAIN_MIN_KEY])
+      : 0.1;
+    gainMax = GAIN_MAX_ALLOWED.includes(Number(data?.[GAIN_MAX_KEY]))
+      ? Number(data[GAIN_MAX_KEY])
+      : 2;
+    gainStep = Math.min(10, Math.max(1, Math.round(finite(data?.[GAIN_STEP_KEY], 5))));
+    const storedGain = data?.[LAST_GAIN_KEY];
+    lastGain = typeof storedGain === "number" && Number.isFinite(storedGain) ? storedGain : null;
+    if (!enabled) userGain = lastGain;
     presetOptions = buildPresetOptions(data);
     const preset = resolveSelectedPreset(data);
     selectedPreset = preset.key;
@@ -472,6 +517,11 @@
         ENABLED_KEY,
         ALWAYS_ON_KEY,
         SELECTED_PRESET_KEY,
+        LAST_GAIN_KEY,
+        WHEEL_ACTION_KEY,
+        GAIN_MIN_KEY,
+        GAIN_MAX_KEY,
+        GAIN_STEP_KEY,
       ]);
       applyStoredSettings(data);
     } catch {
@@ -519,8 +569,171 @@
         `<strong class="${TOOLTIP_CLASS}-title"></strong>` +
         `<span class="${TOOLTIP_CLASS}-preset"></span>`;
       tooltip.firstElementChild.textContent = `오디오 믹서 ${action}`;
-      tooltip.lastElementChild.textContent = `${presetLabel} 프리셋`;
+      tooltip.lastElementChild.textContent =
+        enabled && audio.connected
+          ? `${presetLabel} 프리셋 · 게인 ${Math.round(currentGain() * 100)}%`
+          : `${presetLabel} 프리셋`;
+      // 버튼 위 휠은 믹서가 켜져 있을 때만 동작한다(꺼져 있으면 클립 전환으로 넘긴다).
+      if (enabled && audio.connected) {
+        const hint = document.createElement("span");
+        hint.className = `${TOOLTIP_CLASS}-hint`;
+        hint.textContent = wheelAction === "gain" ? "휠: 게인 조절" : "휠: 프리셋 전환";
+        tooltip.appendChild(hint);
+      }
     }
+    syncGainSlider();
+  }
+
+  // ── 게인 슬라이더(세로) ─────────────────────────────────────────────────────
+  // 치지직 클립 음량 슬라이더처럼 위아래로 조절한다. 버튼 왼쪽은 클립 영상이라 오른쪽으로 펼친다
+  // (실측: 음량 버튼 오른쪽에 약 30px). 믹서가 켜져 있고 버튼·슬라이더에 마우스가 있을 때만 보인다.
+  function ensureGainSlider() {
+    if (!slot) return null;
+    if (gainSlider?.isConnected && gainSlider.parentElement === slot) return gainSlider;
+    gainSlider = document.createElement("div");
+    gainSlider.className = GAIN_SLIDER_CLASS;
+    gainSlider.setAttribute("role", "slider");
+    gainSlider.setAttribute("aria-orientation", "vertical");
+    gainSlider.setAttribute("aria-label", "오디오 믹서 게인");
+    gainSlider.tabIndex = 0;
+    gainSlider.innerHTML =
+      `<span class="${GAIN_SLIDER_CLASS}-track"><span class="${GAIN_SLIDER_CLASS}-fill"></span>` +
+      `<span class="${GAIN_SLIDER_CLASS}-handle"></span></span>`;
+    gainSlider.addEventListener("pointerdown", onGainPointerDown);
+    gainSlider.addEventListener("keydown", onGainKeydown);
+    gainSlider.addEventListener("click", (event) => event.stopPropagation());
+    slot.appendChild(gainSlider);
+    if (!slot.dataset.cheeseGainBound) {
+      slot.dataset.cheeseGainBound = "1";
+      slot.addEventListener("pointerenter", () => setGainOpen(true));
+      slot.addEventListener("pointerleave", () => setGainOpen(false));
+      slot.addEventListener("focusin", () => setGainOpen(true));
+      slot.addEventListener("focusout", () => setGainOpen(false));
+    }
+    return gainSlider;
+  }
+
+  function setGainOpen(open) {
+    if (gainHideTimer) {
+      clearTimeout(gainHideTimer);
+      gainHideTimer = 0;
+    }
+    if (open) {
+      gainOpen = true;
+      syncGainSlider();
+      return;
+    }
+    // 버튼과 슬라이더 사이 틈을 지나는 동안 닫히지 않게 잠깐 기다린다.
+    gainHideTimer = setTimeout(() => {
+      gainHideTimer = 0;
+      if (gainDragging) return;
+      gainOpen = false;
+      syncGainSlider();
+    }, 250);
+  }
+
+  // 치지직 음량 슬라이더의 색·크기를 그대로 따른다(테마마다 다르므로 보일 때마다 읽는다).
+  // 실측 구조: btn_box(판) > control_wrap > volumebar(트랙) > current(채움) + slider_range > slider(핸들).
+  const NATIVE_SLIDER_PARTS = {
+    box: '[class*="VolumeButtonView-module__btn_box__"]',
+    track: '[class*="VolumeButtonView-module__volumebar__"]',
+    fill: '[class*="VolumeButtonView-module__current__"]',
+    handle: '[class*="VolumeButtonView-module__slider__"]',
+  };
+  function harvestNativeSliderStyle(slider) {
+    const group = anchorGroup?.isConnected ? anchorGroup : null;
+    if (!group) return;
+    const css = (selector) => {
+      const el = group.querySelector(selector);
+      return el ? getComputedStyle(el) : null;
+    };
+    const px = (value, fallback) => (/^\d+(\.\d+)?px$/.test(String(value)) ? value : fallback);
+    const box = css(NATIVE_SLIDER_PARTS.box);
+    const track = css(NATIVE_SLIDER_PARTS.track);
+    const fill = css(NATIVE_SLIDER_PARTS.fill);
+    const handle = css(NATIVE_SLIDER_PARTS.handle);
+    const set = (name, value) => {
+      if (value && slider.style.getPropertyValue(name) !== value) slider.style.setProperty(name, value);
+    };
+    set("--cheese-clip-gain-panel-bg", box?.backgroundColor);
+    set("--cheese-clip-gain-track-bg", track?.backgroundColor);
+    set("--cheese-clip-gain-track-radius", track?.borderRadius);
+    set("--cheese-clip-gain-track-width", px(track?.width, ""));
+    set("--cheese-clip-gain-fill-bg", fill?.backgroundColor);
+    set("--cheese-clip-gain-handle-bg", handle?.backgroundColor);
+    set("--cheese-clip-gain-handle-size", px(handle?.width, ""));
+    set("--cheese-clip-gain-handle-shadow", handle?.boxShadow === "none" ? "none" : handle?.boxShadow);
+  }
+
+  function syncGainSlider() {
+    if (!slot) return;
+    const active = enabled && audio.connected && !graphError;
+    const slider = active ? ensureGainSlider() : gainSlider;
+    if (!slider) return;
+    const show = active && (gainOpen || gainDragging);
+    slot.classList.toggle("is-gain-open", show);
+    if (!show) return;
+    harvestNativeSliderStyle(slider);
+    const gain = currentGain();
+    const ratio = gainMax > gainMin ? (gain - gainMin) / (gainMax - gainMin) : 0;
+    slider.style.setProperty("--cheese-clip-gain-ratio", String(Math.max(0, Math.min(1, ratio))));
+    // 오른쪽 공간이 슬라이더보다 좁으면 그만큼 안쪽으로 당겨 화면 밖으로 나가지 않게 한다.
+    const right = slot.getBoundingClientRect().right;
+    const room = innerWidth - right - 2;
+    slider.style.setProperty("--cheese-clip-gain-shift", `${Math.min(0, room - GAIN_SLIDER_WIDTH)}px`);
+    slider.setAttribute("aria-valuemin", String(Math.round(gainMin * 100)));
+    slider.setAttribute("aria-valuemax", String(Math.round(gainMax * 100)));
+    slider.setAttribute("aria-valuenow", String(Math.round(gain * 100)));
+    slider.setAttribute("aria-valuetext", `${Math.round(gain * 100)}%`);
+  }
+
+  function gainFromPointer(event) {
+    const track = gainSlider?.querySelector(`.${GAIN_SLIDER_CLASS}-track`);
+    if (!track) return currentGain();
+    const rect = track.getBoundingClientRect();
+    const ratio = rect.height > 0 ? (rect.bottom - event.clientY) / rect.height : 0;
+    return gainMin + Math.max(0, Math.min(1, ratio)) * (gainMax - gainMin);
+  }
+
+  function onGainPointerDown(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    gainDragging = true;
+    try {
+      gainSlider.setPointerCapture(event.pointerId);
+    } catch {}
+    setGain(gainFromPointer(event));
+    // 캡처가 풀려도(프레임 경계 등) 끌기가 끊기지 않게 창 전체에서 받는다.
+    const move = (moveEvent) => {
+      moveEvent.preventDefault();
+      setGain(gainFromPointer(moveEvent));
+    };
+    const end = () => {
+      gainDragging = false;
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
+      if (!slot?.matches(":hover")) setGainOpen(false);
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", end, true);
+  }
+
+  function onGainKeydown(event) {
+    const keys = {
+      ArrowUp: 1,
+      ArrowRight: 1,
+      ArrowDown: -1,
+      ArrowLeft: -1,
+    };
+    if (event.key in keys) nudgeGain(keys[event.key]);
+    else if (event.key === "Home") setGain(gainMin);
+    else if (event.key === "End") setGain(gainMax);
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   function showGraphError(error) {
@@ -672,6 +885,10 @@
     // 버튼 위 휠도 클립 전환 제스처로 간주하면 공용 도구 스택이 잠시 숨었다가
     // 다시 배치된다. 확장 도구를 조작하는 동안에는 현재 클립을 유지한다.
     if (isMediaToolGesture(event)) return;
+    // 치지직 클립 화면은 실제로 스크롤이 시작될 때 부모(clipFrameCoordinator.js)가 transition-start 를
+    // 보낸다. 그 알림을 받는 프레임이면 휠·터치·방향키만으로 미리 숨기지 않는다 — 첫 클립에서 위로
+    // 굴리거나 음량·좋아요 버튼 사이 빈 곳에서 굴려 넘어가지 않을 때도 버튼이 0.5초 사라졌다.
+    if (frameActivityKnown) return;
     hideButtonDuringTransition();
     const wait =
       TRANSITION_BROADCAST_INTERVAL_MS -
@@ -702,6 +919,25 @@
       return;
     }
     broadcastTransitionStart(event);
+  }
+
+  // ── 클립 전환 감지 ──────────────────────────────────────────────────────────
+  // 치지직 클립은 플레이어 프레임 하나 안에서 클립 목록(FlickingView)을 스크롤해 넘긴다(실측: 프레임은
+  // 그대로이고 음량 버튼이 83 → -31 → -294 로 밀린 뒤 새 클립의 버튼이 83 에 나타난다). 우리 버튼은 음량
+  // 버튼 위치를 따라가므로 이 스크롤 동안 숨겨야 끌려 다니지 않는다. 휠만 보면 넘어가지 않는 휠(첫 클립에서
+  // 위로 등)에도 사라지므로, 영상이 든 목록이 실제로 스크롤될 때만 숨긴다.
+  let transitionScrollWatching = false;
+  function onClipListScroll(event) {
+    const target = event.target;
+    if (!(target instanceof Element) || !frameActive) return;
+    if (target.closest(`.${STACK_CLASS}`)) return;
+    if (!target.querySelector("video")) return;
+    hideButtonDuringTransition();
+  }
+  function startMotionWatch() {
+    if (transitionScrollWatching) return;
+    transitionScrollWatching = true;
+    document.addEventListener("scroll", onClipListScroll, { capture: true, passive: true });
   }
 
   function startTransitionChannel() {
@@ -789,6 +1025,9 @@
     slot = null;
     button = null;
     tooltip = null;
+    gainSlider = null;
+    gainOpen = false;
+    gainDragging = false;
     anchorGroup = null;
     anchorToolTop = null;
     requestSharedToolLayout();
@@ -888,10 +1127,47 @@
     }, NORM_INTERVAL_MS);
   }
 
+  // 지금 적용할 게인. 만진 적 없으면 프리셋 값.
+  function currentGain() {
+    const base = userGain === null ? presetSnapshot.gain : userGain;
+    return Math.min(gainMax, Math.max(gainMin, finite(base, 1)));
+  }
+
+  // 100%(원본 음량)를 기준점으로 간격에 맞춘다. 양 끝은 범위 끝을 그대로 허용한다.
+  function quantizeGain(value) {
+    const g = Math.min(gainMax, Math.max(gainMin, finite(value, 1)));
+    if (g <= gainMin || g >= gainMax) return g;
+    const step = gainStep / 100;
+    const q = 1 + Math.round((g - 1) / step) * step;
+    return Math.round(Math.min(gainMax, Math.max(gainMin, q)) * 100) / 100;
+  }
+
+  function setGain(value) {
+    const next = quantizeGain(value);
+    if (userGain !== null && Math.abs(next - userGain) < 0.0001) return;
+    userGain = next;
+    lastGain = next;
+    if (audio.connected) audio.masterGain.gain.value = currentGain();
+    syncGainSlider();
+    updateButton();
+    // 드래그 중 저장이 몰리지 않게 묶는다. 다른 클립 프레임은 이 값을 이어받는다.
+    if (lastGainSaveTimer) clearTimeout(lastGainSaveTimer);
+    lastGainSaveTimer = setTimeout(() => {
+      lastGainSaveTimer = 0;
+      try {
+        void chrome.storage.local.set({ [LAST_GAIN_KEY]: lastGain });
+      } catch {}
+    }, 250);
+  }
+
+  function nudgeGain(direction) {
+    setGain(currentGain() + (direction * gainStep) / 100);
+  }
+
   function applySnapshot() {
     if (!audio.connected) return;
 
-    audio.masterGain.gain.value = presetSnapshot.gain;
+    audio.masterGain.gain.value = currentGain();
     presetSnapshot.eq.forEach((gain, index) => {
       if (audio.eqFilters[index]) audio.eqFilters[index].gain.value = gain;
     });
@@ -1140,6 +1416,7 @@
       return;
     }
 
+    userGain = lastGain; // 다른 클립에서 조절한 게인을 이어 쓴다
     enabled = true;
     if (!connectGraph(video)) {
       autoEnableSuppressed = true;
@@ -1166,6 +1443,7 @@
 
     const video = findActiveVideo();
     if (!(video instanceof HTMLVideoElement)) return;
+    userGain = lastGain; // 다른 클립에서 조절한 게인을 이어 쓴다
     enabled = true;
     if (!connectGraph(video)) {
       autoEnableSuppressed = true;
@@ -1191,6 +1469,7 @@
     const video = findActiveVideo();
     if (!(video instanceof HTMLVideoElement)) return;
     autoEnableSuppressed = false;
+    userGain = lastGain;
     enabled = true;
     if (!connectGraph(video)) return;
     disarmAutoEnable();
@@ -1198,7 +1477,8 @@
   }
 
   function onButtonWheel(event) {
-    if (!event.target?.closest?.(`.${BUTTON_CLASS}`) || event.deltaY === 0) {
+    const onSlider = Boolean(event.target?.closest?.(`.${GAIN_SLIDER_CLASS}`));
+    if ((!onSlider && !event.target?.closest?.(`.${BUTTON_CLASS}`)) || event.deltaY === 0) {
       return;
     }
     if (
@@ -1214,6 +1494,12 @@
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
+    // 슬라이더 위 휠은 늘 게인, 버튼 위 휠은 설정(프리셋 전환/게인 조절)을 따른다.
+    // ⚠ 여기서 막지 않으면 휠이 클립 전환으로 넘어간다. 그 밖의 휠은 건드리지 않는다.
+    if (onSlider || wheelAction === "gain") {
+      nudgeGain(event.deltaY < 0 ? 1 : -1);
+      return;
+    }
     // 설정의 시작 기본값은 유지하고 현재 클립 프레임에만 즉시 적용한다.
     cyclePreset(event.deltaY < 0 ? -1 : 1);
   }
@@ -1328,6 +1614,8 @@
     }
     startObserver();
     startRouteWatcher();
+    // 다른 클립에서 조절한 게인을 이어 쓴다(이 클립에서 프리셋만 바꾼 상태가 아니면).
+    if (!enabled) userGain = lastGain;
     if (alwaysOn && !enabled && !autoEnableSuppressed) armAutoEnable();
     hideButtonDuringTransition();
   }
@@ -1369,7 +1657,18 @@
 
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area !== "local") return;
+    // 마지막 게인은 값만 받아 둔다. 설정 전체를 다시 읽으면 휠로 바꾼 현재 클립의 프리셋이
+    // 저장된 시작 프리셋으로 되돌아간다. 지금 켜져 있는 클립은 자기 게인을 그대로 둔다.
+    if (changes[LAST_GAIN_KEY]) {
+      const value = changes[LAST_GAIN_KEY].newValue;
+      lastGain = typeof value === "number" && Number.isFinite(value) ? value : null;
+      if (!enabled) userGain = lastGain;
+    }
     if (
+      !changes[WHEEL_ACTION_KEY] &&
+      !changes[GAIN_MIN_KEY] &&
+      !changes[GAIN_MAX_KEY] &&
+      !changes[GAIN_STEP_KEY] &&
       !changes[MASTER_KEY] &&
       !changes[FEATURE_HIDDEN_KEY] &&
       !changes[PRESETS_KEY] &&
@@ -1444,6 +1743,7 @@
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) return;
     startTransitionChannel();
+    startMotionWatch();
     requestFrameActivity();
     if (frameActive) {
       hideButtonDuringTransition();
@@ -1455,6 +1755,7 @@
 
   window.addEventListener("message", handleFrameActivity);
   startTransitionChannel();
+  startMotionWatch();
   await loadSettings();
   requestFrameActivity();
 })();

@@ -123,6 +123,7 @@ button.cheese-clip-audio-mixer-button > svg {
 
 .cheese-clip-audio-mixer-tooltip-title,
 .cheese-clip-audio-mixer-tooltip-preset,
+.cheese-clip-audio-mixer-tooltip-hint,
 .cheese-clip-audio-mixer-tooltip-message {
   display: block;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -135,7 +136,8 @@ button.cheese-clip-audio-mixer-button > svg {
   white-space: nowrap;
 }
 
-.cheese-clip-audio-mixer-tooltip-preset {
+.cheese-clip-audio-mixer-tooltip-preset,
+.cheese-clip-audio-mixer-tooltip-hint {
   margin-top: 2px;
   color: rgba(255, 255, 255, 0.7);
   font-size: 11px;
@@ -184,4 +186,93 @@ button.cheese-clip-fav-btn:focus-visible > svg {
 button.cheese-clip-fav-btn[data-on="true"]:hover > svg,
 button.cheese-clip-fav-btn[data-on="true"]:focus-visible > svg {
   stroke: #fff;
+}
+
+/* 게인 슬라이더(세로). 치지직 클립 음량 슬라이더처럼 위아래로 조절하고, 버튼 왼쪽은 클립 영상이라
+   오른쪽으로 펼친다(실측 오른쪽 여유 약 30px). 오른쪽 공간이 모자라면 JS 가
+   --cheese-clip-gain-shift 만큼 안쪽으로 당긴다. 믹서가 켜져 있고 마우스가 올라 있을 때만 보인다.
+   색·크기는 JS(harvestNativeSliderStyle)가 치지직 음량 슬라이더에서 읽어 변수로 넣는다. 아래 기본값은
+   그 값을 못 읽었을 때 쓰는 실측값(밝은 테마: 판 rgba(0,0,0,.04), 트랙 rgba(0,0,0,.2), 채움·핸들 검정). */
+.cheese-clip-gain-slider {
+  --cheese-clip-gain-ratio: 0.5;
+  --cheese-clip-gain-shift: 0px;
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 2px + var(--cheese-clip-gain-shift));
+  z-index: 3;
+  box-sizing: border-box;
+  width: 26px;
+  height: 102px;
+  padding: 13px 0;
+  border-radius: 13px;
+  background: var(
+    --cheese-clip-gain-panel-bg,
+    var(--cheese-platter-background-inverted-alpha-1)
+  );
+  transform: translateY(-50%);
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* 접을 때는 투명해진 뒤 숨기고, 펼칠 때는 바로 보이게 한다(펼친 직후 Tab 으로 초점이 갈 수 있게). */
+  transition:
+    opacity 0.12s ease,
+    visibility 0s linear 0.12s;
+}
+
+.cheese-clip-audio-mixer-slot.is-gain-open .cheese-clip-gain-slider {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity 0.12s ease,
+    visibility 0s;
+}
+
+.cheese-clip-gain-slider:focus-visible {
+  box-shadow: 0 0 0 2px
+    var(--cheese-clip-gain-fill-bg, var(--cheese-platter-neutral-foreground-subtle-1));
+}
+
+.cheese-clip-gain-slider-track {
+  position: relative;
+  display: block;
+  width: var(--cheese-clip-gain-track-width, 4px);
+  height: 100%;
+  margin: 0 auto;
+  border-radius: var(--cheese-clip-gain-track-radius, 2px);
+  background: var(
+    --cheese-clip-gain-track-bg,
+    color-mix(in srgb, var(--cheese-platter-neutral-foreground-subtle-1) 20%, transparent)
+  );
+}
+
+.cheese-clip-gain-slider-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--cheese-clip-gain-ratio) * 100%);
+  border-radius: var(--cheese-clip-gain-track-radius, 2px);
+  background: var(
+    --cheese-clip-gain-fill-bg,
+    var(--cheese-platter-neutral-foreground-subtle-1)
+  );
+}
+
+.cheese-clip-gain-slider-handle {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--cheese-clip-gain-ratio) * 100%);
+  width: var(--cheese-clip-gain-handle-size, 12px);
+  height: var(--cheese-clip-gain-handle-size, 12px);
+  border-radius: 50%;
+  background: var(
+    --cheese-clip-gain-handle-bg,
+    var(--cheese-platter-neutral-foreground-subtle-1)
+  );
+  box-shadow: var(--cheese-clip-gain-handle-shadow, none);
+  transform: translate(-50%, 50%);
 }

@@ -1562,6 +1562,8 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-cards-per-row]),
 .settings-item:has([data-cf-group-style-value]),
 .settings-item:has([data-auto-sync-channels-list]),
+.settings-item:has([data-clip-audio-mixer-gain-min]),
+.settings-item:has([data-clip-audio-mixer-gain-max]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
@@ -1662,6 +1664,8 @@ html.settings-tab-view .settings-item-desc {
 .settings-segmented[data-chat-os-position],
 .settings-segmented[data-chat-time-seek-offset],
 .settings-segmented[data-chat-donation-tools],
+.settings-segmented[data-clip-audio-mixer-gain-min],
+.settings-segmented[data-clip-audio-mixer-gain-max],
 .settings-item [data-screenshot-name],
 .settings-item [data-update-notice-mode],
 .settings-item [data-affinity-order],

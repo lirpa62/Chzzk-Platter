@@ -700,6 +700,13 @@
         `<span class="${TOOLTIP_CLASS}-preset"></span>`;
       tooltip.firstElementChild.textContent = `비디오 필터 ${action}`;
       tooltip.lastElementChild.textContent = `${presetLabel} 프리셋`;
+      // 버튼 위 휠은 필터가 켜져 있을 때만 프리셋을 바꾼다(꺼져 있으면 클립 전환으로 넘긴다).
+      if (enabled && appliedVideo) {
+        const hint = document.createElement("span");
+        hint.className = `${TOOLTIP_CLASS}-hint`;
+        hint.textContent = "휠: 프리셋 전환";
+        tooltip.appendChild(hint);
+      }
     }
   }
 
@@ -892,7 +899,29 @@
     ) {
       return;
     }
+    // 부모(clipFrameCoordinator.js)가 실제 스크롤 때 transition-start 를 보내는 프레임이면
+    // 휠·터치만으로 미리 숨기지 않는다(넘어가지 않는 휠에도 버튼이 사라졌다). 오디오 믹서와 같은 기준.
+    if (frameActivityKnown) return;
     hideButtonDuringTransition();
+  }
+
+  // ── 클립 전환 감지 ──────────────────────────────────────────────────────────
+  // 치지직 클립은 플레이어 프레임 하나 안에서 클립 목록(FlickingView)을 스크롤해 넘긴다(실측: 프레임은
+  // 그대로이고 음량 버튼이 83 → -31 → -294 로 밀린 뒤 새 클립의 버튼이 83 에 나타난다). 우리 버튼은 음량
+  // 버튼 위치를 따라가므로 이 스크롤 동안 숨겨야 끌려 다니지 않는다. 휠만 보면 넘어가지 않는 휠(첫 클립에서
+  // 위로 등)에도 사라지므로, 영상이 든 목록이 실제로 스크롤될 때만 숨긴다.
+  let transitionScrollWatching = false;
+  function onClipListScroll(event) {
+    const target = event.target;
+    if (!(target instanceof Element) || !frameActive) return;
+    if (target.closest(`.${STACK_CLASS}`)) return;
+    if (!target.querySelector("video")) return;
+    hideButtonDuringTransition();
+  }
+  function startMotionWatch() {
+    if (transitionScrollWatching) return;
+    transitionScrollWatching = true;
+    document.addEventListener("scroll", onClipListScroll, { capture: true, passive: true });
   }
 
   function startTransitionChannel() {
@@ -1114,6 +1143,7 @@
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) return;
     startTransitionChannel();
+    startMotionWatch();
     requestFrameActivity();
     if (frameActive) {
       startObserver();
@@ -1124,6 +1154,7 @@
 
   window.addEventListener("message", handleFrameActivity);
   startTransitionChannel();
+  startMotionWatch();
   await loadSettings();
   requestFrameActivity();
 })();

@@ -11786,6 +11786,156 @@
                   ></ul>
                 </div>
               </li>
+              <li
+                class="settings-item settings-item-stacked"
+                style="flex-direction: column; gap: 0"
+                data-new-feature="clip-audio-mixer-gain"
+              >
+                <div style="width: 100%">
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="클립 게인 휠 볼륨 음량 프리셋 전환"
+                    >└ 믹서 버튼 위 휠 동작</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="클립 믹서 버튼 위에서 휠을 굴렸을 때 프리셋을 바꿀지 게인을 조절할지 정합니다."
+                    >클립 믹서 버튼에 마우스를 올리고 휠을 굴렸을 때 할 일입니다.
+                    프리셋 전환=다음·이전 프리셋, 게인 조절=간격만큼 게인을 올리거나
+                    내림(기본 프리셋 전환). 믹서가 켜져 있을 때만 동작하고, 버튼 밖의
+                    휠은 지금처럼 클립을 넘깁니다. 버튼 오른쪽에 펼쳐지는 게인
+                    슬라이더 위 휠은 늘 게인을 조절합니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-clip-audio-mixer-wheel-action
+                  role="radiogroup"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-wheel-action-value="preset"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    프리셋 전환
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-wheel-action-value="gain"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    게인 조절
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 게인 슬라이더 최소</span>
+                  <span class="settings-item-desc"
+                    >클립 믹서 게인 슬라이더의 하한(100%=원본 음량)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-4"
+                  data-clip-audio-mixer-gain-min
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-gain-min-value="0.5"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    50%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-gain-min-value="0.25"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    25%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-gain-min-value="0.1"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    10%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-gain-min-value="0"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    0%
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item settings-item-stacked">
+                <div>
+                  <span class="settings-item-name">└ 게인 슬라이더 최대</span>
+                  <span class="settings-item-desc"
+                    >클립 믹서 게인 슬라이더의 상한(음량 증폭)</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-clip-audio-mixer-gain-max
+                  role="radiogroup"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-gain-max-value="2"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    200%
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-clip-audio-mixer-gain-max-value="3"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    300%
+                  </button>
+                </div>
+              </li>
+              <li class="settings-item">
+                <label for="clipAudioMixerGainStepInput">
+                  <span class="settings-item-name">└ 게인 조절 간격</span>
+                  <span class="settings-item-desc"
+                    >클립 믹서의 게인을 휠·방향키로 한 단계씩 조절할 크기(1~10%,
+                    기본 5%)</span
+                  >
+                </label>
+                <span class="settings-custom-input">
+                  <input
+                    type="number"
+                    id="clipAudioMixerGainStepInput"
+                    min="1"
+                    max="10"
+                    step="1"
+                    inputmode="numeric"
+                    data-clip-audio-mixer-gain-step
+                  />
+                  <small>%</small>
+                </span>
+              </li>
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">클립 비디오 필터 사용</span>
