@@ -2778,8 +2778,10 @@
     if (button.getAttribute("aria-label") !== label) {
       button.setAttribute("aria-label", label);
     }
+    // 둘째 줄에 버튼 위 휠(꺼져 있어도 프리셋을 바꾼다), 셋째 줄에 우클릭 패널을 알린다.
+    const text = `${label}\n휠: 프리셋 전환\n우클릭: 설정 패널 열기`;
     const tip = button.querySelector(".pzp-button__tooltip");
-    if (tip && tip.textContent !== label) tip.textContent = label;
+    if (tip && tip.textContent !== text) tip.textContent = text;
   }
 
   // 버튼(플레이어 하단)만 가볍게 동기화. ensureButton이 매 tick 호출하므로

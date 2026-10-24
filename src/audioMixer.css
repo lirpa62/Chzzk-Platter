@@ -1758,6 +1758,15 @@
 .cheese-live-seek-bar.is-visible {
   opacity: 1;
 }
+/* 하단 버튼 툴팁(.pzp-button__tooltip)은 z-index 없는 하단 바 안에 있어 z-index 60 인
+   되감기 바 아래에 그려진다. 버튼 줄에 마우스가 올라 있을 때만 버튼 줄을 바보다 위 층으로
+   올린다. 늘 올려 두면 바를 낮게 둔 설정(35px~)에서 버튼 줄 상자가 바를 덮어 드래그가 막힌다.
+   전체 화면 큰 크기에서는 버튼 묶음에 transform 이 걸려 툴팁 자체 z-index 로는 못 빠져나오므로
+   묶음의 부모(.pzp-pc__bottom-buttons)를 올린다. 바가 있다는 표시는 <html> 속성으로 한다
+   (플레이어 클래스는 치지직이 className 을 다시 쓰며 지운다). */
+html[data-cheese-live-seek-bar] .pzp-pc__bottom-buttons:hover {
+  z-index: 61;
+}
 .cheese-live-seek-bar.is-visible .cheese-live-seek-bar__track {
   pointer-events: auto;
 }
@@ -2066,9 +2075,36 @@
    표시 여부만 확실히 가져오고 위치·모양은 치지직 것을 그대로 쓴다.
    disabled 는 건드리지 않는다. */
 /* 둘째 줄 '우클릭: 자동 따라잡기' 안내(setSyncTooltip 의 줄바꿈)를 그대로 보인다. */
-.cheese-live-sync-button .pzp-button__tooltip {
-  white-space: pre;
+/* 툴팁 둘째 줄(따라잡기 '우클릭: 자동 따라잡기', 믹서 '휠: …')을 줄바꿈 그대로 보인다.
+   치지직 툴팁은 한 줄(nowrap)이라 !important 로 확실히 덮는다. */
+.cheese-live-sync-button .pzp-button__tooltip,
+.cheese-audio-mixer-button .pzp-button__tooltip {
+  white-space: pre !important;
   text-align: left;
+}
+/* 여러 줄 툴팁은 아래 끝을 맞춰 위로 자라게 한다. 치지직 툴팁은 위 끝(top 음수)으로 놓여
+   줄이 늘면 아래로 자라 버튼을 덮었다. 한 줄 높이(약 29px)를 빼 한 줄일 때 아래 끝이
+   치지직 툴팁과 같은 자리에 오게 맞춘다. 상태별 top 실측: 기본 -40, 재생 중 -52,
+   중간 크기 -38, 작은 크기 -33(px). */
+.pzp-pc {
+  --cheese-multiline-tip-gap: 11px;
+}
+.pzp-pc--playing {
+  --cheese-multiline-tip-gap: 23px;
+}
+.pzp-pc--size-medium,
+.pzp-pc--size-m {
+  --cheese-multiline-tip-gap: 9px;
+}
+.pzp-pc--size-small,
+.pzp-pc--size-s {
+  --cheese-multiline-tip-gap: 4px;
+}
+.cheese-live-sync-button .pzp-button__tooltip--top,
+.cheese-audio-mixer-button .pzp-button__tooltip--top,
+.cheese-video-filter-button .pzp-button__tooltip--top {
+  top: auto !important;
+  bottom: calc(100% + var(--cheese-multiline-tip-gap, 23px));
 }
 .cheese-live-sync-button.is-tip-open .pzp-button__tooltip {
   display: block !important;

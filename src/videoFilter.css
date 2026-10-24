@@ -7,6 +7,12 @@
   color: #b06cff;
 }
 
+/* 툴팁 둘째 줄 '휠: 프리셋 전환'(videoFilter.js syncButtonLabel 의 줄바꿈)을 그대로 보인다. */
+.cheese-video-filter-button .pzp-button__tooltip {
+  white-space: pre !important;
+  text-align: left;
+}
+
 .cheese-video-filter-button .pzp-ui-icon {
   display: flex;
   align-items: center;

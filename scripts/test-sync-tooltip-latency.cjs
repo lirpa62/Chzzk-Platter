@@ -125,7 +125,7 @@ console.log("\n[소스] 비활성일 때 지연을 버리지 않는다");
   // 자동 따라잡기가 꺼져 있으면 우클릭으로 켤 수 있다는 것을 둘째 줄로 알린다.
   ok(
     /if \(!autoStop && !catching && !autoSyncActive\(\)\) \{\s*text \+= "\\n우클릭: 자동 따라잡기";/.test(mixer) &&
-      /\.cheese-live-sync-button \.pzp-button__tooltip \{\s*white-space: pre;/.test(css),
+      /\.cheese-live-sync-button \.pzp-button__tooltip,\s*\.cheese-audio-mixer-button \.pzp-button__tooltip \{\s*white-space: pre !important;/.test(css),
     "자동 따라잡기가 꺼져 있으면 툴팁 둘째 줄에 '우클릭: 자동 따라잡기'",
   );
 }

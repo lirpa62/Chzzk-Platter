@@ -349,6 +349,7 @@
       ? e.data.wheelVolumeScope
       : "video";
     mixerWheelAction = e.data.mixerWheelAction === "gain" ? "gain" : "preset";
+    syncMixerButtonLabel();
     // 휠 볼륨 조절 간격(% 1~10 → 0.01~0.10). 범위 밖/미설정이면 5%.
     {
       const s = Number(e.data.wheelVolumeStep);
@@ -589,6 +590,9 @@
   const FORWARD_BUTTON_CLASS = "cheese-live-forward-button";
   const VOD_SEEK_BUTTON_CLASS = "cheese-vod-seek-button";
   const SEEK_BAR_CLASS = "cheese-live-seek-bar"; // 되감기 가능 영역 표시 + 드래그 seek 바
+  // 바가 떠 있음을 <html> 속성으로 표시(툴팁 층 올림). 플레이어 클래스는 치지직이 className 을
+  // 통째로 다시 써서 지워진다.
+  const SEEK_BAR_ROOT_ATTR = "data-cheese-live-seek-bar";
   let seekStepS = 10; // 한 번에 ±N초(settings에서 3~60 조절). content.js가 전달.
   const VOD_SEEK_STEP_S = 5; // 치지직 다시보기 기본 방향키 이동 간격
   const SEEK_EDGE_PAD_S = 2; // 라이브 엣지에 이만큼 못 미치게(엣지 직전까지만 앞으로)
@@ -5185,9 +5189,15 @@
     const button = document.querySelector(`.${BUTTON_CLASS}`);
     if (!button) return;
     const label = mixerButtonLabel();
-    button.setAttribute("aria-label", label);
+    if (button.getAttribute("aria-label") !== label) button.setAttribute("aria-label", label);
+    // 둘째 줄에 버튼 위 휠이 하는 일(설정 '믹서 버튼 위 휠 동작'), 셋째 줄에 우클릭 패널을 알린다.
+    // 프리셋 전환은 꺼져 있어도 동작하고, 게인 조절은 꺼져 있으면 켜라고 안내하며, 우클릭은
+    // 클릭 관련 옵션과 상관없이 늘 패널을 여닫으므로 늘 보인다. 한 줄에 이으면 가로로 길어져 줄을 나눈다.
+    const text =
+      `${label}\n휠: ${mixerWheelAction === "gain" ? "게인 조절" : "프리셋 전환"}` +
+      "\n우클릭: 설정 패널 열기";
     const tip = button.querySelector(".pzp-button__tooltip");
-    if (tip) tip.textContent = label;
+    if (tip && tip.textContent !== text) tip.textContent = text;
   }
 
   function syncUI() {
@@ -9005,6 +9015,9 @@
     if (!player) return;
     const anchor = findSeekBarAnchor();
     if (!anchor) return; // 컨트롤 바가 아직 없으면 다음 기회에
+    if (!document.documentElement.hasAttribute(SEEK_BAR_ROOT_ATTR)) {
+      document.documentElement.setAttribute(SEEK_BAR_ROOT_ATTR, "");
+    }
     let bar = player.querySelector(`:scope > .${SEEK_BAR_CLASS}`);
     if (!bar) {
       // 오버레이는 player(.pzp-pc)에 붙이고, 위치는 컨트롤 바 바로 위로 CSS가 잡는다.
@@ -9197,6 +9210,7 @@
       seekBarClsObs = null;
     }
     document.querySelectorAll(`.${SEEK_BAR_CLASS}`).forEach((b) => b.remove());
+    document.documentElement.removeAttribute(SEEK_BAR_ROOT_ATTR);
   }
 
   // 토글 변경 시 즉시 반영: 켜졌고 라이브면 바 보장, 꺼졌으면 제거.
