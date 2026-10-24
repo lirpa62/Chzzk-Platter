@@ -4621,6 +4621,15 @@
   document
     .querySelector('[data-feature="clipVault"]')
     ?.addEventListener("change", reflectCvAvailability);
+  // 보관 개수는 설정 캐시(프리페치)에서 바로 채운다. 사용량은 보관함 전체(계정별 목록, 최대
+  // 수만 개)를 읽어야 해서 늦게 오므로, 그동안 자리만 잡아 두고 뒤에 채운다. 예전에는 보관함을
+  // 다 읽은 뒤에 개수 칸까지 함께 채워 탭을 열어도 칸이 한동안 비어 있었다.
+  function showCvUsageLoading(limit) {
+    if (cvUsage) {
+      cvUsage.textContent = `현재 사용량 · 즐겨찾기 … / ${formatCvCount(limit)}개 · 기록된 좋아요 … / ${formatCvCount(limit)}개`;
+    }
+  }
+
   async function loadCvVaultUsage() {
     let limit = CV_LIMIT_DEFAULT;
     let vault = null;
@@ -4633,6 +4642,12 @@
       cvCurrentAccountId = normalizeCvAccountId(
         data?.[CLIP_VAULT_ACTIVE_ACCOUNT_KEY],
       );
+    } catch {}
+    const normalizedLimit = normalizeCvLimit(limit);
+    setCvLimitInputValue(normalizedLimit);
+    reflectCvAvailability();
+    if (!cvCurrentVault) showCvUsageLoading(normalizedLimit);
+    try {
       const accountKey = cvAccountStorageKey();
       if (accountKey) {
         const accountData = await chrome.storage.local.get(accountKey);
@@ -4644,10 +4659,11 @@
       }
     } catch {}
     cvCurrentVault = vault;
-    const normalizedLimit = normalizeCvLimit(limit);
-    setCvLimitInputValue(normalizedLimit);
-    updateCvLimitStatus(normalizedLimit, vault);
-    reflectCvAvailability();
+    // 보관함을 읽는 사이 개수를 바꿨으면 그 값을 쓴다.
+    const latestLimit = normalizeCvLimit(
+      storageCacheData?.[CLIP_VAULT_LIMIT_KEY] ?? limit,
+    );
+    updateCvLimitStatus(latestLimit, vault);
   }
   void loadCvVaultUsage();
   try {
