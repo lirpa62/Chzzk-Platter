@@ -1565,6 +1565,16 @@
     }
   }
 
+  // 시크릿 창에서 열었는지(?incognito=1). 시크릿 탭에서는 이 화면(확장 페이지)이 열리지 않아
+  // (ERR_BLOCKED_BY_CLIENT) 사이드바·설정 팝업의 '멀티뷰' 가 일반 창에 열고 표시를 붙인다. 시청 화면
+  // (치지직 페이지)은 시크릿 창에 연다. 파이어폭스는 사설 창에 이 화면을 띄우므로 그 경우도 시크릿으로 본다.
+  const OPEN_INCOGNITO = new URLSearchParams(location.search).get("incognito") === "1" ||
+    chrome.extension?.inIncognitoContext === true;
+  {
+    const note = document.getElementById("mvIncognitoNote");
+    if (note) note.hidden = !OPEN_INCOGNITO;
+  }
+
   // ── 실행 ───────────────────────────────────────────────────────────────
   // 고른 구성을 세션 저장소로 넘기고 시청 화면을 연다(기본 배치 9채널·내 배치 16채널까지, 탭은 여러 개).
   // 그 탭에서 고치는 중이면 그 탭을, '기존 멀티뷰 바꾸기' 면 고른 탭을 새 구성으로 다시 열고, 아니면 새 탭.
@@ -1591,7 +1601,9 @@
     // 새 구성으로 다시 열고, 아니면 새 탭 — 실행 중인 멀티뷰가 있으면 먼저 부담·겹치는 채널을 알린다.
     const runningList = await runningMultiviews();
     const editing = state.handoffId ? runningList.find((r) => r.setupId === state.handoffId) || null : null;
-    const same = (editing ? [editing] : runningList).find((r) => sameRunningSetup(r.setup, setup));
+    // 일반 창·시크릿 창 멀티뷰는 따로 본다(시크릿에서 시작했는데 일반 창 멀티뷰로 옮기지 않는다).
+    const same = (editing ? [editing] : runningList.filter((r) => r.incognito === OPEN_INCOGNITO))
+      .find((r) => sameRunningSetup(r.setup, setup));
     if (same) {
       if (await askRunningMultiview() !== "move") return;
       const moved = await chrome.runtime
@@ -1611,9 +1623,11 @@
     const duplicates = setup.chosen.filter((c) => elsewhere.has(c.channelId))
       .map((c) => c.channelName || elsewhere.get(c.channelId) || c.channelId);
     const addingTab = !editing && runningList.length > 0;
+    // 일반 창 멀티뷰와 시크릿 창 멀티뷰는 서로 바꾸지 않는다(배경도 모드가 다르면 새로 연다).
+    const sameMode = runningList.length === 1 && runningList[0].incognito === OPEN_INCOGNITO;
     let reuseTabId = null;
     if (addingTab || duplicates.length) {
-      const answer = await askMultiTab({ duplicates, addingTab, canReplace: addingTab && runningList.length === 1 });
+      const answer = await askMultiTab({ duplicates, addingTab, canReplace: addingTab && sameMode });
       if (answer === "cancel") return;
       if (answer === "replace") reuseTabId = runningList[0].tabId;
     }
@@ -1640,10 +1654,13 @@
         setupId: handoffId,
         theme,
         ...(Number.isInteger(reuseTabId) ? { reuseTabId } : {}),
+        ...(OPEN_INCOGNITO ? { incognito: true } : {}),
       });
     } catch {}
     if (!opened?.ok) {
-      alert("멀티뷰 창을 열지 못했습니다." + (opened?.reason ? ` (${opened.reason})` : ""));
+      alert(opened?.reason === "incognito-not-allowed"
+        ? "시크릿 창에 멀티뷰를 열 수 없습니다. 확장 프로그램 관리에서 치즈 플래터의 '시크릿 모드에서 허용'을 켜 주세요."
+        : "멀티뷰 창을 열지 못했습니다." + (opened?.reason ? ` (${opened.reason})` : ""));
     }
   }
 
@@ -1659,7 +1676,7 @@
         if (!host?.setupId) continue;
         const key = `${HANDOFF_PREFIX}:${host.setupId}`;
         const setup = (await chrome.storage.session.get(key))?.[key];
-        if (setup) list.push({ tabId: host.tabId, setupId: host.setupId, setup });
+        if (setup) list.push({ tabId: host.tabId, setupId: host.setupId, incognito: host.incognito === true, setup });
       }
       return list;
     } catch {

@@ -1111,11 +1111,17 @@
     window.open(settingsUrl.toString(), "_blank", "noopener");
   });
 
-  // 멀티뷰를 새 탭으로 연다.
+  // 멀티뷰를 새 탭으로 연다. 시크릿 창에서 연 설정 팝업이면 고르기 화면에 시크릿에서 왔다고
+  // 알린다(?incognito=1). 고르기 화면은 일반 창에 열리고(시크릿 탭에서는 확장 페이지가 열리지 않는다),
+  // 시청 화면은 시크릿 창에 열린다.
   document
     .getElementById("openMultiviewButton")
-    ?.addEventListener("click", () => {
-      const url = chrome.runtime.getURL("multiview.html");
+    ?.addEventListener("click", async () => {
+      let incognito = false;
+      try {
+        incognito = (await chrome.windows?.getCurrent?.())?.incognito === true;
+      } catch {}
+      const url = chrome.runtime.getURL(incognito ? "multiview.html?incognito=1" : "multiview.html");
       if (chrome.tabs?.create) {
         chrome.tabs.create({ url });
         return;

@@ -26269,6 +26269,17 @@ html.cheese-sidebar-resizing div#layout-body {
     link.target = "_blank";
     link.rel = "noopener";
     link.title = "멀티뷰";
+    // 시크릿 탭에서 링크로 가면 고르기 화면(확장 페이지)이 시크릿 탭에 열려 ERR_BLOCKED_BY_CLIENT 다.
+    // 배경이 일반 창에 ?incognito=1 로 열고, 시작하면 시청 화면은 시크릿 창에 연다.
+    if (chrome.extension?.inIncognitoContext) {
+      const openFromIncognito = (event) => {
+        if (event.type === "auxclick" && event.button !== 1) return;
+        event.preventDefault();
+        chrome.runtime.sendMessage({ type: "MULTIVIEW_OPEN_SETUP" }).catch(() => {});
+      };
+      link.addEventListener("click", openFromIncognito);
+      link.addEventListener("auxclick", openFromIncognito);
+    }
 
     // 원본 아이콘 자리를 찾아 같은 래퍼에 우리 아이콘을 넣는다. 못 찾으면 svg 만 둔다.
     const sampleIcon = sampleLink.querySelector('[class*="_icon_"]');

@@ -3970,7 +3970,8 @@ function lpBroadcast(message, exceptTabId) {
     chrome.tabs.query({ url: "https://chzzk.naver.com/*" }, (tabs) => {
       void chrome.runtime.lastError;
       for (const t of tabs || []) {
-        if (t.id != null && t.id !== exceptTabId) {
+        // 시크릿 탭은 일반 창 계정의 통나무파워 상태를 받지 않는다(LP_INCOGNITO_BLOCKED 참고).
+        if (t.id != null && t.id !== exceptTabId && !t.incognito) {
           chrome.tabs.sendMessage(t.id, message, () => {
             void chrome.runtime.lastError;
           });
@@ -6676,7 +6677,12 @@ async function runningMultiviewHosts() {
   const hosts = await readMultiviewHosts();
   const tabs = await liveMultiviewHostTabs(hosts);
   await writeMultiviewHosts(hosts); // 닫혔거나 떠난 탭 기록은 지운다
-  return tabs.map((tab) => ({ tabId: tab.id, windowId: tab.windowId, setupId: hosts[tab.id]?.setupId || "" }));
+  return tabs.map((tab) => ({
+    tabId: tab.id,
+    windowId: tab.windowId,
+    setupId: hosts[tab.id]?.setupId || "",
+    incognito: tab.incognito === true,
+  }));
 }
 
 // 다른 멀티뷰 탭들이 보고 있는 채널(같은 채널을 또 넣으려 할 때 알린다). [{ channelId, channelName }]
@@ -6709,19 +6715,55 @@ async function focusMultiviewHost(tabId) {
   return { tabId: tab.id, windowId: tab.windowId };
 }
 
-async function openMultiviewHost(setupId, theme, openerTab, reuseTabId = null) {
+// 확장 페이지를 일반 창에 연다(없으면 새 일반 창). 시크릿 탭에서 확장 페이지로 가면 ERR_BLOCKED_BY_CLIENT.
+async function openExtensionPageInNormalWindow(url) {
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] }).catch(() => []);
+  const normal = windows.filter((win) => !win.incognito)
+    .sort((a, b) => Number(b.focused) - Number(a.focused))[0];
+  if (normal) {
+    await chrome.tabs.create({ url, windowId: normal.id, active: true });
+    await chrome.windows.update(normal.id, { focused: true }).catch(() => {});
+    return;
+  }
+  await chrome.windows.create({ url, focused: true });
+}
+
+// 시청 화면을 시크릿 창에 연다. 시크릿에서 연 고르기 화면은 일반 창에 있다(시크릿 탭에서는 확장 페이지가
+// 열리지 않는다) → 열린 시크릿 창(초점 있는 것 먼저)에 새 탭, 없으면 새 시크릿 창.
+async function createIncognitoHostTab() {
+  if (!(await chrome.extension.isAllowedIncognitoAccess())) throw new Error("incognito-not-allowed");
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] }).catch(() => []);
+  const target = windows.filter((win) => win.incognito)
+    .sort((a, b) => Number(b.focused) - Number(a.focused))[0];
+  if (target) {
+    const tab = await chrome.tabs.create({ url: MULTIVIEW_HOST_URL, active: true, windowId: target.id });
+    await chrome.windows.update(target.id, { focused: true }).catch(() => {});
+    return tab;
+  }
+  const win = await chrome.windows.create({ url: MULTIVIEW_HOST_URL, incognito: true, focused: true });
+  return win?.tabs?.[0] || null;
+}
+
+async function openMultiviewHost(setupId, theme, openerTab, reuseTabId = null, incognito = false) {
   const existingHosts = await readMultiviewHosts();
   const live = await liveMultiviewHostTabs(existingHosts);
+  // 같은 구성(그 탭에서 고치는 중)은 그 탭의 모드 그대로 다시 연다. '기존 멀티뷰 바꾸기' 는 같은 모드
+  // (일반/시크릿)일 때만 — 다르면 새로 연다(시크릿 멀티뷰를 일반 창 구성으로 바꾸지 않는다).
   const existing = live.find((tab) => existingHosts[tab.id]?.setupId === setupId) ||
-    (Number.isInteger(reuseTabId) ? live.find((tab) => tab.id === reuseTabId) : null);
+    (Number.isInteger(reuseTabId)
+      ? live.find((tab) => tab.id === reuseTabId && !!tab.incognito === incognito)
+      : null);
   if (existing) return reuseMultiviewHost(existing, existingHosts, setupId, theme);
   await writeMultiviewHosts(existingHosts); // 닫혔거나 떠난 탭 기록은 지운다
-  const tab = await chrome.tabs.create({
-    url: MULTIVIEW_HOST_URL,
-    active: true,
-    ...(Number.isInteger(openerTab?.windowId) ? { windowId: openerTab.windowId } : {}),
-    ...(Number.isInteger(openerTab?.index) ? { index: openerTab.index + 1 } : {}),
-  });
+  // 고르기 화면 자체가 시크릿 창에 있으면(파이어폭스는 사설 창에 확장 페이지를 띄운다) 그 옆에 연다.
+  const tab = incognito && !openerTab?.incognito
+    ? await createIncognitoHostTab()
+    : await chrome.tabs.create({
+      url: MULTIVIEW_HOST_URL,
+      active: true,
+      ...(Number.isInteger(openerTab?.windowId) ? { windowId: openerTab.windowId } : {}),
+      ...(Number.isInteger(openerTab?.index) ? { index: openerTab.index + 1 } : {}),
+    });
   const tabId = tab?.id;
   if (!Number.isInteger(tabId)) throw new Error("no-tab");
   const hosts = await readMultiviewHosts();
@@ -6787,6 +6829,8 @@ async function handleMultiviewHostApi(message, sender) {
       const win = await chrome.windows.create({
         url,
         type: "popup",
+        // 시크릿 창의 멀티뷰가 여는 채팅 창도 시크릿으로(아니면 일반 창 로그인으로 뜬다).
+        ...(sender?.tab?.incognito ? { incognito: true } : {}),
         width: clampWindowSize(args.width, 420),
         height: clampWindowSize(args.height, 760),
       });
@@ -6812,13 +6856,24 @@ async function handleMultiviewHostApi(message, sender) {
     }
     case "setup.open": {
       const base = chrome.runtime.getURL(MULTIVIEW_SETUP_PAGE);
-      const href = String(args.href || "");
+      let href = String(args.href || "");
       if (!href.startsWith(base)) throw new Error("invalid-url");
+      // 시크릿 창의 멀티뷰에서 고치러 가면 고르기 화면에도 시크릿에서 왔다고 남긴다.
+      if (sender?.tab?.incognito) {
+        const url = new URL(href);
+        url.searchParams.set("incognito", "1");
+        href = url.toString();
+      }
       const tabs = await chrome.tabs.query({ url: `${base}*` });
       const found = tabs.find((tab) => Number.isInteger(tab.id));
       if (found) {
         await chrome.tabs.update(found.id, { url: href, active: true });
         if (Number.isInteger(found.windowId)) await chrome.windows.update(found.windowId, { focused: true });
+        return true;
+      }
+      // 시크릿 탭에서는 확장 페이지가 열리지 않으므로(ERR_BLOCKED_BY_CLIENT) 일반 창에 연다.
+      if (sender?.tab?.incognito) {
+        await openExtensionPageInNormalWindow(href);
         return true;
       }
       await chrome.tabs.create({ url: href });
@@ -6942,9 +6997,42 @@ function addWatchTime(entries) {
   return added;
 }
 
+// 통나무파워는 배경이 일반 창 쿠키(일반 창 로그인 계정)로 보유량을 읽어 판정·기록한다. 시크릿 탭의
+// 요청을 받으면 시크릿 탭에 일반 계정의 '적립 중' 이 뜨고(비로그인인데 '0 적립 중'), 시크릿 탭이 보낸
+// 기준값으로 일반 계정 추적을 시작해 기록이 틀어질 수 있다 → 시크릿 탭에서 온 것은 처리하지 않는다.
+const LP_INCOGNITO_BLOCKED = new Set([
+  "START_LOG_POWER_WATCH_REWARD_TRACKING",
+  "GET_LOG_POWER_WATCH_REWARD_STATUS",
+  "CHEESE_LOG_POWER_CLAIMED",
+  "GET_LOG_POWER_BALANCES",
+  "LP_AWAITING",
+  "LP_RECONCILE",
+  "LP_WRITE",
+]);
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
+  }
+
+  if (sender?.tab?.incognito === true && LP_INCOGNITO_BLOCKED.has(message.type)) {
+    sendResponse?.({ ok: false, success: false, status: null, reason: "incognito" });
+    return false;
+  }
+
+  // 시크릿 탭의 사이드바 '멀티뷰'. 시크릿 탭에서 고르기 화면(확장 페이지)으로 바로 가면
+  // ERR_BLOCKED_BY_CLIENT 라 일반 창에 열고, 시크릿에서 왔다고 표시한다(시청 화면은 시크릿 창).
+  if (message.type === "MULTIVIEW_OPEN_SETUP") {
+    if (!/^https:\/\/chzzk\.naver\.com\//.test(String(sender?.url || ""))) return false;
+    const url = chrome.runtime.getURL(
+      sender?.tab?.incognito ? `${MULTIVIEW_SETUP_PAGE}?incognito=1` : MULTIVIEW_SETUP_PAGE,
+    );
+    (sender?.tab?.incognito
+      ? openExtensionPageInNormalWindow(url)
+      : chrome.tabs.create({ url, active: true }))
+      .then(() => sendResponse?.({ ok: true }))
+      .catch((error) => sendResponse?.({ ok: false, reason: String(error?.message || error) }));
+    return true;
   }
 
   if (message.type === "PLAYLIST_PLAY") {
@@ -7039,7 +7127,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
     const reuseTabId = Number.isInteger(message.reuseTabId) ? message.reuseTabId : null;
-    openMultiviewHost(setupId, message.theme, sender?.tab, reuseTabId)
+    const incognito = message.incognito === true || sender?.tab?.incognito === true;
+    openMultiviewHost(setupId, message.theme, sender?.tab, reuseTabId, incognito)
       .then((result) => sendResponse?.({ ok: true, ...result }))
       .catch((error) => sendResponse?.({ ok: false, reason: String(error?.message || error) }));
     return true;

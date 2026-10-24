@@ -2112,6 +2112,13 @@ button.mv-live-more {
 :root:not([data-theme="dark"]) .mv-option-note.mv-many-channels-note {
   color: #d63b3b;
 }
+/* 시크릿 창에서 연 고르기 화면: 시청 화면이 어디에 열리는지 알린다. */
+.mv-option-note.mv-incognito-note {
+  border: 1px solid var(--popup-border, rgba(127, 127, 127, 0.35));
+  border-radius: 6px;
+  margin: 8px 0 0;
+  padding: 6px 8px;
+}
 .mv-option-note strong {
   color: inherit;
   display: block;
