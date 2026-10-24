@@ -8418,13 +8418,19 @@
             `<div class="cheese-logpower-popup-total">전체 합계 ` +
             `<span class="cheese-logpower-popup-all-value">${logPowerPopupIcon()} ${totalPower.toLocaleString("ko-KR")}</span></div>` +
             `<div class="cheese-logpower-popup-total cheese-logpower-popup-top-total">` +
+            `<div class="cheese-logpower-popup-top-head">` +
             `<b class="cheese-logpower-popup-top-label">TOP ${currentLimit} 통나무 파워 합계 </b>` +
+            // 표시 기준 안내는 길어서 (i)를 눌러 펼친다. 목록 영역이 스크롤 상자라 떠 있는 툴팁은 잘린다.
+            `<button type="button" class="cheese-logpower-popup-info-toggle" aria-label="표시 기준 안내" aria-expanded="false" aria-controls="cheese-logpower-popup-info">` +
+            `<svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="6.2" stroke="currentColor" stroke-width="1.4"/><path d="M7 6.2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="7" cy="3.9" r="0.9" fill="currentColor"/></svg>` +
+            `</button></div>` +
             `<span class="cheese-logpower-popup-top-value">${logPowerPopupIcon()} ${limitedTotal().toLocaleString("ko-KR")}</span></div>` +
+            `<div class="cheese-logpower-popup-info" id="cheese-logpower-popup-info" hidden>` +
+            `<div class="cheese-logpower-popup-notice"></div>` +
+            `100 파워 이상 보유한 채널만 표시합니다.<br>비활성화된 채널은 회색으로 표시됩니다.<br>표시 개수는 설정의 통나무파워 탭에서 조절할 수 있습니다.</div>` +
             `<div class="cheese-logpower-popup-pagerow">` +
             `<a href="${LOGPOWER_PAGE_URL}" target="_blank" rel="noreferrer" class="cheese-logpower-popup-pagelink">채널별 통나무 파워</a>` +
             `</div>` +
-            `<div class="cheese-logpower-popup-notice"></div>` +
-            `<div class="cheese-logpower-popup-info">100 파워 이상 보유한 채널만 표시합니다.<br>비활성화된 채널은 회색으로 표시됩니다.<br>표시 개수는 설정의 통나무파워 탭에서 조절할 수 있습니다.</div>` +
             `<div class="cheese-logpower-popup-rows"></div>`;
 
           const topLabel = table.querySelector(
@@ -8437,6 +8443,16 @@
             ".cheese-logpower-popup-all-value",
           );
           const notice = table.querySelector(".cheese-logpower-popup-notice");
+          const infoToggle = table.querySelector(
+            ".cheese-logpower-popup-info-toggle",
+          );
+          const infoBox = table.querySelector(".cheese-logpower-popup-info");
+          infoToggle?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const open = infoToggle.getAttribute("aria-expanded") !== "true";
+            infoToggle.setAttribute("aria-expanded", String(open));
+            if (infoBox) infoBox.hidden = !open;
+          });
           const rowsBox = table.querySelector(".cheese-logpower-popup-rows");
           // 새로고침 버튼은 '채널별 통나무 파워' 링크와 같은 줄 오른쪽 끝에 둔다.
           table

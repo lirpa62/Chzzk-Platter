@@ -9765,10 +9765,50 @@ html.cheese-chat-width-resize-enabled
     var(--cheese-platter-surface-interaction-lighten-hovered)
   );
 }
-.cheese-logpower-popup-notice,
-.cheese-logpower-popup-info {
+/* TOP 합계 이름 + (i). 안내는 (i)를 누르면 합계 줄 아래에 펼친다. */
+.cheese-logpower-popup-top-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.cheese-logpower-popup-info-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
   color: #9aa;
-  font-size: 10px;
+  cursor: pointer;
+}
+.cheese-logpower-popup-info-toggle:hover,
+.cheese-logpower-popup-info-toggle:focus-visible,
+.cheese-logpower-popup-info-toggle[aria-expanded="true"] {
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base)
+  );
+}
+.cheese-logpower-popup-info {
+  margin: 2px 0 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.12);
+  color: #9aa;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+.cheese-logpower-popup-info[hidden] {
+  display: none;
+}
+.cheese-logpower-popup-notice {
+  font-weight: 700;
 }
 .cheese-logpower-popup-rows {
   display: flex;
