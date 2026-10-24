@@ -35,6 +35,12 @@
   let active = false;
   let dotHidden = false;
   let entries = [];
+  // 통나무파워 지우개로 숨긴 채널(hiddenChannels). 내역 페이지·상위 보유 팝업과 같은 기준으로
+  // 화면에서만 뺀다 — 저장된 기록은 그대로다.
+  const ERASED_CHANNELS_KEY = "hiddenChannels";
+  let erasedChannels = new Set();
+  let accountEntries = []; // 계정으로 거른 전체 기록(숨김 적용 전)
+  let erasedRemovedCount = 0; // 실제로 빠진 채널 수(안내용)
   let readAt = 0;
   // 요약 막대의 기간 필터. 통계 페이지의 빠른 기간 버튼과 같은 기준을 쓴다.
   let range = "all";
@@ -128,16 +134,41 @@
     return list.filter((e) => !e.accountId || e.accountId === accountId);
   }
 
+  function readErasedChannels(list) {
+    erasedChannels = new Set(Array.isArray(list) ? list.map((id) => String(id)) : []);
+  }
+
+  function setAccountEntries(list) {
+    accountEntries = list;
+    const removed = new Set();
+    entries = list.filter((e) => {
+      if (!e.channelId || !erasedChannels.has(e.channelId)) return true;
+      removed.add(e.channelId);
+      return false;
+    });
+    erasedRemovedCount = removed.size;
+  }
+
   async function loadEntries() {
     try {
-      const data = await chrome.storage.local.get(LOG_KEY);
+      const data = await chrome.storage.local.get([LOG_KEY, ERASED_CHANNELS_KEY]);
+      readErasedChannels(data?.[ERASED_CHANNELS_KEY]);
       const all = normalizeEntries(data?.[LOG_KEY]);
       // ⚠ 다른 계정 기록이 섞이면 합계가 틀린다. 계정 도입 전 기록(accountId
       //   없음)은 포함한다 — 대부분 단일 계정이라 빼면 과거가 사라져 보인다.
-      entries = filterByAccount(all);
+      setAccountEntries(filterByAccount(all));
     } catch {
-      entries = [];
+      setAccountEntries([]);
     }
+  }
+
+  // 숨긴 채널이 실제로 빠졌을 때만 오차 가능성을 알린다.
+  function erasedNoteHtml() {
+    if (!erasedRemovedCount) return "";
+    return (
+      `<p class="cheese-inbox-logpower-note">통나무파워 지우개로 숨긴 채널 ${erasedRemovedCount}개의 기록은 ` +
+      `표시하지 않습니다. 그래서 합계에 실제 적립과 오차가 생길 수 있습니다.</p>`
+    );
   }
 
   // ⚠ 읽음 시각을 계정마다 따로 둔다. 하나로 공유하면 A 계정에서 읽었을 때
@@ -422,7 +453,7 @@
   function renderSection() {
     const section = document.getElementById(SECTION_ID);
     if (!section) return;
-    const sig = `${entries.length}|${entries[0]?.id || ""}|${range}`;
+    const sig = `${entries.length}|${entries[0]?.id || ""}|${range}|${erasedRemovedCount}`;
     if (sig === lastSignature) return; // 멱등(불필요한 노드 교체 방지)
     lastSignature = sig;
 
@@ -441,6 +472,7 @@
     if (!entries.length) {
       section.innerHTML =
         `<div class="cheese-inbox-logpower-summary"><span>기록 없음</span>${openBtn}</div>` +
+        erasedNoteHtml() +
         `<p class="cheese-inbox-logpower-empty">아직 기록된 통나무파워 획득이 없습니다.` +
         `<br>설정에서 <b>통나무파워 자동 획득</b>을 켜 두면 1시간 시청 보상을 받을 때마다 여기에 쌓입니다.</p>`;
       return;
@@ -457,6 +489,7 @@
       `<strong>합계 ${formatCount(total)}</strong>` +
       openBtn +
       `</div>` +
+      erasedNoteHtml() +
       rangeButtonsHtml();
 
     // 기록은 있지만 고른 기간에만 없는 경우 — 버튼은 남겨야 다른 기간으로 옮길 수 있다.
@@ -787,9 +820,18 @@
     if (changes[MASTER_ENABLED_KEY] || changes[FEATURE_HIDDEN_KEY]) {
       void applyFlags();
     }
+    if (changes[ERASED_CHANNELS_KEY] && !changes[LOG_KEY]) {
+      // 통나무파워 지우개에서 숨기거나 복구하면 열린 수신함에도 바로 반영한다.
+      readErasedChannels(changes[ERASED_CHANNELS_KEY].newValue);
+      setAccountEntries(accountEntries);
+      lastSignature = "";
+      renderSection();
+      syncTabDot();
+    }
     if (changes[LOG_KEY]) {
+      if (changes[ERASED_CHANNELS_KEY]) readErasedChannels(changes[ERASED_CHANNELS_KEY].newValue);
       // ⚠ 여기서 전체를 대입하면 계정 필터가 풀린다.
-      entries = filterByAccount(normalizeEntries(changes[LOG_KEY].newValue));
+      setAccountEntries(filterByAccount(normalizeEntries(changes[LOG_KEY].newValue)));
       lastSignature = "";
       renderSection();
       // 탭을 보고 있는 중이면 방금 들어온 적립까지 읽은 것으로 친다.

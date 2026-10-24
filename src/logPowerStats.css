@@ -2602,6 +2602,20 @@ body {
   margin: 0;
 }
 
+/* 통나무파워 지우개로 숨긴 채널을 뺐다는 안내(오차 가능). */
+.lps-erased-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--popup-soft-bg);
+  color: var(--popup-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.lps-erased-note[hidden] {
+  display: none;
+}
+
 .lps-sync-note {
   margin: 0 0 10px;
   color: var(--popup-brand-strong);

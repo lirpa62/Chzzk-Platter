@@ -72,6 +72,13 @@
   const entryTotal = (e) => (e.amount || 0) + (e.fiveMinAmount || 0);
 
   let entries = [];
+  // ── 통나무파워 지우개로 숨긴 채널(hiddenChannels) ─────────────────────────────
+  // 상위 보유 팝업·전용 팔로잉처럼 내역 페이지에서도 숨긴 채널의 보유량과 기록을 빼고 보인다.
+  // 화면에서만 거른다 — 기록 저장은 background 가 항목 id 단위로 하므로 원본은 그대로다.
+  const ERASED_CHANNELS_KEY = "hiddenChannels";
+  let erasedChannels = new Set();
+  let accountEntries = []; // 계정으로 거른 전체 기록(숨김 적용 전)
+  let balancesAll = null; // 숨김 적용 전 보유량 응답(null = 아직/실패)
   // 세 기준을 함께 켜면 스트리머 > 날짜 > 종류 순서로 묶는다.
   const GROUP_KEY = "cheeseLogPowerStatsGroup";
   const GROUP_ORDER_KEY = "cheeseLogPowerStatsGroupOrder";
@@ -235,7 +242,48 @@
     return owners.size > 1;
   }
 
+  async function loadErasedChannels() {
+    try {
+      const data = await chrome.storage.local.get(ERASED_CHANNELS_KEY);
+      const list = data?.[ERASED_CHANNELS_KEY];
+      erasedChannels = new Set(Array.isArray(list) ? list.map((id) => String(id)) : []);
+    } catch {
+      erasedChannels = new Set();
+    }
+  }
+
+  const isErased = (channelId) => !!channelId && erasedChannels.has(String(channelId));
+
+  function setAccountEntries(list) {
+    accountEntries = list;
+    entries = list.filter((e) => !isErased(e.channelId));
+    renderErasedNote();
+  }
+
+  function applyErasedToBalances() {
+    balances = Array.isArray(balancesAll)
+      ? balancesAll.filter((b) => !isErased(b?.channelId))
+      : balancesAll;
+    renderErasedNote();
+  }
+
+  // 숨긴 채널이 실제로 빠졌을 때만 오차 가능성을 알린다.
+  function renderErasedNote() {
+    const note = document.getElementById("lpsErasedNote");
+    if (!note) return;
+    const removed = new Set();
+    for (const e of accountEntries) if (isErased(e.channelId)) removed.add(String(e.channelId));
+    for (const b of balancesAll || []) if (isErased(b?.channelId)) removed.add(String(b.channelId));
+    note.hidden = removed.size === 0;
+    if (removed.size) {
+      note.textContent =
+        `통나무파워 지우개로 숨긴 채널 ${removed.size}개의 보유량과 기록은 표시하지 않습니다. ` +
+        "그래서 합계·추이·순위에 실제 보유량·적립과 오차가 생길 수 있습니다.";
+    }
+  }
+
   async function load() {
+    await loadErasedChannels();
     try {
       const data = await chrome.storage.local.get(LOG_KEY);
       const all = normalize(data?.[LOG_KEY]);
@@ -245,7 +293,7 @@
       // ⚠ 확인에 실패했다고 필터를 풀면 다계정 환경에서 모든 계정 기록이 섞여
       //   합계·차트가 틀리게 보인다. 마지막으로 확인된 계정을 유지한다.
       await resolveAccountForFilter();
-      entries = filterByAccount(all);
+      setAccountEntries(filterByAccount(all));
       // 계정을 모르는데 여러 계정 기록이 섞여 있으면 일부만 보여 준 상태다.
       // 조용히 숨기면 합계가 틀린 것처럼 보이므로 이유를 알린다.
       if (accountUnknownWithMultiple(all)) {
@@ -3165,9 +3213,11 @@
       const res = await fetch(BALANCES_URL, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const rows = (await res.json())?.content?.data;
-      balances = Array.isArray(rows) ? rows : [];
+      balancesAll = Array.isArray(rows) ? rows : [];
+      applyErasedToBalances();
       return { ok: true };
     } catch (e) {
+      balancesAll = null;
       balances = null;
       return { ok: false, message: String(e?.message || e) };
     }
@@ -4566,6 +4616,14 @@
   // 다른 탭에서 새로 획득하면 즉시 반영한다.
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area !== "local") return;
+    // 통나무파워 지우개에서 숨기거나 복구하면 열린 내역 페이지에도 바로 반영한다.
+    if (changes[ERASED_CHANNELS_KEY]) {
+      const list = changes[ERASED_CHANNELS_KEY].newValue;
+      erasedChannels = new Set(Array.isArray(list) ? list.map((id) => String(id)) : []);
+      setAccountEntries(accountEntries);
+      applyErasedToBalances();
+      render();
+    }
     if (changes[LOG_KEY]) {
       const change = changes[LOG_KEY];
       rememberExplorerNewEntries(change.oldValue, change.newValue);
@@ -4573,7 +4631,7 @@
       //   페이지를 열어 둔 채 계정을 바꿨을 수 있으므로 계정도 다시 확인한다.
       const rows = normalize(change.newValue);
       const prevAccount = accountIdForFilter;
-      entries = filterByAccount(rows);
+      setAccountEntries(filterByAccount(rows));
       persistExplorerUnreadState();
       render();
       // ⚠ 길이로 비교하면 A·B 의 기록 수가 같을 때 교체를 건너뛴다. 기준 계정이
@@ -4582,7 +4640,7 @@
       void resolveAccountDetail(false, ACCOUNT_SOFT_TTL_MS).then(
         ({ id, changed }) => {
           if (!id || (!changed && id === prevAccount)) return;
-          entries = filterByAccount(rows);
+          setAccountEntries(filterByAccount(rows));
           persistExplorerUnreadState();
           render();
         },

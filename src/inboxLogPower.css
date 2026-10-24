@@ -144,6 +144,14 @@ html.cheese-inbox-logpower-active #root {
   color: var(--lp-accent);
 }
 
+/* 통나무파워 지우개로 숨긴 채널을 뺐다는 안내(오차 가능). */
+.cheese-inbox-logpower-note {
+  margin: 8px 16px 0;
+  color: var(--lp-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .cheese-inbox-logpower-empty {
   margin: 0;
   padding: 40px 20px;

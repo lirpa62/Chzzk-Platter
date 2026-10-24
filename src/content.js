@@ -7910,6 +7910,36 @@
     if (!Number.isFinite(n)) return LOGPOWER_POPUP_DEFAULT_LIMIT;
     return Math.min(99, Math.max(5, Math.floor(n)));
   }
+  // 팝업 목록 높이를 표시 개수에 맞춰 최대 10명분까지 늘린다(기본 꺼짐 = 5명 남짓 높이 고정).
+  const LOGPOWER_POPUP_AUTO_HEIGHT_KEY = "cheeseLogPowerPopupAutoHeight";
+  const LOGPOWER_POPUP_AUTO_HEIGHT_MAX_ROWS = 10;
+  function getStoredLogPowerPopupAutoHeight() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(LOGPOWER_POPUP_AUTO_HEIGHT_KEY, (data) => {
+          void chrome.runtime.lastError;
+          resolve(data?.[LOGPOWER_POPUP_AUTO_HEIGHT_KEY] === true);
+        });
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+  // 켜져 있으면 보이는 줄 수(최대 10)만큼 목록 높이를 잡는다. 채팅 영역보다 길어지면 팝업
+  // 표(.cheese-logpower-popup-table)가 스크롤한다. 꺼져 있으면 CSS 기본 높이(240px)로 둔다.
+  function fitLogPowerPopupRows(rowsBox, autoHeight) {
+    if (!rowsBox) return;
+    const first = rowsBox.firstElementChild;
+    const count = Math.min(rowsBox.childElementCount, LOGPOWER_POPUP_AUTO_HEIGHT_MAX_ROWS);
+    if (!autoHeight || !first || !rowsBox.isConnected || count <= 5) {
+      rowsBox.style.removeProperty("max-height");
+      return;
+    }
+    const rowHeight = first.getBoundingClientRect().height;
+    const gap = parseFloat(getComputedStyle(rowsBox).rowGap) || 0;
+    if (!(rowHeight > 0)) return;
+    rowsBox.style.maxHeight = `${Math.ceil(count * rowHeight + (count - 1) * gap) + 1}px`;
+  }
   function getStoredLogPowerPopupLimit() {
     return new Promise((resolve) => {
       try {
@@ -8333,8 +8363,10 @@
         ),
         getStoredLogPowerPopupLimit(),
         getStoredHiddenLogPowerChannels(),
+        getStoredLogPowerPopupAutoHeight(),
       ])
-        .then(([data, initialLimit, hiddenChannels]) => {
+        .then(([data, initialLimit, hiddenChannels, initialAutoHeight]) => {
+          let autoHeight = initialAutoHeight;
           loading.remove();
           // hiddenSet 은 다른 페이지에서 채널을 지우거나 새로고침 시 갱신되므로 let.
           // toSorted 는 클로저로 최신 hiddenSet 을 참조한다.
@@ -8426,6 +8458,7 @@
                   : `표시 가능한 ${rows.length}개 채널을 모두 표시합니다.`;
             }
             if (rowsBox) rowsBox.innerHTML = renderRows(rows);
+            fitLogPowerPopupRows(rowsBox, autoHeight);
           };
 
           // 새로고침: balances + 지운 채널(hiddenChannels)을 함께 다시 받아 반영한다.
@@ -8479,14 +8512,24 @@
           // settings 에서 개수 변경 시 반영(팝업이 살아 있는 동안만). 팝업이 닫히면
           // layer 가 사라지므로 리스너에서 스스로 정리한다.
           const onLimitChanged = (changes, area) => {
-            if (area !== "local" || !changes[LOGPOWER_POPUP_LIMIT_KEY]) return;
+            if (
+              area !== "local" ||
+              (!changes[LOGPOWER_POPUP_LIMIT_KEY] && !changes[LOGPOWER_POPUP_AUTO_HEIGHT_KEY])
+            ) {
+              return;
+            }
             if (!layer.isConnected) {
               chrome.storage.onChanged.removeListener(onLimitChanged);
               return;
             }
-            currentLimit = clampLogPowerPopupLimit(
-              changes[LOGPOWER_POPUP_LIMIT_KEY].newValue,
-            );
+            if (changes[LOGPOWER_POPUP_LIMIT_KEY]) {
+              currentLimit = clampLogPowerPopupLimit(
+                changes[LOGPOWER_POPUP_LIMIT_KEY].newValue,
+              );
+            }
+            if (changes[LOGPOWER_POPUP_AUTO_HEIGHT_KEY]) {
+              autoHeight = changes[LOGPOWER_POPUP_AUTO_HEIGHT_KEY].newValue === true;
+            }
             render();
           };
           try {
@@ -8495,6 +8538,8 @@
 
           render();
           container.appendChild(table);
+          // 줄 높이는 화면에 붙은 뒤에야 잴 수 있다.
+          fitLogPowerPopupRows(rowsBox, autoHeight);
         })
         .catch(() => {
           loading.remove();

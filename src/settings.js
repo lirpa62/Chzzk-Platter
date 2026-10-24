@@ -303,6 +303,7 @@
     "cheeseLogPowerClickAction",
     "cheeseLogPowerEarningColor",
     "cheeseLogPowerPopupLimit",
+    "cheeseLogPowerPopupAutoHeight",
     "cheeseLogPowerProgressMode",
     "cheeseLogPowerTimerMode",
     "cheeseLogPowerEraser",
@@ -5551,6 +5552,8 @@
     ["[data-chat-profile-side]", "cheeseChatProfileSide", false],
     // 자동 따라잡기. 플레이어 버튼 우클릭 메뉴와 같은 키(content.js 가 열린 치지직 탭에 전한다).
     ["[data-live-auto-sync]", "cheeseAudioMixer.autoSync", false],
+    // 통나무파워 상위 보유 팝업 높이를 표시 개수(최대 10)에 맞춘다(기본 꺼짐).
+    ["[data-logpower-popup-auto-height]", "cheeseLogPowerPopupAutoHeight", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;
