@@ -309,6 +309,7 @@
     "cheeseLogPowerEarningColor",
     "cheeseLogPowerPopupLimit",
     "cheeseLogPowerPopupAutoHeight",
+    "cheeseVodClockTimeZone",
     "cheeseLogPowerProgressMode",
     "cheeseLogPowerTimerMode",
     "cheeseLogPowerEraser",
@@ -6150,6 +6151,25 @@
     ["preset", "gain"],
     "preset",
   );
+
+  // 다시보기 실제 시각(재생바 썸네일·등록일 툴팁) 시간대. 이 컴퓨터가 한국 시간대면 차이가 없음을 알린다.
+  bindStringSegmented(
+    document.querySelector("[data-vod-clock-time-zone]"),
+    "vod-clock-time-zone-value",
+    "cheeseVodClockTimeZone",
+    ["local", "kst", "both"],
+    "local",
+  );
+  {
+    const note = document.querySelector("[data-vod-clock-time-zone-same]");
+    if (note) {
+      let zone = "";
+      try {
+        zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      } catch {}
+      note.hidden = !(zone === "Asia/Seoul" || new Date().getTimezoneOffset() === -540);
+    }
+  }
 
   // 클립 페이지 오디오 믹서 게인(라이브·임베드와 별개 키).
   bindStringSegmented(

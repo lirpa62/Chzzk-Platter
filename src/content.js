@@ -2189,6 +2189,9 @@
   // 채팅 활성도와 실제 시각 병기 설정에서 독립된 opt-in 기능이다.
   const VOD_TITLE_CHANGES_KEY = "cheeseVodTitleChanges";
   let vodTitleChangesOn = false;
+  // 다시보기 실제 시각(재생바 썸네일·영상 정보·카드 날짜 툴팁)의 시간대: 이 컴퓨터(local) / 한국(kst) / 둘 다(both).
+  const VOD_CLOCK_TIME_ZONE_KEY = "cheeseVodClockTimeZone";
+  let vodClockTimeZone = "local";
   // 다시보기 AI 생성 챕터 숨김(전역, 기본 OFF=표시). 자동 생성된 챕터가 내용을
   // 미리 드러내지 않도록 재생바 분할과 좌하단 챕터 제목을 함께 숨긴다.
   // 켜면 html 에 cheese-vod-chapter-hide 클래스를 붙이고 CSS(content.css)가 숨긴다.
@@ -7608,23 +7611,72 @@
   }
 
   // ms → "26.06.22. 오후 1:49:59" (12시간제, YY.MM.DD.)
+  // "26.06.22. 오후 1:49:59". 이 컴퓨터 시간대(브라우저)로 쓴다 — 해외에서는 현지 시각이다.
+  // (이름은 예전 그대로지만 KST 고정이 아니다. 한국 시간은 formatSeoulClock.)
   function formatKstClock(ms) {
     const d = new Date(ms);
-    const yy = String(d.getFullYear()).slice(2);
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const h24 = d.getHours();
-    const ampm = h24 < 12 ? "오전" : "오후";
-    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-    const min = String(d.getMinutes()).padStart(2, "0");
-    const sec = String(d.getSeconds()).padStart(2, "0");
+    return formatClockFields({
+      year: d.getFullYear(),
+      month: d.getMonth() + 1,
+      day: d.getDate(),
+      hour: d.getHours(),
+      minute: d.getMinutes(),
+      second: d.getSeconds(),
+    });
+  }
+
+  function formatClockFields({ year, month, day, hour, minute, second }) {
+    const yy = String(year).slice(2);
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const ampm = hour < 12 ? "오전" : "오후";
+    const h12 = hour % 12 === 0 ? 12 : hour % 12;
+    const min = String(minute).padStart(2, "0");
+    const sec = String(second).padStart(2, "0");
     return `${yy}.${mm}.${dd}. ${ampm} ${h12}:${min}:${sec}`;
   }
 
-  // liveOpenAt(ms) + 초 → "26.06.22. 오후 1:49:59"
-  function formatBroadcastClock(baseMs, offsetSeconds) {
-    return `${formatKstClock(baseMs + offsetSeconds * 1000)}`;
+  // 한국 시간(Asia/Seoul)으로 같은 모양. 서머타임 등 시간대 계산은 브라우저(Intl)에 맡긴다.
+  let seoulClockFormatter = null;
+  function formatSeoulClock(ms) {
+    seoulClockFormatter ||= new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hourCycle: "h23",
+    });
+    const f = {};
+    for (const part of seoulClockFormatter.formatToParts(new Date(ms))) {
+      if (part.type !== "literal") f[part.type] = Number(part.value);
+    }
+    return formatClockFields(f);
   }
+
+  function normalizeVodClockTimeZone(value) {
+    return value === "kst" || value === "both" ? value : "local";
+  }
+
+  // 다시보기 실제 시각 표기. 이 컴퓨터가 한국 시간대면 어느 설정이든 그대로(차이가 없다).
+  //   local: "26.06.22. 오전 6:49:59" / kst: "26.06.22. 오후 1:49:59 KST"
+  //   both : 현지 시각 + extra "KST 오후 1:49:59"(날짜가 다르면 날짜까지)
+  function vodClockParts(ms) {
+    const local = formatKstClock(ms);
+    const seoul = formatSeoulClock(ms);
+    if (vodClockTimeZone === "local" || local === seoul) return { label: local, extra: "" };
+    if (vodClockTimeZone === "kst") return { label: `${seoul} KST`, extra: "" };
+    const datePart = (text) => text.slice(0, text.indexOf(". ", 6) + 1);
+    const sameDate = datePart(local) === datePart(seoul);
+    return { label: local, extra: `KST ${sameDate ? seoul.slice(datePart(seoul).length + 1) : seoul}` };
+  }
+  function formatVodClock(ms) {
+    const { label, extra } = vodClockParts(ms);
+    return extra ? `${label} (${extra})` : label;
+  }
+
 
   // 현재 재생 영상이 '세로'(videoHeight > videoWidth)인지 <html> 클래스로 표시한다.
   // seek preview 실제시각 라벨·댓글 마커 툴팁이 좁은 세로 preview 에 맞게 CSS 를 달리 적용.
@@ -7657,10 +7709,13 @@
     if (!Number.isFinite(seconds)) return;
     const showRealtime = !featureFlags.seekPreviewRealtime;
     const broadcastTitle = vodTitleChangesOn ? vodTitleAtOffset(seconds) : "";
-    const label =
+    const clock =
       showRealtime && seekPreviewState.liveOpenAt
-        ? formatBroadcastClock(seekPreviewState.liveOpenAt, seconds)
-        : "";
+        ? vodClockParts(seekPreviewState.liveOpenAt + seconds * 1000)
+        : { label: "", extra: "" };
+    const label = clock.label;
+    // '둘 다' 면 셋째 줄에 KST 를 더한다(한 줄에 이으면 미리보기 폭이 넓어져 화면 밖으로 잘린다).
+    const extra = clock.extra;
     if (!label && !broadcastTitle) {
       existing?.remove();
       return;
@@ -7674,13 +7729,15 @@
     if (existing) {
       if (
         existing.dataset.label !== label ||
+        existing.dataset.extra !== extra ||
         existing.dataset.source !== source ||
         existing.dataset.broadcastTitle !== broadcastTitle
       ) {
         existing.dataset.label = label;
+        existing.dataset.extra = extra;
         existing.dataset.source = source;
         existing.dataset.broadcastTitle = broadcastTitle;
-        setSeekRealtimeContent(existing, label, broadcastTitle);
+        setSeekRealtimeContent(existing, label, broadcastTitle, extra);
       }
       existing.title = tooltip;
       return;
@@ -7688,16 +7745,17 @@
     const span = document.createElement("span");
     span.className = SEEK_PREVIEW_REALTIME_CLASS;
     span.dataset.label = label;
+    span.dataset.extra = extra;
     span.dataset.source = source;
     span.dataset.broadcastTitle = broadcastTitle;
     span.title = tooltip;
-    setSeekRealtimeContent(span, label, broadcastTitle);
+    setSeekRealtimeContent(span, label, broadcastTitle, extra);
     timeEl.appendChild(span);
   }
 
   // 실제시각 라벨을 '날짜 / 시각' 두 줄로 나눠 넣는다(한 줄이면 preview 폭을 넓혀 세로
   // 방송·재생바 끝에서 화면 밖으로 짤렸다). "YY.MM.DD. 오전/오후 H:MM:SS" → 날짜부 + 시각부.
-  function setSeekRealtimeContent(el, label, broadcastTitle = "") {
+  function setSeekRealtimeContent(el, label, broadcastTitle = "", extra = "") {
     el.textContent = "";
     el.classList.toggle("is-title-only", !label && Boolean(broadcastTitle));
     const m = String(label).match(/^(.+?\.)\s+(.+)$/); // "26.07.20." | "오후 4:06:50"
@@ -7714,6 +7772,12 @@
       t.className = "cheese-seek-realtime-time";
       t.textContent = timePart;
       el.appendChild(t);
+    }
+    if (extra) {
+      const k = document.createElement("span");
+      k.className = "cheese-seek-realtime-time cheese-seek-realtime-kst";
+      k.textContent = extra;
+      el.appendChild(k);
     }
     if (broadcastTitle) {
       const title = document.createElement("span");
@@ -7740,12 +7804,12 @@
     const parts = [];
     if (seekPreviewState.publishAt) {
       parts.push(
-        `등록일 : ${escapeHtml(formatKstClock(seekPreviewState.publishAt))}`,
+        `등록일 : ${escapeHtml(formatVodClock(seekPreviewState.publishAt))}`,
       );
     }
     if (seekPreviewState.liveOpenAt) {
       parts.push(
-        `방송 시작 시각 : ${escapeHtml(formatKstClock(seekPreviewState.liveOpenAt))}`,
+        `방송 시작 시각 : ${escapeHtml(formatVodClock(seekPreviewState.liveOpenAt))}`,
       );
     }
     return parts.join("<br>");
@@ -46721,9 +46785,9 @@ html.cheese-sidebar-resizing div#layout-body {
       return;
     const parts = [];
     if (dates.publishAt)
-      parts.push(`등록일 : ${formatKstClock(dates.publishAt)}`);
+      parts.push(`등록일 : ${formatVodClock(dates.publishAt)}`);
     if (dates.liveOpenAt) {
-      parts.push(`방송 시작 시각 : ${formatKstClock(dates.liveOpenAt)}`);
+      parts.push(`방송 시작 시각 : ${formatVodClock(dates.liveOpenAt)}`);
     }
     if (!parts.length) return;
     const label = getCardDateFloatEl();
@@ -61234,6 +61298,10 @@ html.cheese-sidebar-resizing div#layout-body {
         if (cardDateTooltipOn) bindCardDateTooltip();
         else unbindCardDateTooltip();
       }
+      if (changes[VOD_CLOCK_TIME_ZONE_KEY]) {
+        vodClockTimeZone = normalizeVodClockTimeZone(changes[VOD_CLOCK_TIME_ZONE_KEY].newValue);
+        updateSeekPreviewRealtime();
+      }
       if (changes[VOD_TITLE_CHANGES_KEY]) {
         vodTitleChangesOn = changes[VOD_TITLE_CHANGES_KEY].newValue === true;
         updateSeekPreviewRealtime();
@@ -61877,6 +61945,7 @@ html.cheese-sidebar-resizing div#layout-body {
         ROLE_CHAT_ON_KEY,
         ROLE_CHAT_BOTS_KEY,
         VOD_TITLE_CHANGES_KEY,
+        VOD_CLOCK_TIME_ZONE_KEY,
       ]);
       followingLiveSortOn = data?.[FOLLOW_SORT_ENABLED_KEY] === true;
       pipDisableOn = data?.[PIP_DISABLE_KEY] === true;
@@ -61886,6 +61955,7 @@ html.cheese-sidebar-resizing div#layout-body {
       vodRoleChatOn = data?.[ROLE_CHAT_ON_KEY] === true; // 기본 OFF
       applyVodRoleChatBots(data?.[ROLE_CHAT_BOTS_KEY]);
       vodTitleChangesOn = data?.[VOD_TITLE_CHANGES_KEY] === true; // 기본 OFF
+      vodClockTimeZone = normalizeVodClockTimeZone(data?.[VOD_CLOCK_TIME_ZONE_KEY]);
       applyChatGraphColors(data?.[CHAT_GRAPH_COLORS_KEY]);
       // init()은 저장소 응답보다 먼저 실행될 수 있다. 특히 설정을 막 불러온 새 설치에서는
       // 기본값(false)으로 첫 init이 끝난 뒤 DOM 변이가 없으면 버튼·자동 수집이 영영

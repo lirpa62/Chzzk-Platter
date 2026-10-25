@@ -3469,6 +3469,67 @@
                 </label>
               </li>
               <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="vod-clock-time-zone"
+              >
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="시간대 한국 시간 KST 현지 시각 해외"
+                    >└ 표시 시간대</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="실제 시각을 이 컴퓨터 시간, 한국 시간(KST), 둘 다 중 어느 것으로 보일지 고릅니다."
+                    >재생바 썸네일의 실제 시각과 다시보기 등록일·방송 시작 시각
+                    툴팁을 어느 시간대로 보일지 고릅니다. 이 컴퓨터 시간=브라우저
+                    시간대(해외에서는 현지 시각), 한국 시간=KST 를 붙여 표시, 둘
+                    다=현지 시각 아래 KST 를 함께 표시(기본 이 컴퓨터 시간)</span
+                  >
+                  <p
+                    class="settings-item-desc"
+                    data-vod-clock-time-zone-same
+                    hidden
+                  >
+                    지금 이 컴퓨터가 한국 시간대라 어느 쪽을 골라도 같게 보입니다.
+                  </p>
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-3"
+                  data-vod-clock-time-zone
+                  role="radiogroup"
+                  style="margin-top: 6px; width: 100%"
+                >
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-vod-clock-time-zone-value="local"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    이 컴퓨터 시간
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-vod-clock-time-zone-value="kst"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    한국 시간
+                  </button>
+                  <button
+                    type="button"
+                    class="settings-segmented-btn"
+                    data-vod-clock-time-zone-value="both"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    둘 다
+                  </button>
+                </div>
+              </li>
+              <li
                 class="settings-item"
                 data-new-feature="vod-title-change-history"
               >

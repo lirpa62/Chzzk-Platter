@@ -76,6 +76,7 @@
     ["[data-vod-chat-graph-auto]", "[data-vod-chat-graph-auto-collect]"],
     ["[data-vod-role-chat]", "[data-role-bot-row]"],
     ['[data-feature="vodSeekButtons"]', '[data-feature="vodGlobalArrowSeek"]'],
+    ['[data-feature="seekPreviewRealtime"]', "[data-vod-clock-time-zone]"],
     ['[data-feature="chatHideInputPlaceholder"]', '[data-feature="chatInputLatencyPlaceholder"]'],
     ['[data-feature="vodLocalChat"]', '[data-feature="vodLocalChatHideBorder"], [data-feature="vodLocalChatHideBackground"]'],
     ['[data-feature="commentTimestamp"]', "#commentTsClickAction"],

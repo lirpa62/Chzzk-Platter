@@ -3554,6 +3554,13 @@ html.cheese-vod-portrait
 .cheese-seek-realtime-time {
   white-space: nowrap;
 }
+/* '둘 다' 시간대: 현지 시각 아래 KST 를 한 줄 더(조금 흐리게). */
+.cheese-seek-realtime-kst {
+  flex: 0 0 100%;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 10px;
+}
 .cheese-seek-realtime-title {
   display: -webkit-box;
   flex: 0 0 100%;
