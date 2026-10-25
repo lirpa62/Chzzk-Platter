@@ -21305,17 +21305,34 @@
   // 의도가 아니라 초기화로 보고 그대로 되돌린다. 이 시간이 지난 뒤의 muted 만 사용자
   // 직접 음소거로 존중한다.
   const AD_UNMUTE_SETTLE_MS = 1500;
+  // ⚠ 멀티뷰에서는 소리 주인을 부모가 정한다. 부모가 음소거를 지시한 칸(보조 칸)은 켜지 않는다 —
+  //   켜면 메인만 소리 나는 규칙이 깨진다(광고 중 보조 칸이 갑자기 들린다). 소리를 맡은 칸은 한 탭에서
+  //   볼 때처럼 옵션을 따른다(예전엔 멀티뷰 칸 전체에서 꺼 두어 옵션이 동작하지 않았다).
+  function adUnmuteBlockedByMultiview() {
+    return IS_MULTIVIEW_FRAME && multiviewMuted;
+  }
   function setAdUnmuteMutedFalse(v) {
-    // 멀티뷰에서는 어떤 경로로도 여기서 소리를 켜지 않는다(부모가 정한다).
-    if (IS_MULTIVIEW_FRAME) return;
+    if (adUnmuteBlockedByMultiview()) return;
     adUnmuteSelfChanging = true;
+    // 멀티뷰 칸은 부모가 지시한 크기로 켠다(이전 크기가 남아 갑자기 크게 들리지 않게).
+    if (IS_MULTIVIEW_FRAME && Math.abs(v.volume - multiviewVolume) > 0.001) {
+      try {
+        v.volume = multiviewVolume;
+      } catch {}
+    }
     v.muted = false;
     adUnmuteSelfChanging = false;
   }
+  // 멀티뷰 칸이 광고 중 보조 칸이 되면(메인 변경) 우리가 켠 미니플레이어 소리를 다시 끈다.
+  function remuteAdMiniplayerForMultiview() {
+    const v = adUnmuteObservedVideo;
+    if (!adUnmuteBlockedByMultiview() || !(v instanceof HTMLVideoElement) || v.muted) return;
+    adUnmuteSelfChanging = true;
+    v.muted = true;
+    adUnmuteSelfChanging = false;
+  }
   function onAdMiniplayerVolumeChange(e) {
-    // ⚠ 멀티뷰에서는 소리 주인을 부모가 정한다. 이 기능이 보조 칸을 임의로 켜면
-    //   메인만 소리 나는 규칙이 깨진다(광고 중 aux 가 갑자기 들린다).
-    if (IS_MULTIVIEW_FRAME) return;
+    if (adUnmuteBlockedByMultiview()) return;
     if (!adMiniplayerUnmute) return;
     if (adUnmuteSelfChanging) return; // 우리가 유발한 변경 — 무시
     const v = e.currentTarget;
@@ -21358,7 +21375,7 @@
       adUnmuteObservedVideo = null;
       adUnmuteSuppressed = false; // 새 미니플레이어 세션에서는 다시 자동 해제
     }
-    if (IS_MULTIVIEW_FRAME) return; // 멀티뷰는 부모가 소리를 관리한다
+    if (adUnmuteBlockedByMultiview()) return; // 멀티뷰 보조 칸은 부모가 소리를 관리한다
     if (!adMiniplayerUnmute || !(video instanceof HTMLVideoElement)) return;
     if (adUnmuteObservedVideo !== video) {
       video.addEventListener("volumechange", onAdMiniplayerVolumeChange);
@@ -24007,6 +24024,9 @@
       muteOverriddenByUser = false;
       syncMultiviewVideo();
       if (currentVideo) applyAudioToVideo(currentVideo);
+      // 중간광고 미니플레이어 소리: 보조 칸이 되면 끄고, 소리를 맡게 되면 옵션대로 켠다.
+      remuteAdMiniplayerForMultiview();
+      applyAdMiniplayerUnmute();
       // 역할이 같아도 FRAME_READY 직후에는 로딩 중 놓친 화질 적용을 다시 시도한다.
       // 실제 트랙 변경 시점은 applyMaxQuality의 재생 안정성 검사에 맡긴다.
       if (qualityChanged || forceQualityReconcile) reconcileMultiviewQuality();
