@@ -63140,6 +63140,19 @@ html.cheese-sidebar-resizing div#layout-body {
         .catch(() => {});
       return;
     }
+    // 따라잡기 버튼 우클릭 메뉴에서 시작·목표 지연을 바꾸면 민감도를 커스텀으로 저장한다.
+    if (data.type === "save-sync-custom") {
+      const enable = Number(data.custom?.enable);
+      const target = Number(data.custom?.target);
+      if (
+        !Number.isFinite(enable) || !Number.isFinite(target) ||
+        target < 1 || target > 20 || enable < 2 || enable > 30 || enable <= target
+      ) return;
+      void chrome.storage.local
+        .set({ [SYNC_PRESET_KEY]: "custom", [SYNC_CUSTOM_KEY]: { enable, target } })
+        .catch(() => {});
+      return;
+    }
     if (data.type === "save-auto-sync") {
       void chrome.storage.local
         .set({ [AUDIO_MIXER_AUTO_SYNC_KEY]: data.enabled === true })

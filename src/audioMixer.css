@@ -1692,6 +1692,44 @@
   font-weight: 500;
 }
 
+/* 우클릭 메뉴: 시작·목표 지연 바로 조절 */
+.cheese-sync-adjust-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.cheese-sync-adjust-name {
+  flex: 1;
+  color: rgba(255, 255, 255, 0.85);
+}
+.cheese-sync-adjust-value {
+  min-width: 42px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cheese-sync-adjust-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cheese-sync-adjust-btn:hover {
+  border-color: rgba(0, 255, 163, 0.6);
+  background: rgba(0, 255, 163, 0.12);
+}
+.cheese-sync-menu-hint.cheese-sync-adjust-hint {
+  margin-top: 2px;
+}
+
 .cheese-sync-menu-hint {
   margin: 4px 10px 6px;
   color: rgba(255, 255, 255, 0.55);

@@ -14663,12 +14663,12 @@
     if (syncCustomRow) syncCustomRow.hidden = preset !== "custom";
   }
 
-  // 커스텀 입력값을 정규화(목표 1~10, 시작 2~30, 시작 > 목표)하고 저장.
+  // 커스텀 입력값을 정규화(목표 1~20, 시작 2~30, 시작 > 목표)하고 저장.
   function saveSyncCustom() {
     let target = clamp(
       syncCustomTarget?.value,
       1,
-      10,
+      20,
       SYNC_CUSTOM_DEFAULT.target,
     );
     let enable = clamp(
@@ -14695,7 +14695,7 @@
       if (c && typeof c === "object") {
         custom = {
           enable: clamp(c.enable, 2, 30, SYNC_CUSTOM_DEFAULT.enable),
-          target: clamp(c.target, 1, 10, SYNC_CUSTOM_DEFAULT.target),
+          target: clamp(c.target, 1, 20, SYNC_CUSTOM_DEFAULT.target),
         };
       }
     } catch {}

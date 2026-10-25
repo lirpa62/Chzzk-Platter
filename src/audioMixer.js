@@ -611,7 +611,10 @@
   const SYNC_MAX_DURATION_MS = 30000; // 안전: 최대 따라잡기 시간
   const SYNC_NO_PROGRESS_MS = 4000; // 이 시간 동안 지연이 의미있게 안 줄면(스톨) 중단
   const SYNC_PROGRESS_EPS_S = 0.3; // '진전'으로 인정할 최소 지연 감소(초)
-  const SYNC_JUMP_LATENCY_S = 12; // 이 지연(초) 이상이면 1.5배속 대신 라이브로 즉시 점프
+  const SYNC_JUMP_LATENCY_S = 12; // 이 지연(초) 이상이면 1.5배속 대신 라이브로 즉시 점프(시작 지연이 크면 늦춤)
+  const SYNC_CUSTOM_TARGET_MAX_S = 20; // 커스텀 목표 지연 상한(설정 화면·우클릭 메뉴 공통)
+  const SYNC_CUSTOM_ENABLE_MAX_S = 30;
+  const SYNC_ADJUST_STEP_S = 0.5; // 우클릭 메뉴에서 시작·목표 지연을 바꾸는 단위
   // 따라잡기 민감도 프리셋(settings에서 선택). enable=발동/버튼활성 임계, target=목표 지연.
   // 값이 작을수록 라이브에 더 바짝 붙는다(자주 발동). 큰 값은 느슨하게(끊김 적게).
   const SYNC_PRESETS = {
@@ -647,6 +650,12 @@
   const SYNC_ADAPT_MAX_S = 2;
   const SYNC_ADAPT_WATCH_MS = 10000; // 목표 도달 뒤 이 시간 안의 버퍼링만 따라잡기 탓으로 본다
   const SYNC_MIN_BUFFER_AHEAD_S = 0.5; // 앞쪽 버퍼가 이보다 적으면 목표 전이라도 멈춘다
+  // 배속 중 멈춤(waiting)이 났을 때 앞쪽 버퍼가 이만큼 남아 있었으면 '버퍼 부족' 이 아니라 '배속을
+  // 디코딩이 못 따라감' 으로 본다(실측: Windows 1080p60 1.5배속에서 버퍼 4초가 남았는데 멈추고, 플레이어가
+  // 뒤로 옮겨 지연이 되돌아갔다). 그때는 기준을 늦추지 않고 이 방송은 '버퍼 안 건너뛰기' 로 따라잡는다.
+  const SYNC_STARVED_AHEAD_S = 1;
+  const SYNC_SKIP_KEEP_S = 1; // 건너뛴 뒤에도 남겨 둘 앞쪽 버퍼(초)
+  const SYNC_SKIP_MIN_S = 0.3; // 이보다 적게 건너뛸 수 있으면 건너뛰지 않는다
   const PANEL_RIGHT_PX = 16;
   const PANEL_BOTTOM_PX = 64;
   const PANEL_TOP_GAP_PX = 12;
@@ -8323,6 +8332,11 @@
   let autoSyncChannels = {};
 
   const syncEnableS = () => syncCfg.enable + syncAdaptBoost;
+  // 이 지연 이상이면 배속 대신 라이브로 바로 옮긴다. 시작 지연을 크게 잡은 사용자(커스텀 목표 20초까지)는
+  // 그만큼 늦춘다 — 고정 12초면 시작 지연 12초 이상에서 자동이 영영 발동하지 않았다(지연 ≥ 시작 && < 12).
+  const syncJumpLatencyS = () => Math.max(SYNC_JUMP_LATENCY_S, syncEnableS() + 4);
+  // 배속 중 디코딩이 못 따라가 멈춘 방송: 배속 대신 받아 둔 구간 안에서 건너뛴다(새 방송에서 되돌림).
+  let syncSkipMode = false;
   const syncTargetS = () =>
     Math.min(syncCfg.target + syncAdaptBoost, syncEnableS() - 0.5);
   function resetSyncAdapt() {
@@ -8341,8 +8355,35 @@
       syncAdaptWatch = null;
       return;
     }
+    // ⚠ 버퍼가 실제로 바닥났을 때만 기준을 늦춘다. 버퍼가 남아 있는데 멈췄다면 우리 목표가 너무
+    //   바짝이라서가 아니다(디코딩 부담 등). 예전엔 이것까지 늦춰 몇 번 만에 시작 지연이 2초 커졌다.
+    if (!isSyncBufferStarved(watch.video)) {
+      syncAdaptWatch = null;
+      return;
+    }
     raiseSyncAdapt();
     updateSyncButtonState();
+  }
+  // 앞쪽 버퍼가 바닥났는가(모르면 바닥난 것으로 본다 — 예전 동작 유지).
+  function isSyncBufferStarved(video) {
+    const ahead = syncBufferAhead(video);
+    return !Number.isFinite(ahead) || ahead < SYNC_STARVED_AHEAD_S;
+  }
+  // 받아 둔 구간 안에서 목표 지연만큼 앞으로 건너뛴다. 디코딩 부담·네트워크 요청 없이 한 번에 끝난다.
+  // 남길 버퍼(SYNC_SKIP_KEEP_S)를 빼고 건너뛸 수 있는 만큼만 옮긴다.
+  function skipWithinBuffer(video, lat) {
+    const ahead = syncBufferAhead(video);
+    if (!Number.isFinite(ahead) || !Number.isFinite(lat)) return false;
+    const step = Math.min(lat - syncTargetS(), ahead - SYNC_SKIP_KEEP_S);
+    if (!(step >= SYNC_SKIP_MIN_S)) return false;
+    ourSeekUntil = Date.now() + 1500; // 곧 발생할 seeked 는 우리 것 → 사용자 seek 로 보지 않는다
+    try {
+      video.currentTime += step;
+    } catch {
+      return false;
+    }
+    updateSyncButtonState();
+    return true;
   }
   // 재생 위치에서 앞쪽으로 받아 둔 버퍼(초). 모르면 NaN.
   function syncBufferAhead(video) {
@@ -9524,7 +9565,7 @@
         : "실시간 따라잡기";
     } else if (
       Number.isFinite(lat) &&
-      (SYNC_MODE === "jump" || lat >= SYNC_JUMP_LATENCY_S)
+      (SYNC_MODE === "jump" || lat >= syncJumpLatencyS())
     ) {
       // 점프 모드는 항상 '이동'이라고 알린다(배속으로 서서히 줄지 않으므로).
       text = `라이브로 이동 (지연 ${formatLatency(lat)})`;
@@ -9574,7 +9615,7 @@
     const autoEligible =
       Number.isFinite(lat) &&
       lat >= syncEnableS() &&
-      lat < SYNC_JUMP_LATENCY_S;
+      lat < syncJumpLatencyS();
 
     // 라이브 최초 진입 1회: 쿨다운/사용자 seek 차단을 무시하고 따라잡는다. 지연이
     // 측정되어 판단이 끝나면 플래그를 소진한다(임계 미만이면 발동 없이 소진). 평소
@@ -9636,14 +9677,15 @@
   }
 
   // 따라잡기 민감도 프리셋 적용(자동·수동 임계/목표 지연 모두). 알 수 없는 값이면 보통.
-  // 커스텀 입력값을 안전 범위로 정규화. 목표 1~10초, 시작 2~30초, 시작 > 목표 보장.
+  // 커스텀 입력값을 안전 범위로 정규화. 목표 1~20초, 시작 2~30초, 시작 > 목표 보장.
+  // (목표 상한 10초였다. 치지직 지연 숫자가 실제보다 크게 나오는 날엔 10초 넘게 잡아야 했다.)
   function normalizeSyncCustom(custom) {
     const c = custom && typeof custom === "object" ? custom : {};
     let target = Number(c.target);
     let enable = Number(c.enable);
     if (!Number.isFinite(target)) target = SYNC_PRESETS.normal.target;
     if (!Number.isFinite(enable)) enable = SYNC_PRESETS.normal.enable;
-    target = Math.min(10, Math.max(1, target));
+    target = Math.min(SYNC_CUSTOM_TARGET_MAX_S, Math.max(1, target));
     enable = Math.min(30, Math.max(2, enable));
     // 시작 지연은 목표보다 최소 0.5초 커야 의미가 있다.
     if (enable <= target) enable = Math.min(30, target + 0.5);
@@ -9706,6 +9748,7 @@
   // 라이브 최초 진입 후 1회 강제 따라잡기를 무장한다(tick의 페이지 전환에서 호출).
   function armFreshLiveEntry() {
     resetSyncAdapt();
+    syncSkipMode = false;
     syncFreshLiveEntry = true;
     freshEntryDeadline = Date.now() + SYNC_FRESH_ENTRY_WINDOW_MS;
   }
@@ -10105,8 +10148,13 @@
 
     // 설정이 '즉시 점프'면 지연 크기와 무관하게 바로 라이브 엣지로 당긴다.
     // 지연이 크면(타임머신 등) 배속 모드에서도 점프가 유일한 현실적 수단이다.
-    if (SYNC_MODE === "jump" || lat >= SYNC_JUMP_LATENCY_S) {
+    if (SYNC_MODE === "jump" || lat >= syncJumpLatencyS()) {
       jumpToLiveEdge(core, video);
+      return;
+    }
+    // 배속을 디코딩이 못 따라가는 방송이면 받아 둔 구간 안에서 건너뛴다.
+    if (syncSkipMode) {
+      skipWithinBuffer(video, lat);
       return;
     }
 
@@ -10131,6 +10179,15 @@
     updateSyncButtonState();
 
     const session = syncCatchUp;
+    // 배속 중 멈춤: 버퍼가 남아 있으면 디코딩이 배속을 못 따라간 것이다 → 이 방송은 건너뛰기로 바꾸고
+    // 기준은 그대로 둔다. 버퍼가 바닥났으면 기준을 늦춘다.
+    session.onWaiting = () => {
+      if (syncCatchUp !== session) return;
+      if (isSyncBufferStarved(video)) raiseSyncAdapt();
+      else syncSkipMode = true;
+      stopSyncCatchUp();
+    };
+    video.addEventListener("waiting", session.onWaiting);
     const loop = () => {
       if (syncCatchUp !== session) return;
       if (!video.isConnected || video.paused || video.seeking || video.readyState < 3) {
@@ -10192,6 +10249,8 @@
   function stopSyncCatchUp() {
     if (!syncCatchUp) return;
     if (syncCatchUp.timer) window.clearTimeout(syncCatchUp.timer);
+    if (syncCatchUp.onWaiting)
+      syncCatchUp.video?.removeEventListener("waiting", syncCatchUp.onWaiting);
     // ⚠ 예전에는 '현재 배속 === SYNC_RATE' 일 때만 원복했다. 그런데 Video Speed
     //    Controller 같은 확장은 ratechange 를 듣고 값을 자기 것으로 덮어쓴다.
     //    그러면 이 조건이 거짓이 되어 원복을 건너뛰고 배속이 걸린 채 남았다.
@@ -10381,6 +10440,14 @@
 
   // 따라잡기 버튼 클릭 위임.
   document.addEventListener("click", (e) => {
+    // 시작·목표 지연 조절(메뉴는 닫지 않는다)
+    const adjust = e.target.closest?.(`#${SYNC_MENU_ID} [data-sync-adjust]`);
+    if (adjust) {
+      e.preventDefault();
+      e.stopPropagation();
+      adjustSyncCustom(adjust.dataset.syncAdjust, Number(adjust.dataset.delta));
+      return;
+    }
     // 메뉴 항목 클릭(자동 토글)
     const menuItem = e.target.closest?.(`#${SYNC_MENU_ID} [data-sync-auto]`);
     if (menuItem) {
@@ -10673,13 +10740,31 @@
     const adaptNote = syncAdaptBoost
       ? `<br>버퍼링이 있어 이 방송은 ${syncAdaptBoost}초 늦춰 ${syncEnableS()}초 → ${syncTargetS()}초로 따라잡습니다.`
       : "";
+    const skipNote = syncSkipMode
+      ? "<br>배속 중 끊겨 이 방송은 받아 둔 구간 안에서 건너뛰어 따라잡습니다."
+      : "";
+    // 시작·목표 지연을 바로 바꾼다(설정 화면까지 가지 않게). 바꾸면 민감도가 '커스텀' 으로 저장된다.
+    const presetName = { low: "낮음", normal: "보통", high: "높음", custom: "커스텀" }[syncPresetKey] || "";
+    const adjustRow = (field, label, value) =>
+      `<div class="cheese-sync-adjust-row">` +
+      `<span class="cheese-sync-adjust-name">${label}</span>` +
+      `<button type="button" class="cheese-sync-adjust-btn" data-sync-adjust="${field}" data-delta="-${SYNC_ADJUST_STEP_S}" aria-label="${label} ${SYNC_ADJUST_STEP_S}초 줄이기">−</button>` +
+      `<span class="cheese-sync-adjust-value" data-sync-adjust-value="${field}">${formatSyncSeconds(value)}</span>` +
+      `<button type="button" class="cheese-sync-adjust-btn" data-sync-adjust="${field}" data-delta="${SYNC_ADJUST_STEP_S}" aria-label="${label} ${SYNC_ADJUST_STEP_S}초 늘리기">+</button>` +
+      `</div>`;
+    const adjustItems =
+      `<p class="cheese-sync-menu-label">따라잡기 기준${presetName ? ` · ${presetName}` : ""}</p>` +
+      adjustRow("enable", "시작 지연", syncCfg.enable) +
+      adjustRow("target", "목표 지연", syncCfg.target) +
+      `<p class="cheese-sync-menu-hint cheese-sync-adjust-hint">바꾸면 민감도가 ‘커스텀’으로 저장됩니다.</p>`;
     menu.innerHTML = `
       <button type="button" class="cheese-sync-menu-item" data-sync-auto role="menuitemcheckbox" aria-checked="${autoSyncEnabled}">
         <span class="cheese-sync-menu-check" aria-hidden="true">${autoSyncEnabled ? "✓" : ""}</span>
         <span>모든 방송 자동 따라잡기</span>
       </button>
       ${channelItems}
-      <p class="cheese-sync-menu-hint">지연이 ${syncEnableS()}초를 넘으면 자동으로 따라잡습니다.<br>타임머신으로 과거를 볼 땐 자동 따라잡기를 멈춥니다.${adaptNote}</p>`;
+      ${adjustItems}
+      <p class="cheese-sync-menu-hint">지연이 ${syncEnableS()}초를 넘으면 자동으로 따라잡습니다.<br>타임머신으로 과거를 볼 땐 자동 따라잡기를 멈춥니다.${adaptNote}${skipNote}</p>`;
     root.appendChild(menu);
     // 버튼 위쪽에 배치(재생바 위로 뜨도록). 아이콘 오른쪽 끝 기준에서 조금 더
     // 오른쪽(-12px)·살짝 더 위(+14px)로.
@@ -10693,6 +10778,35 @@
     );
     menu.style.right = `${right}px`;
     keepControlsVisible(root, "sync-menu");
+  }
+
+  function formatSyncSeconds(value) {
+    return `${Number(value).toFixed(1).replace(/\.0$/, "")}초`;
+  }
+
+  // 우클릭 메뉴의 시작·목표 지연 조절. 지금 기준(이 방송에서 늦춘 값 제외)에서 한 단계 바꿔 커스텀으로
+  // 적용·저장한다. 시작은 목표보다 0.5초 이상 크게 유지한다(줄이는 쪽이 상대를 함께 민다).
+  function adjustSyncCustom(field, delta) {
+    if (field !== "enable" && field !== "target") return;
+    if (!Number.isFinite(delta) || delta === 0) return;
+    const round = (v) => Math.round(v / SYNC_ADJUST_STEP_S) * SYNC_ADJUST_STEP_S;
+    let enable = syncCfg.enable;
+    let target = syncCfg.target;
+    if (field === "enable") {
+      enable = Math.min(SYNC_CUSTOM_ENABLE_MAX_S, Math.max(2, round(enable + delta)));
+      if (enable - target < 0.5) target = Math.max(1, enable - 0.5);
+    } else {
+      target = Math.min(SYNC_CUSTOM_TARGET_MAX_S, Math.max(1, round(target + delta)));
+      if (enable - target < 0.5) enable = Math.min(SYNC_CUSTOM_ENABLE_MAX_S, target + 0.5);
+    }
+    const next = normalizeSyncCustom({ enable, target });
+    applySyncPreset("custom", next);
+    window.postMessage(
+      { source: "cheese-audio-mixer", type: "save-sync-custom", custom: next },
+      BRIDGE_ORIGIN,
+    );
+    const btn = document.querySelector(`.${SYNC_BUTTON_CLASS}`);
+    if (btn && document.getElementById(SYNC_MENU_ID)) openSyncMenu(btn);
   }
 
   function closeSyncMenu() {

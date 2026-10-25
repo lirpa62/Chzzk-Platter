@@ -25,6 +25,7 @@ function makeCtx() {
   const posted = [];
   const ctx = {
     SYNC_ADAPT_STEP_S: 0.5, SYNC_ADAPT_MAX_S: 2, SYNC_ADAPT_WATCH_MS: 10000,
+    SYNC_JUMP_LATENCY_S: 12, SYNC_STARVED_AHEAD_S: 1, SYNC_SKIP_KEEP_S: 1, SYNC_SKIP_MIN_S: 0.3, ourSeekUntil: 0,
     syncCfg: { enable: 3, target: 2 },
     currentPageKey: `live:${A}`,
     autoSyncEnabled: false,
@@ -113,7 +114,8 @@ function makeCtx() {
   const loopSrc = fnSrc("startSyncCatchUp");
   function run({ lat, ahead }) {
     const timers = [];
-    const video = { paused: false, seeking: false, readyState: 4, isConnected: true, playbackRate: 1 };
+    const video = { paused: false, seeking: false, readyState: 4, isConnected: true, playbackRate: 1,
+      addEventListener: () => {}, removeEventListener: () => {} };
     const state = { stops: 0, raised: 0, watch: null };
     const ctx = {
       SYNC_MODE: "rate", SYNC_JUMP_LATENCY_S: 12, SYNC_RATE: 1.5, SYNC_PROGRESS_EPS_S: 0.3,
@@ -128,6 +130,8 @@ function makeCtx() {
       raiseSyncAdapt: () => { state.raised += 1; },
       updateSyncButtonState: () => {}, keepControlsVisible: () => {}, setSyncTooltip: () => {},
       jumpToLiveEdge: () => {},
+      syncJumpLatencyS: () => 12, syncSkipMode: false, skipWithinBuffer: () => true,
+      isSyncBufferStarved: () => ahead < 1,
       document: { hidden: true, querySelector: () => null },
       window: { setTimeout: (fn) => { timers.push(fn); return timers.length; } },
       Date,
@@ -159,7 +163,7 @@ assert.match(mixer, /function armFreshLiveEntry\(\) \{\n\s*resetSyncAdapt\(\);/,
 assert.match(mixer, /syncAutoCooldownMs = SYNC_AUTO_COOLDOWN_BASE_MS;\n\s*resetSyncAdapt\(\);/, "민감도를 바꾸면 되돌린다");
 assert.match(mixer, /const autoOn = autoSyncActive\(\);/);
 assert.match(mixer, /if \(autoOn && autoEligible && canAutoCatchUp\(\)\) \{/);
-assert.match(mixer, /lat >= syncEnableS\(\) &&\n\s*lat < SYNC_JUMP_LATENCY_S;/, "자동은 늦춘 기준으로 판단한다");
+assert.match(mixer, /lat >= syncEnableS\(\) &&\n\s*lat < syncJumpLatencyS\(\);/, "자동은 늦춘 기준으로 판단한다");
 assert.ok(mixer.includes("const overThreshold = Number.isFinite(lat) && lat >= syncCfg.enable;"), "수동 버튼은 원래 기준 그대로");
 assert.ok(mixer.includes('data-sync-channel="${mode}"'), "우클릭 메뉴에 이 채널 설정");
 assert.match(mixer, /if \(channelAutoSyncMode\(\) === "on"\) \{\n\s*setChannelAutoSync\(autoSyncEnabled \? "off" : "inherit"\);/, "이 채널만 켜 둔 경우 정지 버튼은 그 채널 설정만 푼다");
