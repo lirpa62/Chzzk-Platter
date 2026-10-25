@@ -6284,7 +6284,64 @@
     }
   }
 
-  // 라이브 지연(초). _getLiveLatency()는 ms를 반환한다. core를 받으면 재사용.
+  // ── PC 시계 보정 ──────────────────────────────────────────────────────────
+  // 치지직 _getLiveLatency() 는 'PC 시계(Date.now) − 수신 서버가 그 장면을 받은 서버 시각(ingest-utc)' 이다
+  // (player-vendor 번들 확인). PC 시계가 서버보다 5초 빠르면 지연이 5초 크게 나온다. 그래서 날마다 숫자가
+  // 9~12초 → 2~3초 → 6.5~7.5초로 바뀌는데 실제 화면·채팅 차이는 1.5~3초인 PC 가 있었고, 따라잡기 기준이
+  // 통째로 밀려 목표에 닿지 못했다.
+  // 같은 출처(chzzk.naver.com) HEAD 응답의 Date 헤더(서버 시각, 초 단위)로 PC 시계 차이를 잰다.
+  // ⚠ api.chzzk.naver.com 은 다른 출처라 Date 헤더를 스크립트가 읽을 수 없다(CORS 노출 헤더 아님).
+  // 한 번에 몇 번 재서 '서버 시각 ∈ [Date, Date+1초)' 구간을 겹쳐 오차를 줄인다.
+  const CLOCK_SAMPLE_COUNT = 4;
+  const CLOCK_SAMPLE_GAP_MS = 260; // 초 경계를 고르게 지나도록 1초를 나누어 잰다
+  const CLOCK_REFRESH_MS = 30 * 60 * 1000;
+  const CLOCK_RETRY_MS = 60 * 1000; // 재지 못했으면 1분 뒤 다시
+  const CLOCK_APPLY_MIN_MS = 500; // 이보다 작은 차이는 보정하지 않는다(측정 오차 수준)
+  const CLOCK_MAX_SPREAD_MS = 1500; // 구간이 이보다 넓으면(응답이 느렸다) 믿지 않는다
+  let clockOffsetMs = 0; // PC 시계 − 서버 시계(+ 면 PC 가 빠르다). 보정에 쓰는 값
+  let clockMeasuring = false;
+  let clockNextAt = 0;
+  async function measureClockOffset() {
+    if (clockMeasuring) return;
+    clockMeasuring = true;
+    let lo = -Infinity;
+    let hi = Infinity;
+    try {
+      for (let i = 0; i < CLOCK_SAMPLE_COUNT; i += 1) {
+        if (i) await new Promise((r) => setTimeout(r, CLOCK_SAMPLE_GAP_MS));
+        const sentAt = Date.now();
+        const res = await fetch(`${location.origin}/`, {
+          method: "HEAD",
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        const receivedAt = Date.now();
+        const serverAt = Date.parse(res.headers.get("date") || "");
+        if (!Number.isFinite(serverAt)) continue;
+        // 응답을 만든 순간: 서버 시각 ∈ [serverAt, serverAt+1000), PC 시각 ∈ [sentAt, receivedAt]
+        lo = Math.max(lo, sentAt - serverAt - 1000);
+        hi = Math.min(hi, receivedAt - serverAt);
+      }
+      const known = Number.isFinite(lo) && Number.isFinite(hi) && hi >= lo && hi - lo <= CLOCK_MAX_SPREAD_MS;
+      if (known) {
+        const offset = (lo + hi) / 2;
+        clockOffsetMs = Math.abs(offset) >= CLOCK_APPLY_MIN_MS ? Math.round(offset) : 0;
+      }
+      clockNextAt = Date.now() + (known ? CLOCK_REFRESH_MS : CLOCK_RETRY_MS);
+    } catch {
+      clockNextAt = Date.now() + CLOCK_RETRY_MS;
+    } finally {
+      clockMeasuring = false;
+    }
+  }
+  // 치지직 지연(ms)에서 PC 시계 차이를 뺀다. 라이브에서 처음 읽을 때 재기 시작한다(다시보기는 재지 않음).
+  function correctLiveLatencyMs(ms) {
+    if (!Number.isFinite(ms)) return ms;
+    if (!clockMeasuring && Date.now() >= clockNextAt) void measureClockOffset();
+    return ms - clockOffsetMs;
+  }
+
+  // 라이브 지연(초). _getLiveLatency()는 ms를 반환한다(PC 시계 차이는 뺀다). core를 받으면 재사용.
   // 마지막으로 잰 값과 시각을 남긴다(채팅 입력창 지연 표시가 따라잡기 버튼이 막 잰 값을
   // 다시 쓴다 — findCorePlayer 의 React 트리 탐색을 1초에 두 번 하지 않게).
   let lastLiveLatencyValue = null;
@@ -6293,7 +6350,7 @@
     let value = null;
     try {
       const c = core || findCorePlayer();
-      const ms = c?.srcObject?._getLiveLatency?.();
+      const ms = correctLiveLatencyMs(c?.srcObject?._getLiveLatency?.());
       value = Number.isFinite(ms) ? ms / 1000 : null;
     } catch {}
     lastLiveLatencyValue = value;
@@ -6803,9 +6860,14 @@
           info.isLive &&
           typeof core.srcObject?._getLiveLatency === "function"
         ) {
-          const lat = core.srcObject._getLiveLatency();
-          if (Number.isFinite(lat))
-            info.latency = `${numberFormat(Math.floor(lat))} ms`;
+          const lat = correctLiveLatencyMs(core.srcObject._getLiveLatency());
+          if (Number.isFinite(lat)) {
+            // PC 시계를 보정했으면 얼마나 뺐는지 함께 보인다(치지직 원래 값과 다른 이유).
+            info.latency = `${numberFormat(Math.floor(lat))} ms` +
+              (clockOffsetMs
+                ? ` (PC 시계 ${clockOffsetMs > 0 ? "+" : "−"}${(Math.abs(clockOffsetMs) / 1000).toFixed(1)}초 보정)`
+                : "");
+          }
         }
 
         // 다시보기(ABR)는 트랙에 비트레이트/FPS가 없다 → DASH MPD에서 현재 재생
