@@ -62,6 +62,7 @@
   } catch {}
   // content.js 의 SIDEBAR_HIDE_STYLE_ID 와 동일해야 나중에 자연스럽게 대체된다.
   const STYLE_ID = "cheese-sidebar-hide-style";
+  const MV_ONLY_CLASS = "cheese-sb-services-mv-only";
   const FEATURE_KEY = "cheeseFeatureHidden";
   // content.js featureFlags 기본값과 의미 일치(true=숨김). 조기 단계라 '명시적으로 숨김
   // (true)'인 것만 처리하고, 기본 표시 항목은 건드리지 않는다.
@@ -81,6 +82,12 @@
     // 0) 라벨 기반 섹션 숨김 마커(cheese-sb-hide)의 display:none 규칙. 이 규칙은 content.js
     //    가 늦게 주입하므로, 조기 옵저버가 붙인 클래스가 바로 먹도록 여기서 함께 넣는다.
     rules.push(`aside#sidebar .cheese-sb-hide{display:none!important}`);
+    // 서비스 바로가기 숨김 + 멀티뷰 바로가기 표시: 멀티뷰 항목이 든 갈래만 남긴다(content.js 와 같은 규칙).
+    rules.push(
+      `aside#sidebar nav.${MV_ONLY_CLASS}>:not(:has(#cheese-sidebar-multiview)),` +
+        `aside#sidebar nav.${MV_ONLY_CLASS} [class*="_title_"],` +
+        `aside#sidebar nav.${MV_ONLY_CLASS} li:not(#cheese-sidebar-multiview){display:none!important}`,
+    );
     // 1) 사이드바 전체 숨김.
     if (f.sidebar === true) {
       rules.push(
@@ -137,6 +144,8 @@
     ["서비스바로가기", "sbServices"],
   ];
   let labelFlags = null; // 숨겨야 할 키워드 목록(설정 로드 후 채움)
+  // 서비스 바로가기를 숨겨도 멀티뷰 바로가기는 남기는지(멀티뷰 바로가기 숨김이 꺼져 있으면 남긴다).
+  let keepMultiviewInServices = false;
 
   function navLabel(nav) {
     // 접힌 새 사이드바는 섹션 제목 대신 nav aria-label만 남긴다. content.js와
@@ -161,7 +170,9 @@
       const label = navLabel(nav);
       for (const kw of labelFlags) {
         if (label.includes(kw)) {
-          nav.classList.add(HIDE_CLASS);
+          nav.classList.add(
+            kw === "서비스바로가기" && keepMultiviewInServices ? MV_ONLY_CLASS : HIDE_CLASS,
+          );
           break;
         }
       }
@@ -223,6 +234,7 @@
         labelFlags = LABEL_RULES.filter(([, flag]) => f[flag] === true).map(
           ([kw]) => kw,
         );
+        keepMultiviewInServices = f.sbMultiview !== true;
         if (labelFlags.length) startLabelObserver();
       }
     });

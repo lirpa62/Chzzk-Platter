@@ -2516,6 +2516,7 @@
     sbBroadcastSchedule: false, // 방송 일정
     sbPartner: false, // 파트너
     sbServices: false, // 서비스 바로가기(게임/e스포츠/오리지널/PC게임/라운지)
+    sbMultiview: false, // 치즈 플래터 멀티뷰 바로가기(서비스 바로가기 숨김과 별개)
     sbFollowOffline: false, // 팔로잉 섹션의 오프라인 채널 숨김
     sbFollowAutoExpand: false, // 팔로잉 '더보기'를 클릭 없이 자동으로 모두 펼침
     sbFollowCustom: false, // 네이티브 팔로잉 목록을 치즈 플래터 전용 목록으로 대체(기본 OFF)
@@ -3053,6 +3054,8 @@
   let headerNavConfig = {};
   // 사이드바 항목/섹션 숨김 마커 클래스(JS가 식별해 부여, CSS가 숨김).
   const SIDEBAR_HIDE_ITEM_CLASS = "cheese-sb-hide";
+  // '서비스 바로가기' 를 숨겨도 그 안의 멀티뷰 바로가기는 남긴다(치지직 항목·제목만 숨김).
+  const SIDEBAR_SERVICES_MV_ONLY_CLASS = "cheese-sb-services-mv-only";
   // 재생바 댓글 타임스탬프 마커 표시 on/off(전역, chrome.storage 저장). 디폴트 ON.
   const COMMENT_MARKERS_ENABLED_KEY = "cheeseCommentMarkersEnabled";
   // 댓글 타임스탬프 기능 전체 on/off(버튼 우클릭 메뉴로 토글, 전역 저장). 디폴트 ON.
@@ -25418,6 +25421,12 @@ aside#sidebar button[aria-controls="navigation"] [class*="_label_"] {
       // 섹션별 숨김은 JS 마커 클래스로(텍스트 식별 필요).
       rules.push(
         `aside#sidebar .${SIDEBAR_HIDE_ITEM_CLASS} { display: none !important; }`,
+        // 서비스 바로가기 숨김 + 멀티뷰 표시: 멀티뷰 항목이 든 갈래만 남긴다.
+        // ⚠ id 는 문자열로 쓴다 — SIDEBAR_MULTIVIEW_ID 는 이 함수보다 뒤에 선언돼 첫 실행 때 TDZ 다.
+        `aside#sidebar nav.${SIDEBAR_SERVICES_MV_ONLY_CLASS} > :not(:has(#cheese-sidebar-multiview)),` +
+          ` aside#sidebar nav.${SIDEBAR_SERVICES_MV_ONLY_CLASS} [class*="_title_"],` +
+          ` aside#sidebar nav.${SIDEBAR_SERVICES_MV_ONLY_CLASS} li:not(#cheese-sidebar-multiview)` +
+          ` { display: none !important; }`,
       );
       // 메뉴 항목 숨김은 href 기반 CSS로 직접 숨긴다 — 치지직이 그리는 즉시 가려져
       // JS 클래스 부여 지연으로 인한 깜빡임이 없다(:has는 Chromium 105+ 지원).
@@ -26101,8 +26110,12 @@ html.cheese-sidebar-resizing div#layout-body {
       else if (label.includes("방송일정"))
         hidden = featureFlags.sbBroadcastSchedule;
       else if (label.includes("파트너")) hidden = featureFlags.sbPartner;
-      else if (label.includes("서비스바로가기"))
-        hidden = featureFlags.sbServices;
+      else if (label.includes("서비스바로가기")) {
+        // 서비스 바로가기를 숨겨도 멀티뷰 바로가기는 따로 남긴다(멀티뷰도 숨겼으면 섹션째 숨김).
+        const multiviewOnly = featureFlags.sbServices && !featureFlags.sbMultiview;
+        nav.classList.toggle(SIDEBAR_SERVICES_MV_ONLY_CLASS, multiviewOnly);
+        hidden = featureFlags.sbServices && !multiviewOnly;
+      }
       if (hidden !== null) {
         nav.classList.toggle(SIDEBAR_HIDE_ITEM_CLASS, Boolean(hidden));
         // 팔로잉 섹션이면 오프라인 항목 숨김도 함께 처리.
@@ -26216,7 +26229,7 @@ html.cheese-sidebar-resizing div#layout-body {
   }
 
   // ── 사이드바 멀티뷰 진입 버튼 ────────────────────────────────────────────
-  // '서비스 바로가기' nav 안에 우리 항목을 하나 얹는다. 치지직 원본 항목의 클래스를
+  // '서비스 바로가기' nav 안에 우리 항목을 하나 얹는다(서비스 바로가기를 숨겨도 이 항목은 남는다). 치지직 원본 항목의 클래스를
   // harvest 해 같은 모양을 쓰고, 사이드바가 재렌더되면 옵저버가 이 함수를 다시 불러
   // 멱등하게 복구한다(요소가 살아 있으면 아무 것도 하지 않는다).
   const SIDEBAR_MULTIVIEW_ID = "cheese-sidebar-multiview";
@@ -26239,8 +26252,9 @@ html.cheese-sidebar-resizing div#layout-body {
 
   function ensureSidebarMultiview() {
     const existing = document.getElementById(SIDEBAR_MULTIVIEW_ID);
-    // 사이드바 전체 숨김이거나 서비스 섹션이 숨겨진 상태면 우리 항목도 뺀다.
-    if (featureFlags.sidebar || featureFlags.sbServices) {
+    // 사이드바 전체 숨김이거나 멀티뷰 바로가기 숨김이면 뺀다. '서비스 바로가기' 숨김과는 별개다
+    // (그때는 치지직 항목만 숨기고 이 항목은 남긴다 — applySidebarSections).
+    if (featureFlags.sidebar || featureFlags.sbMultiview) {
       existing?.remove();
       return;
     }
