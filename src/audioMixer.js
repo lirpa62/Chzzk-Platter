@@ -10335,7 +10335,9 @@
       const seekBarOn = liveSeekBarOn;
       const seekButtonsOn = !featureFlags.liveRewind;
       if (!seekBarOn && !seekButtonsOn) return false;
-    } else if (!featureFlags.vodGlobalArrowSeek) {
+    } else if (!featureFlags.vodSeekButtons || !featureFlags.vodGlobalArrowSeek) {
+      // '플레이어 포커스 없이 방향키 이동' 은 '되감기·앞으로 버튼' 의 하위 옵션이다. 상위를 끄면
+      // 설정 화면에선 잠기지만 저장값은 켜진 채라, 상위를 함께 보지 않으면 계속 동작했다.
       return false;
     }
     if (isTypingTarget(e.target) || isTypingTarget(document.activeElement))
