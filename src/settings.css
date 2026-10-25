@@ -1564,6 +1564,7 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-auto-sync-channels-list]),
 .settings-item:has([data-clip-audio-mixer-gain-min]),
 .settings-item:has([data-clip-audio-mixer-gain-max]),
+.settings-item:has([data-vod-clock-time-zone]),
 .settings-item:has([data-logpower-progress-mode]),
 .settings-item:has([data-logpower-timer-mode]),
 .settings-item:has([data-mixer-gain-min]) {
