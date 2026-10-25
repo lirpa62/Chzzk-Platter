@@ -1550,6 +1550,7 @@
     reflectLoungeRefreshAvailability();
     // 전제 조건 잠금은 이 함수보다 뒤에서 정의된다(저장값이 채워진 지금 맞춘다).
     syncPrereqLocks?.();
+    reflectLogPowerTimerAutoNote();
     if (ok) featureFlagsLoaded = true;
   }
 
@@ -3819,11 +3820,25 @@
     "cheeseLogPowerProgressMode",
     () => reflectEarningColorLink(),
   );
-  bindLogPowerModeSeg(
+  const lpTimerSeg = bindLogPowerModeSeg(
     "[data-logpower-timer-mode]",
     "lp-timer-mode",
     "cheeseLogPowerTimerMode",
+    () => reflectLogPowerTimerAutoNote(),
   );
+  document
+    .querySelector('[data-feature="chatLogPowerAuto"]')
+    ?.addEventListener("change", () => reflectLogPowerTimerAutoNote());
+
+  // 1시간 타이머는 자동 획득으로 1시간 보상을 받아야 시작한다. 타이머를 보이게 해 두고 자동 획득이
+  // 꺼져 있으면 왜 안 뜨는지 알린다(자동 획득 기본값이 꺼짐이라 타이머 표시를 켜 두어도 뜨지 않았다).
+  // ⚠ 기능 토글 로드(load)가 끝난 뒤에도 부른다. 그 전엔 자동 획득 스위치가 기본값 상태다.
+  function reflectLogPowerTimerAutoNote() {
+    const note = document.querySelector("[data-logpower-timer-auto-note]");
+    if (!note || !lpTimerSeg) return;
+    const autoOn = document.querySelector('[data-feature="chatLogPowerAuto"]')?.checked === true;
+    note.hidden = autoOn || lpTimerSeg.get() === "off";
+  }
 
   // '적립 중 색 변경'을 켜면 배지 텍스트 색으로 적립 중을 표현하므로, '적립 중 표시
   // 위치'에서 '배지' 옵션만 비활성화한다(끔/툴팁은 계속 고를 수 있다). 현재 '배지'가

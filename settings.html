@@ -11349,9 +11349,16 @@
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name">‘적립 중’ 표시 위치</span>
-                  <span class="settings-item-desc"
-                    >적립되는 동안 ‘적립 중’을 어디에 보일지: 끔 / 배지(인라인)
-                    / 호버 툴팁</span
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="적립되는 동안 ‘적립 중’을 어디에 보일지: 끔 / 배지(인라인) / 호버 툴팁"
+                    >적립되는 동안 ‘적립 중’을 어디에 보일지 고릅니다(끔 /
+                    배지(인라인) / 호버 툴팁). 치지직은 시청 중 5분마다
+                    통나무파워를 주지만 지금 적립 중인지는 따로 알려 주지 않아,
+                    1분마다 보유량을 확인해 늘어나면 ‘적립 중’으로 표시합니다.
+                    그래서 시청을 시작한 뒤 첫 적립이 확인되기까지 약 5~6분이
+                    걸리고, 적립이 멈춘 뒤에도 최대 6분 동안 남아 있을 수
+                    있습니다.</span
                   >
                 </div>
                 <div
@@ -11388,10 +11395,25 @@
               <li class="settings-item settings-item-stacked">
                 <div>
                   <span class="settings-item-name">1시간 타이머 표시 위치</span>
-                  <span class="settings-item-desc"
-                    >1시간 보상까지 남은 시간을 어디에 보일지: 끔 / 배지(인라인)
-                    / 호버 툴팁</span
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="1시간 보상까지 남은 시간을 어디에 보일지: 끔 / 배지(인라인) / 호버 툴팁"
+                    >1시간 보상까지 남은 시간을 어디에 보일지 고릅니다(끔 /
+                    배지(인라인) / 호버 툴팁). 타이머는 ‘통나무파워 자동
+                    획득’으로 1시간 보상을 받은 순간부터 다음 보상까지 셉니다.
+                    자동 획득이 꺼져 있으면 표시되지 않고, 켜져 있어도 그
+                    채널에서 첫 1시간 보상을 받기 전에는 표시되지 않습니다.
+                    채널을 떠나면 멈췄다가 1시간 안에 돌아오면 이어서
+                    셉니다.</span
                   >
+                  <p
+                    class="settings-notice"
+                    data-logpower-timer-auto-note
+                    hidden
+                  >
+                    ‘통나무파워 자동 획득’이 꺼져 있어 1시간 타이머가 표시되지
+                    않습니다.
+                  </p>
                 </div>
                 <div
                   class="settings-segmented settings-segmented-3"
@@ -11427,9 +11449,13 @@
               <li class="settings-item">
                 <label>
                   <span class="settings-item-name">적립 중 배지 색 변경</span>
-                  <span class="settings-item-desc"
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="적립 중일 때 배지의 통나무파워 숫자 색을 적립 색으로 강조"
                     >적립 중일 때 배지의 통나무파워 숫자 색을 적립 색으로
-                    강조</span
+                    강조합니다. ‘적립 중’ 표시와 같은 기준이라 시청을 시작한 뒤
+                    약 5~6분 뒤에 바뀌고, 적립이 멈춘 뒤에도 최대 6분 동안
+                    유지될 수 있습니다.</span
                   >
                 </label>
                 <label class="settings-switch">
