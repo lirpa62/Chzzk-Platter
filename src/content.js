@@ -35774,6 +35774,10 @@ html.cheese-sidebar-resizing div#layout-body {
           "[data-clip-thumbnail-url]:not([data-clip-orientation-ready])",
         )
         .forEach(normalizeClipCardOrientation);
+      // 별표·재생목록 버튼을 그린 즉시 단다. 페이지 감시(유휴 시간에 도는 전체 패스)를 기다리면
+      // 카드가 뜨고 한참 뒤에 버튼이 붙었다.
+      ensureClipVaultCardButtons();
+      ensurePlaylistCardButtons();
     }
 
     if (integratedSearchClipsState.loading) {
@@ -51909,7 +51913,8 @@ html.cheese-sidebar-resizing div#layout-body {
   }
 
   function isClipCardListPage() {
-    return isClipsListPage() || isChannelClipsListPage();
+    // 통합검색 클립 섹션(우리가 그리는 카드)도 별표·재생목록 버튼을 단다.
+    return isClipsListPage() || isChannelClipsListPage() || location.pathname === "/search";
   }
 
   function ensureClipVaultAccount() {
@@ -51948,6 +51953,8 @@ html.cheese-sidebar-resizing div#layout-body {
       'ul[class*="_type_clip_"] a[class*="_link_"][href*="chzzk.naver.com/clips/"]',
       '#clips-PANEL a[href^="/clips/"]',
       '#clips-PANEL a[href*="chzzk.naver.com/clips/"]',
+      // 통합검색 클립 섹션: 카드를 덮는 표지 링크(빈 a)에 단다.
+      '.cheese-search-integrated-clips-list a.cheese-search-clip-cover-link[href*="/clips/"]',
     ].join(", ");
     const candidates = [...document.querySelectorAll(selector)].filter(
       (link) =>
@@ -54099,6 +54106,28 @@ html.cheese-sidebar-resizing div#layout-body {
     return id ? `${VIDEO_VAULT_ACCOUNT_KEY_PREFIX}${id}` : "";
   }
 
+  // 통합검색(/search). 보관함 패널은 두지 않고 동영상·클립 카드에 버튼만 단다.
+  function isIntegratedSearchCardPage() {
+    return location.pathname === "/search";
+  }
+
+  // 통합검색 동영상 카드는 썸네일 위쪽에 '다시보기'·'N회 시청된 라이브' 배지가 길게 붙어 오른쪽 위
+  // 버튼과 겹친다. 그 카드의 버튼은 비어 있는 왼쪽 아래에 둔다(CSS 가 이 표시를 본다).
+  const CARD_BUTTONS_PLACE_ATTR = "data-cheese-card-buttons";
+  function markCardButtonsPlacement(link) {
+    const want = isIntegratedSearchCardPage() && videoNoFromHref(link.getAttribute("href"))
+      ? "bottom-left"
+      : null;
+    if (link.getAttribute(CARD_BUTTONS_PLACE_ATTR) === want) return;
+    if (want) link.setAttribute(CARD_BUTTONS_PLACE_ATTR, want);
+    else link.removeAttribute(CARD_BUTTONS_PLACE_ATTR);
+  }
+
+  // 카드에 다시보기 보관함·재생목록 버튼을 다는 페이지(보관함 패널을 두는 목록 + 통합검색).
+  function isVideoVaultCardPage() {
+    return isVideoVaultListPage() || isIntegratedSearchCardPage();
+  }
+
   function isVideoVaultListPage() {
     if (/^\/videos\/?$/.test(location.pathname)) return true;
     if (getCategoryVideoContext()) return true;
@@ -54382,7 +54411,7 @@ html.cheese-sidebar-resizing div#layout-body {
   }
 
   function videoVaultCardLinks() {
-    if (!isVideoVaultListPage()) return [];
+    if (!isVideoVaultCardPage()) return [];
     const candidates = [
       ...document.querySelectorAll(
         'a[href^="/video/"], a[href*="chzzk.naver.com/video/"]',
@@ -54658,7 +54687,7 @@ html.cheese-sidebar-resizing div#layout-body {
   }
 
   function ensureVideoVaultCardButtons() {
-    if (!IS_TOP_FRAME || !isVideoVaultAvailable() || !isVideoVaultListPage()) {
+    if (!IS_TOP_FRAME || !isVideoVaultAvailable() || !isVideoVaultCardPage()) {
       clearVideoVaultCardDecorations();
       return;
     }
@@ -54691,6 +54720,7 @@ html.cheese-sidebar-resizing div#layout-body {
       }
       if (staticLinks.has(link)) link.classList.add("cheese-video-vault-card-anchor");
       if (link.getAttribute(VIDEO_VAULT_CARD_MARK) !== "1") link.setAttribute(VIDEO_VAULT_CARD_MARK, "1");
+      markCardButtonsPlacement(link);
       let archiveButton = link.querySelector(
         ":scope > .cheese-video-vault-archive, :scope > .cheese-video-vault-star",
       );
@@ -55919,7 +55949,7 @@ html.cheese-sidebar-resizing div#layout-body {
     }
     const keep = new Set();
     const targets = [];
-    if (isVideoVaultListPage()) {
+    if (isVideoVaultCardPage()) {
       for (const link of videoVaultCardLinks()) {
         const videoNo = videoNoFromHref(link.getAttribute("href"));
         if (videoNo) targets.push([link, `video:${videoNo}`]);
@@ -55940,6 +55970,7 @@ html.cheese-sidebar-resizing div#layout-body {
     );
     for (const [link, key] of targets) {
       ensurePlaylistCardButton(link, key, staticLinks.has(link));
+      markCardButtonsPlacement(link);
       keep.add(link);
     }
     // 페이지를 옮겨 대상이 아니게 된 카드(목록 재사용 등)는 정리한다.

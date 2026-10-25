@@ -84,6 +84,9 @@ const HARNESS = `
   };
   const readVideoVaultDetailPageMeta = () => ({ title: "상세 제목", thumb: "https://x/t.jpg", channelId: "", channelName: "치즈", adult: false });
   const isVideoVaultListPage = () => location.hash === "#videos";
+  // 카드 버튼은 보관함 목록 + 통합검색(content.js isVideoVaultCardPage)에 단다.
+  const isVideoVaultCardPage = () => isVideoVaultListPage();
+  const markCardButtonsPlacement = () => {}; // 통합검색 배치 표시(이 테스트 범위 밖)
   const isClipCardListPage = () => location.hash === "#clips";
   const videoNoFromHref = (href) => String(href || "").match(/^\\/video\\/(\\d+)/)?.[1] || "";
   const clipUidFromHref = (href) => String(href || "").match(/^\\/clips\\/([^/?#]+)/)?.[1] || "";

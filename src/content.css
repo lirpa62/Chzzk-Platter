@@ -512,7 +512,7 @@ html.cheese-channel-live-profile-custom
 .cheese-category-video-adult-thumbnail > div[class*="_badge_"],
 .cheese-category-video-adult-thumbnail > span[class*="_time_"],
 .cheese-category-video-adult-thumbnail > .cheese-video-vault-archive {
-  z-index: 3;
+  z-index: 6;
 }
 
 .cheese-search-shell.has-progress-label {
@@ -14287,7 +14287,7 @@ p.cheese-follower-tooltip-target:focus-within .cheese-live-start-tooltip {
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 2;
+  z-index: 6;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14343,7 +14343,7 @@ a[data-cheese-clip-vault]:hover .cheese-clip-vault-star,
   position: absolute;
   right: 8px;
   bottom: 8px;
-  z-index: 2;
+  z-index: 6;
   display: inline-grid;
   place-items: center;
   box-sizing: border-box;
@@ -14430,7 +14430,7 @@ a[data-cheese-clip-vault]:hover .cheese-clip-vault-star,
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 3;
+  z-index: 6;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14451,6 +14451,20 @@ a[data-cheese-clip-vault]:hover .cheese-clip-vault-star,
 a:has(> .cheese-video-vault-archive, > .cheese-clip-vault-star)
   > .cheese-playlist-card-add {
   right: 44px;
+}
+/* 통합검색 동영상 카드: 위쪽 배지('다시보기'·'N회 시청된 라이브')와 겹치지 않게 왼쪽 아래(재생 위치
+   막대 위)에 둔다. 보관함 버튼이 있으면 재생목록 버튼은 그 오른쪽. */
+a[data-cheese-card-buttons="bottom-left"] > .cheese-video-vault-archive,
+a[data-cheese-card-buttons="bottom-left"] > .cheese-playlist-card-add {
+  top: auto;
+  right: auto;
+  bottom: 12px;
+  left: 8px;
+}
+a[data-cheese-card-buttons="bottom-left"]:has(> .cheese-video-vault-archive)
+  > .cheese-playlist-card-add {
+  right: auto;
+  left: 44px;
 }
 a[data-cheese-playlist-card]:hover > .cheese-playlist-card-add,
 .cheese-playlist-card-add:focus-visible,
@@ -16290,9 +16304,11 @@ html.cheese-chzzk-playlist-detached
   color: var(--cheese-platter-content-brand-base, #168f5c);
 }
 
+/* 카드 버튼(보관함·재생목록·클립 별표)은 z-index 6. 치지직 /videos 는 썸네일에 마우스를 올리면 링크 안에
+   미리보기 플레이어 상자(position:absolute; z-index:5)를 끼워 넣어 그보다 낮은 버튼을 덮었다(실측). */
 .cheese-video-vault-del,
 .cheese-video-vault-archive {
-  z-index: 3;
+  z-index: 6;
   display: inline-flex;
   align-items: center;
   justify-content: center;
