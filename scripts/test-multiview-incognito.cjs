@@ -9,7 +9,8 @@
 //   - '시크릿 모드에서 허용' 이 꺼져 있으면 열지 않고 이유를 돌려준다
 //   - 일반·시크릿 멀티뷰는 '같은 구성'·'기존 멀티뷰 바꾸기' 대상으로 섞지 않는다
 //   - 시크릿 멀티뷰가 여는 채팅 창도 시크릿, '고르기 화면 열기' 는 일반 창에 ?incognito=1 을 붙여 연다
-// 함께: 통나무파워는 배경이 일반 창 쿠키로 판정하므로 시크릿 탭 요청은 처리하지 않고 상태도 보내지 않는다
+// 함께: 배경 fetch 는 일반 창 쿠키로 나가므로 일반 계정을 바꾸거나 보여 주는 요청(통나무파워, 내가 만든 클립
+// 목록·삭제, 팔로잉 좋아요 가져오기)은 시크릿 탭에서 받지 않고 통나무파워 상태도 보내지 않는다
 // (실측: 비로그인 시크릿 멀티뷰에 일반 창 계정의 '0 적립 중' 이 떴다).
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -65,11 +66,17 @@ check(/if \(message\.type === "MULTIVIEW_OPEN_SETUP"\) \{\s*if \(!\/\^https:\\\/
   /sender\?\.tab\?\.incognito \? `\$\{MULTIVIEW_SETUP_PAGE\}\?incognito=1` : MULTIVIEW_SETUP_PAGE/.test(background) &&
   /\? openExtensionPageInNormalWindow\(url\)/.test(background),
   "배경은 치지직 탭의 요청만 받아, 시크릿이면 일반 창에 ?incognito=1 로 고르기 화면을 연다");
-const lpBlocked = between(background, "const LP_INCOGNITO_BLOCKED = new Set([", "]);");
+const blocked = between(background, "const INCOGNITO_BLOCKED_MESSAGES = new Set([", "]);");
 check(["START_LOG_POWER_WATCH_REWARD_TRACKING", "GET_LOG_POWER_WATCH_REWARD_STATUS", "CHEESE_LOG_POWER_CLAIMED",
-  "GET_LOG_POWER_BALANCES", "LP_AWAITING", "LP_RECONCILE", "LP_WRITE"].every((type) => lpBlocked.includes(`"${type}"`)) &&
-  /if \(sender\?\.tab\?\.incognito === true && LP_INCOGNITO_BLOCKED\.has\(message\.type\)\) \{\s*sendResponse\?\.\(\{ ok: false, success: false, status: null, reason: "incognito" \}\);\s*return false;/.test(background),
+  "GET_LOG_POWER_BALANCES", "LP_AWAITING", "LP_RECONCILE", "LP_WRITE"].every((type) => blocked.includes(`"${type}"`)) &&
+  /if \(sender\?\.tab\?\.incognito === true && INCOGNITO_BLOCKED_MESSAGES\.has\(message\.type\)\) \{\s*sendResponse\?\.\(\{\s*ok: false,\s*success: false,\s*status: null,\s*reason: "incognito",\s*error: INCOGNITO_BLOCKED_ERROR,\s*\}\);\s*return false;/.test(background),
   "시크릿 탭의 통나무파워 요청(적립 추적·상태·기록·보유 목록)은 처리하지 않는다");
+check(["CHEESE_SEARCH_FETCH_MAKE_CLIPS", "CHEESE_SEARCH_DELETE_MAKE_CLIP", "CHEESE_CLIP_VAULT_IMPORT_FOLLOWING_LIKES",
+  "CHEESE_CLIP_VAULT_RETRY_FOLLOWING_LIKES"].every((type) => blocked.includes(`"${type}"`)),
+  "일반 계정을 바꾸거나 보여 주는 요청(내가 만든 클립 목록·삭제, 팔로잉 좋아요 가져오기)도 시크릿 탭에선 받지 않는다");
+check(!["MULTIVIEW_API", "CHEESE_SEARCH_FETCH_VIDEOS", "CHEESE_SEARCH_FETCH_CLIPS", "PLAYLIST_META",
+  "CHEESE_CLIP_VAULT_GET_METADATA"].some((type) => blocked.includes(`"${type}"`)),
+  "공개 정보 요청(멀티뷰 목록·검색·재생목록·클립 정보)은 막지 않는다");
 check(/if \(t\.id != null && t\.id !== exceptTabId && !t\.incognito\)/.test(between(background, "function lpBroadcast(", "\n}\n")),
   "통나무파워 상태 알림은 시크릿 탭에 보내지 않는다");
 

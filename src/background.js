@@ -3970,7 +3970,7 @@ function lpBroadcast(message, exceptTabId) {
     chrome.tabs.query({ url: "https://chzzk.naver.com/*" }, (tabs) => {
       void chrome.runtime.lastError;
       for (const t of tabs || []) {
-        // 시크릿 탭은 일반 창 계정의 통나무파워 상태를 받지 않는다(LP_INCOGNITO_BLOCKED 참고).
+        // 시크릿 탭은 일반 창 계정의 통나무파워 상태를 받지 않는다(INCOGNITO_BLOCKED_MESSAGES 참고).
         if (t.id != null && t.id !== exceptTabId && !t.incognito) {
           chrome.tabs.sendMessage(t.id, message, () => {
             void chrome.runtime.lastError;
@@ -6997,10 +6997,14 @@ function addWatchTime(entries) {
   return added;
 }
 
-// 통나무파워는 배경이 일반 창 쿠키(일반 창 로그인 계정)로 보유량을 읽어 판정·기록한다. 시크릿 탭의
-// 요청을 받으면 시크릿 탭에 일반 계정의 '적립 중' 이 뜨고(비로그인인데 '0 적립 중'), 시크릿 탭이 보낸
-// 기준값으로 일반 계정 추적을 시작해 기록이 틀어질 수 있다 → 시크릿 탭에서 온 것은 처리하지 않는다.
-const LP_INCOGNITO_BLOCKED = new Set([
+// 배경의 fetch 는 일반 창 쿠키(일반 창 로그인 계정)로 나간다. 시크릿 탭이 부탁하면 시크릿 쪽 로그인과
+// 상관없이 일반 계정으로 동작하므로, 일반 계정을 바꾸거나 일반 계정 것을 보여 주는 요청은 시크릿 탭에서
+// 받지 않는다. 공개 정보(검색·클립·재생목록 정보)는 계정과 무관해 그대로 둔다.
+//   - 통나무파워: 시크릿 탭에 일반 계정의 '적립 중' 이 뜨고(비로그인인데 '0 적립 중'), 시크릿 탭이 보낸
+//     기준값으로 일반 계정 추적을 시작해 기록이 틀어질 수 있었다.
+//   - 스튜디오 '내가 만든 클립' 목록·삭제(탭에서 실패하면 배경이 다시 시도): 일반 계정 클립을 보여 주고 지운다.
+//   - 클립 보관함 '팔로잉 채널 좋아요 가져오기': 일반 계정 팔로잉으로 보관함에 기록한다.
+const INCOGNITO_BLOCKED_MESSAGES = new Set([
   "START_LOG_POWER_WATCH_REWARD_TRACKING",
   "GET_LOG_POWER_WATCH_REWARD_STATUS",
   "CHEESE_LOG_POWER_CLAIMED",
@@ -7008,15 +7012,26 @@ const LP_INCOGNITO_BLOCKED = new Set([
   "LP_AWAITING",
   "LP_RECONCILE",
   "LP_WRITE",
+  "CHEESE_SEARCH_FETCH_MAKE_CLIPS",
+  "CHEESE_SEARCH_DELETE_MAKE_CLIP",
+  "CHEESE_CLIP_VAULT_IMPORT_FOLLOWING_LIKES",
+  "CHEESE_CLIP_VAULT_RETRY_FOLLOWING_LIKES",
 ]);
+const INCOGNITO_BLOCKED_ERROR = "시크릿 창에서는 사용할 수 없는 기능입니다.";
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
   }
 
-  if (sender?.tab?.incognito === true && LP_INCOGNITO_BLOCKED.has(message.type)) {
-    sendResponse?.({ ok: false, success: false, status: null, reason: "incognito" });
+  if (sender?.tab?.incognito === true && INCOGNITO_BLOCKED_MESSAGES.has(message.type)) {
+    sendResponse?.({
+      ok: false,
+      success: false,
+      status: null,
+      reason: "incognito",
+      error: INCOGNITO_BLOCKED_ERROR,
+    });
     return false;
   }
 
