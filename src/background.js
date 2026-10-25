@@ -6775,6 +6775,19 @@ async function openMultiviewHost(setupId, theme, openerTab, reuseTabId = null, i
   return { windowId: tab.windowId, tabId };
 }
 
+// 멀티뷰 탭의 탭 음소거가 바뀌면(브라우저 탭 스피커 아이콘·칸 플레이어 '탭 음소거' 버튼 포함)
+// 시청 화면 볼륨 패널·헤더가 따라가게 알린다.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.mutedInfo) return;
+  readMultiviewHosts().then((hosts) => {
+    if (!hosts[tabId]) return;
+    chrome.tabs.sendMessage(tabId, {
+      type: "MULTIVIEW_HOST_TAB_MUTED",
+      muted: changeInfo.mutedInfo.muted === true,
+    }).catch(() => {});
+  });
+});
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== "complete") return;
   readMultiviewHosts().then((hosts) => {
@@ -6878,6 +6891,15 @@ async function handleMultiviewHostApi(message, sender) {
       }
       await chrome.tabs.create({ url: href });
       return true;
+    }
+    // 탭 음소거(브라우저 탭 소리 출력). 이 멀티뷰 탭 자신만 다룬다.
+    case "tab.mute": {
+      if (args.action === "set") {
+        const tab = await chrome.tabs.update(hostTabId, { muted: args.muted === true });
+        return { muted: tab?.mutedInfo?.muted === true };
+      }
+      const tab = await chrome.tabs.get(hostTabId);
+      return { muted: tab?.mutedInfo?.muted === true };
     }
     // 다른 멀티뷰 탭들이 보고 있는 채널(채널 관리에서 같은 채널을 넣으려 하면 알린다).
     case "others.channels":

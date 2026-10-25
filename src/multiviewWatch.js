@@ -50,6 +50,12 @@
           if (message?.type === "MULTIVIEW_HOST_WINDOW_REMOVED" &&
               Number.isInteger(message.windowId)) listener(message.windowId);
         }),
+        // 탭 음소거(브라우저 탭 소리 출력). 이 멀티뷰 탭 자신만 다룬다.
+        getTabMuted: () => hostApi("tab.mute", { action: "query" }).then((value) => value?.muted === true),
+        setTabMuted: (muted) => hostApi("tab.mute", { action: "set", muted }).then((value) => value?.muted === true),
+        onTabMutedChanged: (listener) => chrome.runtime.onMessage.addListener((message) => {
+          if (message?.type === "MULTIVIEW_HOST_TAB_MUTED") listener(message.muted === true);
+        }),
       }
     : {
         createWindow: (options) => chrome.windows.create(options),
@@ -57,7 +63,21 @@
         focusWindow: (windowId) => chrome.windows.update(windowId, { focused: true }),
         updateTabUrl: (tabId, url) => chrome.tabs.update(tabId, { url }),
         onWindowRemoved: (listener) => chrome.windows.onRemoved.addListener(listener),
+        getTabMuted: () => chrome.tabs.getCurrent().then((tab) => tab?.mutedInfo?.muted === true),
+        setTabMuted: async (muted) => {
+          const tab = await chrome.tabs.getCurrent();
+          const next = await chrome.tabs.update(tab.id, { muted: muted === true });
+          return next?.mutedInfo?.muted === true;
+        },
+        onTabMutedChanged: (listener) => chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+          if (!changeInfo.mutedInfo) return;
+          const tab = await chrome.tabs.getCurrent().catch(() => null);
+          if (tab?.id === tabId) listener(changeInfo.mutedInfo.muted === true);
+        }),
       };
+
+  // 탭 음소거 상태. 볼륨 버튼 값을 처음 그릴 때부터 읽으므로 앞쪽에 둔다(아래 '탭 음소거' 참고).
+  let tabMuted = false;
 
   function isTrustedFrameMessage(event) {
     if (event.origin !== CHZZK_ORIGIN) return false;
@@ -3051,7 +3071,32 @@
     button.dataset.tooltip = label;
   }
 
+  // ── 탭 음소거 ──────────────────────────────────────────────────────────
+  // 브라우저가 이 탭의 소리 출력을 통째로 끈다. 칸별 음소거·음량은 건드리지 않아 풀면 그대로
+  // 돌아오고, 광고·칸 재로드 중 소리도 새지 않는다. 브라우저 탭 스피커 아이콘이나 칸 플레이어의
+  // '탭 음소거' 버튼으로 바뀌어도 따라간다(onTabMutedChanged). 상태 변수 tabMuted 는 위(EXT 아래)에 있다.
+  function applyTabMuted(muted) {
+    if (tabMuted === muted) return;
+    tabMuted = muted;
+    renderVolume();
+  }
+  async function setTabMuted(muted) {
+    try {
+      applyTabMuted(await EXT.setTabMuted(muted));
+    } catch {
+      renderVolume(); // 실패하면 체크 상태를 실제 값으로 되돌린다
+    }
+  }
+  // ⚠ 탭 API 가 없는 환경에서도 시청 화면은 떠야 한다(탭 음소거만 빠진다).
+  try {
+    EXT.onTabMutedChanged(applyTabMuted);
+    Promise.resolve(EXT.getTabMuted()).then(applyTabMuted).catch(() => {});
+  } catch {}
+
   function volumeButtonState() {
+    // 탭 음소거는 브라우저 탭에 남아 새로고침해도 유지된다. 켜 둔 걸 잊으면 칸은 '소리 켬' 인데
+    // 아무 소리도 안 나므로 가장 먼저 알린다.
+    if (tabMuted) return { value: "탭 음소거", muted: true };
     if (state.masterMuted) return { value: "전체 음소거", muted: true };
     if (state.audioFocusMode) {
       if (!state.mainId || effectiveMuted(state.mainId))
@@ -3308,6 +3353,10 @@
 
     panel.innerHTML =
       notice +
+      `<label class="mv-vol-focus mv-vol-tab-mute">` +
+      `<input type="checkbox" id="mvVolTabMute"${tabMuted ? " checked" : ""}>` +
+      `<span>탭 음소거</span></label>` +
+      `<p class="mv-vol-focus-note">브라우저 탭 소리를 통째로 끕니다. 칸 설정은 그대로입니다.</p>` +
       `<div class="mv-vol-row is-master">` +
       `<span class="mv-vol-name">전체 볼륨</span>` +
       `<button type="button" class="mv-vol-mute mv-custom-tooltip" data-mv-vol-master-mute` +
@@ -9260,6 +9309,10 @@
     const syncPick = event.target?.closest?.("[data-mv-sync-pick]");
     if (syncPick) {
       setSyncSelected(syncPick.dataset.mvSyncPick, syncPick.checked === true);
+      return;
+    }
+    if (event.target?.id === "mvVolTabMute") {
+      void setTabMuted(event.target.checked === true);
       return;
     }
     if (event.target?.id !== "mvVolFocus") return;
