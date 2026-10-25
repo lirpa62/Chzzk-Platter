@@ -38364,9 +38364,12 @@ html.cheese-sidebar-resizing div#layout-body {
         hiddenCards.add(card);
       }
     }
+    // ⚠ 같이보기 칩('같이보기' → /watchparty/all, 'WORLDS2026' 같은 같이보기 태그 → /watchparty/{번호})은
+    //   tags= 링크가 아니고 안쪽 span 도 _tag_ 가 아니라 _highlight_ 라 빠졌다(실측). 드롭스 칩만 링크가
+    //   /category/…/lives#drops 라 우연히 걸렸다. 값은 안쪽 _category_ span 글자로 읽는다.
     const filterNodes = active.length
       ? scope.querySelectorAll(
-          'a[href*="tags="], a[href*="/category/"][href*="/lives"], span[class*="_tag_"]',
+          'a[href*="tags="], a[href*="/category/"][href*="/lives"], a[href*="/watchparty/"], span[class*="_tag_"]',
         )
       : [];
     for (const node of filterNodes) {
