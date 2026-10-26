@@ -40622,7 +40622,16 @@ html.cheese-sidebar-resizing div#layout-body {
             <span>강조색</span>
             <input type="text" data-cf-modal-color value="${escapeAttribute(sanitizeCustomFollowGroupColor(state.color))}" autocomplete="off" spellcheck="false" readonly aria-label="그룹 강조색">
           </label>
-        </div>
+          <div class="cheese-cf-group-modal-icon-field">
+            <span>아이콘</span>
+            <button type="button" class="cheese-cf-group-modal-icon-trigger" data-cf-modal-icon-toggle aria-haspopup="true" aria-expanded="${String(state.iconPickerOpen === true)}" aria-controls="cheese-cf-group-modal-icon-popover" aria-label="그룹 아이콘 고르기">
+              <span class="cheese-cf-group-modal-icon-current" data-cf-modal-icon-current>${customFollowLucideIcon(state.icon, 18)}</span>
+              ${customFollowLucideIcon("chevron-down", 14)}
+            </button>
+          </div>
+          <!-- 아이콘 고르기(기본 27개 + 내 아이콘)는 팝오버로 접는다. 펼쳐 두면 채널 목록이 창 맨 아래로 밀려
+               작게 보였다. 아이콘을 고르면 닫고, 내 아이콘 추가·삭제로 다시 그려도 열린 상태를 유지한다. -->
+          <div class="cheese-cf-group-modal-icon-popover" id="cheese-cf-group-modal-icon-popover" data-cf-modal-icon-popover${state.iconPickerOpen === true ? "" : " hidden"}>
         <fieldset class="cheese-cf-group-modal-icons">
           <legend>아이콘</legend>
           ${[...CUSTOM_FOLLOW_GROUP_ICONS]
@@ -40635,6 +40644,8 @@ html.cheese-sidebar-resizing div#layout-body {
             .join("")}
         </fieldset>
         ${renderCustomFollowGroupCustomIconEditor(state)}
+          </div>
+        </div>
         <div class="cheese-cf-group-modal-sources">
           <div class="cheese-cf-group-modal-sources-head">
             <span>자동 그룹에서 채널 추가</span>
@@ -41306,6 +41317,18 @@ html.cheese-sidebar-resizing div#layout-body {
     renderCustomFollowGroupModal();
   }
 
+  // 그룹 편집 창의 아이콘 팝오버 열고 닫기. 다시 그리지 않고 표시만 바꾼다(상태는 다시 그릴 때 이어진다).
+  function setCustomFollowGroupIconPickerOpen(overlay, open) {
+    const state = customFollowGroupModalState;
+    if (!state) return;
+    state.iconPickerOpen = open === true;
+    const popover = overlay.querySelector("[data-cf-modal-icon-popover]");
+    if (popover) popover.hidden = !state.iconPickerOpen;
+    overlay
+      .querySelector("[data-cf-modal-icon-toggle]")
+      ?.setAttribute("aria-expanded", String(state.iconPickerOpen));
+  }
+
   function openCustomFollowGroupModal(trigger, initialGroup = null) {
     const existing = document.getElementById(CUSTOM_FOLLOW_GROUP_MODAL_ID);
     if (existing) {
@@ -41328,6 +41351,13 @@ html.cheese-sidebar-resizing div#layout-body {
       if (event.target === overlay) {
         closeCustomFollowGroupModal();
         return;
+      }
+      // 아이콘 팝오버 바깥을 누르면 닫는다(팝오버·여는 버튼 안의 클릭은 아래에서 처리).
+      if (
+        customFollowGroupModalState?.iconPickerOpen &&
+        !event.target.closest?.("[data-cf-modal-icon-popover], [data-cf-modal-icon-toggle]")
+      ) {
+        setCustomFollowGroupIconPickerOpen(overlay, false);
       }
       const button = event.target.closest?.("button");
       if (!button) return;
@@ -41464,6 +41494,10 @@ html.cheese-sidebar-resizing div#layout-body {
         } catch {}
         ensureCustomFollowList();
         renderCustomFollowGroupModal();
+      } else if (button.matches("[data-cf-modal-icon-toggle]")) {
+        const state = customFollowGroupModalState;
+        if (!state || state.view !== "editor") return;
+        setCustomFollowGroupIconPickerOpen(overlay, state.iconPickerOpen !== true);
       } else if (button.matches("[data-cf-modal-icon]")) {
         const icon = button.dataset.cfModalIcon;
         if (!isCustomFollowGroupIcon(icon)) return;
@@ -41473,6 +41507,9 @@ html.cheese-sidebar-resizing div#layout-body {
           item.classList.toggle("is-active", active);
           item.setAttribute("aria-pressed", String(active));
         });
+        const current = overlay.querySelector("[data-cf-modal-icon-current]");
+        if (current) current.innerHTML = customFollowLucideIcon(icon, 18);
+        setCustomFollowGroupIconPickerOpen(overlay, false);
       } else if (button.matches("[data-cf-modal-source]")) {
         const source = getCustomFollowAutomaticGroupSources().find(
           (group) => group.key === button.dataset.cfModalSource,
@@ -41684,6 +41721,12 @@ html.cheese-sidebar-resizing div#layout-body {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
+        // 아이콘 팝오버가 열려 있으면 그것만 닫고 여는 버튼으로 돌아간다.
+        if (customFollowGroupModalState?.iconPickerOpen) {
+          setCustomFollowGroupIconPickerOpen(overlay, false);
+          overlay.querySelector("[data-cf-modal-icon-toggle]")?.focus();
+          return;
+        }
         if (customFollowGroupModalState?.view === "editor") {
           try {
             window.Coloris?.close();
