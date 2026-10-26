@@ -6510,27 +6510,6 @@
               </li>
               <li class="settings-item">
                 <label>
-                  <span class="settings-item-name"
-                    >전용 팔로잉 목록 자동 펼치기</span
-                  >
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="전용 목록을 처음부터 펼쳐서 표시합니다."
-                    >전용 목록을 처음부터 모든 채널까지 펼쳐서 표시합니다.
-                    목록의 '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌
-                    상태를 유지합니다</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-feature="sbFollowCustomAutoExpand"
-                  />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
-              <li class="settings-item">
-                <label>
                   <span class="settings-item-name">오프라인 채널 숨김</span>
                   <span class="settings-item-desc"
                     >즐겨찾기를 제외한 일반 목록에서 방송 중이 아닌 채널을
@@ -6661,22 +6640,6 @@
                   />
                   <small>개</small>
                 </span>
-              </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">└ 즐겨찾기 자동 펼치기</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="즐겨찾기를 처음부터 펼쳐서 표시합니다."
-                    >즐겨찾기를 처음부터 모든 채널까지 펼쳐서 표시합니다.
-                    '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
-                    유지합니다.</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input type="checkbox" data-feature="sbFollowFavAutoExpand" />
-                  <i aria-hidden="true"></i>
-                </label>
               </li>
               <li class="settings-item">
                 <label>
@@ -7134,25 +7097,6 @@
                   <small>개</small>
                 </span>
               </li>
-              <li class="settings-item">
-                <label>
-                  <span class="settings-item-name">└ 그룹 자동 펼치기</span>
-                  <span
-                    class="settings-item-desc"
-                    data-settings-summary="그룹 영역을 처음부터 펼쳐서 표시합니다."
-                    >그룹 영역을 처음부터 모든 그룹까지 펼쳐서 표시합니다.
-                    '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
-                    유지합니다.</span
-                  >
-                </label>
-                <label class="settings-switch">
-                  <input
-                    type="checkbox"
-                    data-feature="sbFollowGroupAutoExpand"
-                  />
-                  <i aria-hidden="true"></i>
-                </label>
-              </li>
               <li
                 class="settings-item"
                 data-new-feature="following-group-compact-header"
@@ -7474,6 +7418,73 @@
                   />
                   <small>개</small>
                 </span>
+              </li>
+            </ul>
+            <h2 class="settings-group-title" style="margin-top: 14px">
+              자동 펼치기
+            </h2>
+            <ul class="settings-list">
+              <li class="settings-item">
+                <label>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="전용 팔로잉 목록 자동 펼치기"
+                    >팔로잉 목록 자동 펼치기</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="팔로잉 목록을 처음부터 펼쳐서 표시합니다. 즐겨찾기·그룹은 바로 아래 옵션으로 따로 정합니다."
+                    >전용 목록의 팔로잉 채널을 처음부터 모든 채널까지 펼쳐서
+                    표시합니다. 목록의 '접기'를 누르면 사이드바를 다시 펼칠
+                    때까지 접힌 상태를 유지합니다. 즐겨찾기·그룹은 바로 아래
+                    '즐겨찾기 자동 펼치기'·'그룹 자동 펼치기'로 따로
+                    정합니다</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowCustomAutoExpand"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">즐겨찾기 자동 펼치기</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="즐겨찾기를 처음부터 펼쳐서 표시합니다."
+                    >즐겨찾기를 처음부터 모든 채널까지 펼쳐서 표시합니다.
+                    '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
+                    유지합니다. '즐겨찾기' 묶음의 '즐겨찾기 사용'이 꺼져 있으면
+                    쓸 수 없습니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input type="checkbox" data-feature="sbFollowFavAutoExpand" />
+                  <i aria-hidden="true"></i>
+                </label>
+              </li>
+              <li class="settings-item">
+                <label>
+                  <span class="settings-item-name">그룹 자동 펼치기</span>
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="그룹 영역을 처음부터 펼쳐서 표시합니다."
+                    >그룹 영역을 처음부터 모든 그룹까지 펼쳐서 표시합니다.
+                    '접기'를 누르면 사이드바를 다시 펼칠 때까지 접힌 상태를
+                    유지합니다. '그룹' 묶음의 '그룹 사용'이 꺼져 있으면 쓸 수
+                    없습니다.</span
+                  >
+                </label>
+                <label class="settings-switch">
+                  <input
+                    type="checkbox"
+                    data-feature="sbFollowGroupAutoExpand"
+                  />
+                  <i aria-hidden="true"></i>
+                </label>
               </li>
             </ul>
             <h2 class="settings-group-title" style="margin-top: 14px">

@@ -94,9 +94,10 @@
     // ⚠ 자동 펼치기도 즐겨찾기 사용의 하위다. 예전에는 두 개수 옵션 '사이에'
     //   끼어 있어 화면상으로는 자동 펼치기의 하위처럼 보였다(잠기지 않는다는
     //   문제의 원인). 개수는 자동 펼치기를 꺼야 비로소 쓰이므로 그 하위가 아니다.
-    ['[data-feature="sbFollowFavEnabled"]', '[data-cf-fav-initial], [data-cf-fav-more], [data-feature="sbFollowFavAutoExpand"]'],
+    // 즐겨찾기·그룹 자동 펼치기는 '팔로잉 목록 자동 펼치기' 옆으로 옮겨 하위 옵션이 아니다(잠금은 settings.js).
+    ['[data-feature="sbFollowFavEnabled"]', '[data-cf-fav-initial], [data-cf-fav-more]'],
     // 즐겨찾기와 같은 구성: 사용 → (개수 둘, 자동 펼치기).
-    ['[data-feature="sbFollowGroupEnabled"]', '[data-cf-group-initial], [data-cf-group-more], [data-feature="sbFollowGroupAutoExpand"]'],
+    ['[data-feature="sbFollowGroupEnabled"]', '[data-cf-group-initial], [data-cf-group-more]'],
     ['[data-feature="sbFollowGroupTags"]', "[data-cf-group-tag-hide-offline]"],
     ["[data-affinity-on]", "[data-affinity-hide-offline], [data-affinity-initial], [data-affinity-more], [data-settings-affinity-weights]"],
     ["[data-follow-preview-card-layout]", "#followPreviewBadgePos"],

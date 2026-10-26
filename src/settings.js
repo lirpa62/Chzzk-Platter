@@ -1552,6 +1552,7 @@
     // 전제 조건 잠금은 이 함수보다 뒤에서 정의된다(저장값이 채워진 지금 맞춘다).
     syncPrereqLocks?.();
     reflectLogPowerTimerAutoNote();
+    reflectFollowAutoExpandLocks();
     if (ok) featureFlagsLoaded = true;
   }
 
@@ -14971,6 +14972,28 @@
   );
   // 저장값은 숨김 플래그지만, 이 세 체크박스는 체크=표시다.
   // 각 하위 옵션은 자기 기능의 표시를 껐을 때만 잠근다.
+  // '즐겨찾기 자동 펼치기'·'그룹 자동 펼치기'는 '팔로잉 목록 자동 펼치기' 옆에 두어 하위 옵션이 아니지만,
+  // 즐겨찾기·그룹을 쓰지 않으면 의미가 없어 잠근다(하위 옵션 잠금과 같은 모양: is-locked + disabled).
+  // ⚠ load() 가 부르므로 캡처한 변수 대신 DOM 에서 찾는다(TDZ).
+  function reflectFollowAutoExpandLocks() {
+    for (const [parentKey, childKey] of [
+      ["sbFollowFavEnabled", "sbFollowFavAutoExpand"],
+      ["sbFollowGroupEnabled", "sbFollowGroupAutoExpand"],
+    ]) {
+      const parent = document.querySelector(`[data-feature="${parentKey}"]`);
+      const child = document.querySelector(`[data-feature="${childKey}"]`);
+      if (!parent || !child) continue;
+      const locked = parent.checked !== true;
+      child.disabled = locked;
+      child.closest(".settings-item")?.classList.toggle("is-locked", locked);
+    }
+  }
+  ["sbFollowFavEnabled", "sbFollowGroupEnabled"].forEach((key) => {
+    document
+      .querySelector(`[data-feature="${key}"]`)
+      ?.addEventListener("change", reflectFollowAutoExpandLocks);
+  });
+
   function reflectLoungeRefreshAvailability() {
     // ⚠ 기능 플래그 로더(load())도 이 함수를 부른다. 그 시점에 아래쪽 const 들이 아직
     // 초기화 전일 수 있으므로(TDZ) 캡처된 변수를 쓰지 않고 DOM 에서 직접 찾는다.
