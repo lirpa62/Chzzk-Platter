@@ -40769,6 +40769,7 @@ html.cheese-sidebar-resizing div#layout-body {
   }
 
   function editCustomFollowGroupFromModal(group = null) {
+    refreshCustomFollowListForGroupModal();
     clearTimeout(customFollowGroupTagSearchTimer);
     customFollowGroupTagSearchTimer = 0;
     customFollowGroupTagSearchToken += 1;
@@ -41317,6 +41318,7 @@ html.cheese-sidebar-resizing div#layout-body {
     }
     customFollowGroupModalRestoreFocus = trigger || document.activeElement;
     customFollowGroupModalState = { view: "list", message: "" };
+    refreshCustomFollowListForGroupModal();
     const overlay = document.createElement("div");
     overlay.id = CUSTOM_FOLLOW_GROUP_MODAL_ID;
     overlay.className = "cheese-cf-group-modal";
@@ -47808,6 +47810,18 @@ html.cheese-sidebar-resizing div#layout-body {
     return customFollowSubscriptionPromise;
   }
 
+  // 마지막으로 전체 팔로잉을 다 받은 시각. 그룹 창을 열 때 다시 받을지 판단한다.
+  let customFollowFullRefreshAt = 0;
+  const CUSTOM_FOLLOW_MODAL_REFRESH_GAP_MS = 10000;
+  // 그룹 창(추가·수정)은 이미 받아 둔 팔로잉 목록에서 채널을 고른다. 치지직은 SPA 라 페이지를 옮기며 팔로우한
+  // 채널은 다음 자동 새로고침(꺼져 있으면 F5) 전까지 목록에 없어 검색되지 않았다 → 창을 열 때 한 번 다시 받는다.
+  // 받으면 commitCustomFollowItems 가 열린 그룹 창의 채널 목록도 다시 그린다.
+  function refreshCustomFollowListForGroupModal() {
+    if (customFollowLoading) return;
+    if (Date.now() - customFollowFullRefreshAt < CUSTOM_FOLLOW_MODAL_REFRESH_GAP_MS) return;
+    if (canRefreshCustomFollowList()) void refreshCustomFollowList();
+  }
+
   function canRefreshCustomFollowList() {
     return (
       IS_TOP_FRAME &&
@@ -47950,6 +47964,7 @@ html.cheese-sidebar-resizing div#layout-body {
       const nextItems = mergeCustomFollowItems(all, headerFollowLiveItems);
       // 기본 목록을 먼저 확정해 날짜 정렬용 개별 상태 요청이 화면 표시를 막지 않게 한다.
       commitCustomFollowItems(nextItems);
+      customFollowFullRefreshAt = Date.now();
       const needOpenDate =
         customFollowSort === "recent" || customFollowSort === "oldest";
       const needTags =
