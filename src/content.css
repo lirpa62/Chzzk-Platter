@@ -3911,7 +3911,9 @@ html[data-cheese-cf-group-style="box"] #cheese-custom-follow .cheese-cf-group {
   border-radius: 10px;
   background: color-mix(in srgb, var(--cheese-cf-group-color) 6%, transparent);
 }
-html[data-cheese-cf-group-style="divider"] #cheese-custom-follow .cheese-cf-group {
+html[data-cheese-cf-group-style="divider"]
+  #cheese-custom-follow
+  .cheese-cf-group {
   border-left: 0;
   border-top: 1px solid
     color-mix(in srgb, var(--cheese-cf-group-color) 60%, transparent);
@@ -6730,7 +6732,9 @@ html[data-cheese-cards-per-row]
    ⚠ :nth-last-child 로 고르지 않는다 — 카드가 붙을 때마다 모든 카드 스타일을 다시 계산한다. */
 html[data-cheese-cards-per-row]
   ul[data-cheese-cards-list]
-  > li[class*="_item_"]:not(.cheese-live-tag-filter-hidden):not([data-cheese-card-tail]) {
+  > li[class*="_item_"]:not(.cheese-live-tag-filter-hidden):not(
+    [data-cheese-card-tail]
+  ) {
   content-visibility: auto;
   contain-intrinsic-block-size: auto 260px;
 }
@@ -6780,7 +6784,9 @@ html[data-cheese-cards-per-row] [data-cheese-sentinel-lead] {
   font-size: 13px;
   cursor: pointer;
 }
-.cheese-following-group-bar button > span:not(.cheese-following-group-bar-icon) {
+.cheese-following-group-bar
+  button
+  > span:not(.cheese-following-group-bar-icon) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9446,7 +9452,9 @@ html.cheese-chat-fold-restoring-instant:not(.cheese-chat-stacked):not(
 [role="alertdialog"] [data-cheese-profile-fold] > * {
   order: 0;
 }
-[role="alertdialog"] [data-cheese-profile-fold] > .cheese-chat-profile-fold-toggle {
+[role="alertdialog"]
+  [data-cheese-profile-fold]
+  > .cheese-chat-profile-fold-toggle {
   order: 1;
   display: flex !important;
   align-items: center;
@@ -9462,14 +9470,17 @@ html.cheese-chat-fold-restoring-instant:not(.cheese-chat-stacked):not(
 [role="alertdialog"] [data-cheese-profile-fold] > [data-cheese-profile-low] {
   order: 2;
 }
-[role="alertdialog"] [data-cheese-profile-fold="folded"] > [data-cheese-profile-low] {
+[role="alertdialog"]
+  [data-cheese-profile-fold="folded"]
+  > [data-cheese-profile-low] {
   display: none !important;
 }
 .cheese-chat-profile-fold-chevron {
   flex: none;
   transition: transform 0.15s ease;
 }
-.cheese-chat-profile-fold-toggle[aria-expanded="true"] .cheese-chat-profile-fold-chevron {
+.cheese-chat-profile-fold-toggle[aria-expanded="true"]
+  .cheese-chat-profile-fold-chevron {
   transform: rotate(180deg);
 }
 
@@ -9477,7 +9488,8 @@ html.cheese-chat-fold-restoring-instant:not(.cheese-chat-stacked):not(
    바꿔 채팅창 바깥에 둔다. 위쪽 조상의 transform 때문에 fixed 기준이 화면이 아닐 수 있어
    좌표는 content.js(placeChatProfileSide)가 기준 상자만큼 보정한 값이다.
    왼쪽 배치 규칙(left:8px !important)보다 구체적이어야 한다. */
-aside#aside-chatting [role="alertdialog"][aria-modal][data-cheese-profile-side] {
+aside#aside-chatting
+  [role="alertdialog"][aria-modal][data-cheese-profile-side] {
   position: fixed !important;
   left: var(--cheese-chat-profile-side-left, 8px) !important;
   top: var(--cheese-chat-profile-side-top, 8px) !important;
@@ -15035,7 +15047,9 @@ a[data-cheese-playlist-card]:hover > .cheese-playlist-card-add,
   z-index: 1;
   inset: 0;
   border-radius: inherit;
-  background: rgba(0, 0, 0, 0.2) url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png) 50% / contain no-repeat;
+  background: rgba(0, 0, 0, 0.2)
+    url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png)
+    50% / contain no-repeat;
   content: "";
   pointer-events: none;
 }
@@ -15543,7 +15557,9 @@ html.cheese-playlist-panel-dragging * {
   z-index: 1;
   inset: 0;
   border-radius: inherit;
-  background: rgba(0, 0, 0, 0.2) url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png) 50% / contain no-repeat;
+  background: rgba(0, 0, 0, 0.2)
+    url(https://ssl.pstatic.net/static/nng/glive/image/age_restriction_small_shadow.png)
+    50% / contain no-repeat;
   pointer-events: none;
 }
 .cheese-playlist-library-thumb span {
