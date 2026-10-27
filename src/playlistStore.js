@@ -2,7 +2,8 @@
 //
 // 저장 키 cheesePlaylists = { v: 1, lists: [{ id, name, items, createdAt, updatedAt }] }
 // 항목 = { id, type: "video"|"clip", videoNo|clipUID, start, title, thumb, channelId,
-//          channelName, duration, adult, addedAt }
+//          channelName, duration, adult, addedAt, verifiedMark?, verifiedMarkType? }
+//   - verifiedMark 는 채널 인증 마크(파트너 등)를 확인했을 때만 둔다(없으면 '아직 모름' → 화면이 채널 정보로 채운다).
 //   - start 는 다시보기만(초). 치지직 공유 주소의 ?currentTime= 과 같은 뜻이다.
 //   - 같은 영상을 다른 시작 시간으로 여러 번 담을 수 있게 항목마다 id 를 따로 준다.
 // 계정 구분은 하지 않는다(나누는 건 내보내기·불러오기로 한다).
@@ -96,6 +97,8 @@
     // 없으면 키를 두지 않는다(예전 항목·파일과 모양이 같게).
     if (views(raw.views)) base.views = views(raw.views);
     if (dateMs(raw.date)) base.date = dateMs(raw.date);
+    if (typeof raw.verifiedMark === "boolean") base.verifiedMark = raw.verifiedMark;
+    if (typeof raw.verifiedMarkType === "string" && raw.verifiedMarkType) base.verifiedMarkType = raw.verifiedMarkType.slice(0, 40);
     if (type === "video") {
       const videoNo = String(raw.videoNo ?? "").trim();
       if (!VIDEO_NO_RE.test(videoNo)) return null;
@@ -253,10 +256,30 @@
           adult: meta.adult === true || item.adult,
           views: views(meta.views) || item.views,
           date: dateMs(meta.date) || item.date,
+          verifiedMark: typeof meta.verifiedMark === "boolean" ? meta.verifiedMark : item.verifiedMark,
+          verifiedMarkType: meta.verifiedMarkType || item.verifiedMarkType,
         });
         if (JSON.stringify(next) === JSON.stringify(item)) return item;
         touched = true;
         return next;
+      });
+      if (!touched) return list;
+      changed = true;
+      return { ...list, items };
+    });
+    return { state: changed ? { ...state, lists } : state, changed };
+  }
+
+  // 채널 인증 마크를 아직 모르는 항목(예전에 담은 것)에 채널 정보로 채운다. 그 채널 항목 전부에.
+  function applyChannelMark(state, channelId, mark) {
+    if (!HASH_RE.test(String(channelId || "")) || typeof mark?.verifiedMark !== "boolean") return { state, changed: false };
+    let changed = false;
+    const lists = state.lists.map((list) => {
+      let touched = false;
+      const items = list.items.map((item) => {
+        if (item.channelId !== channelId || typeof item.verifiedMark === "boolean") return item;
+        touched = true;
+        return normalizeItem({ ...item, verifiedMark: mark.verifiedMark, verifiedMarkType: mark.verifiedMarkType });
       });
       if (!touched) return list;
       changed = true;
@@ -326,6 +349,15 @@
   function parseClock(value) {
     const raw = String(value ?? "").trim();
     if (!raw) return 0;
+    // 치지직 다시보기 주소를 붙여 넣으면 그 위치(?currentTime=, ?t=)
+    const fromUrl = raw.match(/[?&](?:currentTime|t)=(\d+)(?:&|#|$)/);
+    if (fromUrl && /^https?:\/\//i.test(raw)) return seconds(fromUrl[1]);
+    // 1h2m3s · 1h 30m · 90s
+    const latin = raw.match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/i);
+    if (latin && latin.slice(1).some(Boolean)) {
+      const [h, m, s] = latin.slice(1).map((n) => Number(n || 0));
+      return seconds(h * 3600 + m * 60 + s);
+    }
     if (/^\d+$/.test(raw)) return seconds(raw);
     const colon = raw.match(/^(\d+):(\d{1,2})(?::(\d{1,2}))?$/);
     if (colon) {
@@ -514,6 +546,7 @@
     moveItem,
     setStart,
     applyMeta,
+    applyChannelMark,
     listContains,
     totalDuration,
     parseChzzkUrl,

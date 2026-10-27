@@ -64,7 +64,7 @@
           </div>
           <ol class="pl-items" id="plItems" aria-label="항목"></ol>
           <p class="pl-empty" id="plNoItems" hidden>비어 있습니다. 오른쪽에서 다시보기·클립을 추가하거나, 치지직에서 재생목록 버튼으로 담으세요.</p>
-          <p class="pl-hint">손잡이를 끌거나 Alt+↑/↓ 로 순서를 바꿉니다. 시작 시간은 '1:23:45'처럼 적습니다.</p>
+          <p class="pl-hint">손잡이를 끌거나 Alt+↑/↓ 로 순서를 바꿉니다. 시작 시간은 '1:23:45'·'1h2m'처럼 적거나 칸에서 ↑↓·휠로 커서 자리(시·분·초)를 조절합니다(Shift 10씩, Esc 되돌리기).</p>
         </section>
 
         <!-- 항목 추가 -->
@@ -125,7 +125,6 @@
             <ul class="pl-cards" id="plVideoResults" aria-label="다시보기 결과(누르면 담기/빼기)"></ul>
             <div class="pl-row-end">
               <span class="pl-status" id="plVideoStatus" role="status"></span>
-              <button type="button" class="pl-button" id="plVideoMore" hidden>더 보기</button>
             </div>
           </div>
           <div class="pl-tab-body" data-add-body="clip" hidden>
@@ -136,7 +135,7 @@
               </div>
             </div>
             <form class="pl-search" id="plClipChannelSearch" hidden>
-              <input type="search" maxlength="60" placeholder="채널 이름" aria-label="채널 이름" />
+              <input type="search" maxlength="60" placeholder="채널 이름" aria-label="채널 이름" autocomplete="off" />
               <button type="submit" class="pl-button">찾기</button>
             </form>
             <ul class="pl-channels" id="plClipChannels" aria-label="채널" hidden></ul>
@@ -150,7 +149,6 @@
             <ul class="pl-cards is-clip-grid" id="plClipResults" aria-label="클립 결과(누르면 담기/빼기)"></ul>
             <div class="pl-row-end">
               <span class="pl-status" id="plClipStatus" role="status"></span>
-              <button type="button" class="pl-button" id="plClipMore" hidden>더 보기</button>
             </div>
           </div>
         </section>

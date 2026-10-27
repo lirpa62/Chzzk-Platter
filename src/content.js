@@ -56770,6 +56770,8 @@ html.cheese-sidebar-resizing div#layout-body {
         channelName: meta.channelName,
         duration: Number(meta.durationSeconds) || 0,
         adult: meta.adult === true,
+        // 카드에서 읽은 인증 마크는 있을 때만 믿는다(없으면 재생목록 페이지가 채널 정보로 채운다).
+        ...(meta.verifiedMark === true ? CheeseVerifiedMark.fields(meta) : {}),
       };
     }
     const uid = clipUidFromHref(href);

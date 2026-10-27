@@ -179,6 +179,29 @@ const check = (condition, label) => {
   await S.update((current) => S.addItems(current, created.list.id, [{ type: "clip", clipUID: "clipBBBB" }]), store);
   check(store.data[S.KEY].lists.length === 2 && store.data[S.KEY].lists[0].items.length === 1, "다른 탭이 쓴 목록을 덮지 않는다");
 
+  // ── 채널 인증 마크·시작 시간 표기 더 ──
+  {
+    const ch = "a".repeat(32);
+    const st = S.normalize({ v: 1, lists: [{ id: "l1", name: "x", items: [
+      { type: "video", videoNo: "1", channelId: ch },
+      { type: "video", videoNo: "2", channelId: ch, verifiedMark: false },
+      { type: "clip", clipUID: "abcDEF123", channelId: ch, verifiedMark: true, verifiedMarkType: "T".repeat(60) },
+    ] }] });
+    const items = st.lists[0].items;
+    check(!("verifiedMark" in items[0]) && items[1].verifiedMark === false && items[2].verifiedMark === true && items[2].verifiedMarkType.length === 40,
+      "인증 마크는 확인했을 때만 저장(모르면 키 없음), 타입은 있을 때만·길이 제한");
+    const filled = S.applyChannelMark(st, ch, { verifiedMark: true, verifiedMarkType: "X" });
+    check(filled.changed && filled.state.lists[0].items[0].verifiedMark === true && filled.state.lists[0].items[0].verifiedMarkType === "X" &&
+      filled.state.lists[0].items[1].verifiedMark === false && !S.applyChannelMark(filled.state, ch, { verifiedMark: true }).changed,
+      "채널 정보로 채우기: 모르는 항목에만(이미 아는 값은 그대로), 다시 채울 것이 없으면 바뀌지 않음");
+    const meta = S.applyMeta(st, S.itemKey(items[0]), { title: "t", verifiedMark: true });
+    check(meta.state.lists[0].items[0].verifiedMark === true, "배경 정보(PLAYLIST_META)의 인증 마크도 받는다");
+    check(S.parseClock("1h2m3s") === 3723 && S.parseClock("1H 30M") === 5400 && S.parseClock("90s") === 90 &&
+      S.parseClock("https://chzzk.naver.com/video/1?currentTime=754") === 754 && S.parseClock("https://chzzk.naver.com/video/1?t=12&x=1") === 12 &&
+      S.parseClock("currentTime=754") === null && S.parseClock("1h2x") === null,
+      "시작 시간: 1h2m3s·치지직 주소(?currentTime=·?t=)도 읽는다");
+  }
+
   console.log(checks.map((label) => `  PASS ${label}`).join("\n"));
   console.log("전부 통과");
 })().catch((error) => {

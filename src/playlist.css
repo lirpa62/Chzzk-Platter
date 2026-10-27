@@ -487,15 +487,48 @@ body {
   font-size: 12px;
   gap: 6px;
 }
+/* 종류 배지: 썸네일 왼쪽 위(멀티뷰 카드의 다시보기·업로드 배지와 같은 자리·보라 계열). */
 .pl-badge {
-  border: 1px solid var(--popup-border);
-  border-radius: 999px;
-  font-size: 11px;
-  padding: 0 6px;
+  background: #5741b8;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  left: 4px;
+  line-height: 1.4;
+  padding: 1px 4px;
+  pointer-events: none;
+  position: absolute;
+  top: 4px;
+  z-index: 5; /* 19세 표시 위 */
 }
 .pl-badge.is-clip {
-  border-color: var(--popup-border-violet, var(--popup-border));
-  color: var(--popup-text-violet, inherit);
+  background: #8a3fc4;
+}
+.pl-sr-only {
+  clip: rect(0 0 0 0);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+/* 채널 이름 + 인증 마크: 이름만 말줄임하고 마크는 남긴다. */
+.pl-item-channel,
+.pl-channel-name,
+.pl-channel-head strong {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+  min-width: 0;
+}
+.pl-item-channel-name,
+.pl-channel-name > span,
+.pl-channel-head strong > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pl-start {
   align-items: center;
@@ -511,7 +544,11 @@ body {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   padding: 2px 6px;
-  width: 70px;
+  width: 84px;
+}
+.pl-start input:focus {
+  border-color: var(--popup-brand, #00ffa3);
+  outline: none;
 }
 .pl-start input::placeholder {
   color: var(--popup-muted);

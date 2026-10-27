@@ -33,6 +33,77 @@
 
   const currentList = () => S.findList(state.data, state.listId);
 
+  // ── 시작 시간 입력칸 ── ↑↓·휠로 커서가 있는 자리(시·분·초)를 1씩(Shift 10씩) 올리고 내린다.
+  // 1:23:45 · 83:45 · 5025(초) · 1h2m3s · 1시간 2분 · 치지직 주소(?currentTime=)를 모두 읽는다. Esc 는 되돌린다.
+  const CLOCK_INPUT_TIP = "↑↓·휠: 커서 자리(시·분·초)를 1씩, Shift 는 10씩 · 1:23:45, 83:45, 1h2m, 1시간 2분, 치지직 주소도 됩니다 · Esc 되돌리기";
+  // "1:23:45" 에서 커서가 1 → 3600, 23 → 60, 45 → 1. 콜론이 없으면(초·빈칸) 1.
+  function clockUnitAt(value, caret) {
+    const parts = String(value).split(":");
+    if (parts.length < 2 || parts.length > 3) return 1;
+    let end = 0;
+    for (let i = 0; i < parts.length; i += 1) {
+      end += parts[i].length;
+      if (caret <= end) return 60 ** (parts.length - 1 - i);
+      end += 1;
+    }
+    return 1;
+  }
+  function clockMax(input) {
+    const max = Number(input.dataset.clockMax);
+    return input.dataset.clockMax && Number.isFinite(max) ? max : Infinity;
+  }
+  function stepClockInput(input, direction, big) {
+    const current = S.parseClock(input.value);
+    if (current == null) return false;
+    const unit = clockUnitAt(input.value.trim(), input.selectionStart ?? input.value.length);
+    const next = Math.min(clockMax(input), Math.max(0, current + direction * unit * (big ? 10 : 1)));
+    const text = S.formatClock(next);
+    input.value = text;
+    // 같은 단위 자리 끝에 커서를 둔다(분을 올리다 1시간을 넘겨도 분 자리 그대로).
+    const parts = text.split(":");
+    const index = Math.max(0, parts.length - 1 - Math.round(Math.log(unit) / Math.log(60)));
+    const caret = parts.slice(0, index + 1).join(":").length;
+    input.setSelectionRange(caret, caret);
+    input.dataset.clockDirty = "1";
+    input.setAttribute("aria-invalid", "false");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  }
+  function bindClockInputs(root, selector) {
+    root.addEventListener("focusin", (event) => {
+      const input = event.target.closest?.(selector);
+      if (input) input.dataset.clockOriginal = input.value;
+    });
+    root.addEventListener("keydown", (event) => {
+      const input = event.target.closest?.(selector);
+      if (!input || event.altKey || event.ctrlKey || event.metaKey) return; // Alt+↑/↓ 는 순서 바꾸기
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        if (stepClockInput(input, event.key === "ArrowUp" ? 1 : -1, event.shiftKey)) event.preventDefault();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        input.value = input.dataset.clockOriginal ?? input.value;
+        delete input.dataset.clockDirty;
+        input.setAttribute("aria-invalid", "false");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.blur();
+      }
+    });
+    // 휠은 칸에 커서가 있을 때만(목록을 스크롤하다 지나가며 값이 바뀌지 않게).
+    root.addEventListener("wheel", (event) => {
+      const input = event.target.closest?.(selector);
+      if (!input || document.activeElement !== input || !event.deltaY) return;
+      if (stepClockInput(input, event.deltaY < 0 ? 1 : -1, event.shiftKey)) event.preventDefault();
+    }, { passive: false });
+    // ↑↓·휠로 바꾼 값은 브라우저 change 가 오지 않으므로 칸을 벗어날 때 직접 알린다.
+    root.addEventListener("focusout", (event) => {
+      const input = event.target.closest?.(selector);
+      if (!input?.dataset.clockDirty) return;
+      delete input.dataset.clockDirty;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
   // ── 저장 ──
   async function mutate(change) {
     const result = await S.update(change);
@@ -119,6 +190,17 @@
     return "정보를 불러오는 중…";
   }
 
+  // 종류 배지(썸네일 왼쪽 위 — 멀티뷰 카드의 다시보기·업로드 배지와 같은 자리·색 계열).
+  function kindBadgeHtml(clip) {
+    return `<span class="pl-badge${clip ? " is-clip" : ""}">${clip ? "클립" : "다시보기"}</span>`;
+  }
+  function verifiedHtml(source) {
+    const markKind = CheeseVerifiedMark.kind(source);
+    return markKind
+      ? `<span class="pl-card-verified" data-cheese-mark="${markKind}" role="img" aria-label="${CheeseVerifiedMark.label(markKind)} 채널"></span>`
+      : "";
+  }
+
   function itemHtml(item, index) {
     const url = S.itemUrl(item);
     const selected = state.selected.has(item.id);
@@ -126,18 +208,19 @@
     const thumb = item.thumb ? `<img src="${esc(item.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : "";
     const duration = item.duration ? `<span class="pl-duration">${esc(S.formatClock(item.duration))}</span>` : "";
     const start = item.type === "video"
-      ? `<label class="pl-start">시작 <input type="text" inputmode="numeric" data-start value="${item.start ? esc(S.formatClock(item.start)) : ""}" placeholder="0:00" aria-label="${index + 1}번 시작 시간"></label>`
+      ? `<label class="pl-start">시작 <input type="text" inputmode="numeric" data-start data-clock-max="${item.duration > 0 ? item.duration - 1 : ""}" value="${item.start ? esc(S.formatClock(item.start)) : ""}" placeholder="0:00" aria-label="${index + 1}번 시작 시간" title="${esc(CLOCK_INPUT_TIP)}"></label>`
       : "";
     return (
       `<li class="pl-item${selected ? " is-selected" : ""}" data-item-id="${esc(item.id)}">` +
       `<input type="checkbox" data-check aria-label="${index + 1}번 선택"${selected ? " checked" : ""}>` +
       `<button type="button" class="pl-handle" data-handle aria-label="${index + 1}번 순서 바꾸기 (Alt+↑/↓)" title="끌어서 순서 바꾸기">${ICON.grip}</button>` +
       `<span class="pl-index">${index + 1}</span>` +
-      `<a class="pl-thumb${item.adult ? " is-adult" : ""}" href="${esc(url)}" target="_blank" rel="noopener" tabindex="-1" aria-hidden="true">${thumb}${duration}</a>` +
+      // ⚠ aria-hidden 을 두면 마우스로 누를 때 포커스가 숨긴 링크에 가서 경고가 난다. Tab 순서에서만 빼고 이름을 준다.
+      `<a class="pl-thumb${item.adult ? " is-adult" : ""}" href="${esc(url)}" target="_blank" rel="noopener" tabindex="-1" aria-label="${esc(`${itemTitle(item)} 썸네일`)}">${thumb}${kindBadgeHtml(item.type === "clip")}${duration}</a>` +
       `<div class="pl-item-body">` +
       `<a class="pl-item-title" href="${esc(url)}" target="_blank" rel="noopener" title="${esc(item.title)}">${esc(itemTitle(item))}</a>` +
-      `<div class="pl-item-sub"><span class="pl-badge${item.type === "clip" ? " is-clip" : ""}">${item.type === "clip" ? "클립" : "다시보기"}</span>` +
-      (item.channelName ? `<span>${esc(item.channelName)}</span>` : "") +
+      `<div class="pl-item-sub"><span class="pl-sr-only">${item.type === "clip" ? "클립" : "다시보기"}</span>` +
+      (item.channelName ? `<span class="pl-item-channel"><span class="pl-item-channel-name">${esc(item.channelName)}</span>${verifiedHtml(item)}</span>` : "") +
       start +
       `</div></div>` +
       `<div class="pl-item-actions">` +
@@ -209,6 +292,7 @@
         metaAgain = false;
         await fillMissingMetaOnce();
       } while (metaAgain);
+      await fillListChannelMarks();
     } finally {
       metaRunning = false;
     }
@@ -470,17 +554,17 @@
     const thumb = info.thumb ? `<img src="${esc(info.thumb)}" alt="" referrerpolicy="no-referrer">` : "";
     const start = clip ? "" :
       `<span class="pl-url-start"><label class="pl-start">시작 <input type="text" inputmode="numeric" data-url-start value="${item.start ? esc(S.formatClock(item.start)) : ""}" ` +
-      `placeholder="0:00" aria-label="시작 시간(시:분:초)"></label><small data-url-time>${item.start ? `currentTime=${item.start}` : "처음부터"}</small></span>`;
+      `placeholder="0:00" aria-label="시작 시간(시:분:초)" title="${esc(CLOCK_INPUT_TIP)}"></label><small data-url-time>${item.start ? `currentTime=${item.start}` : "처음부터"}</small></span>`;
     return (
       `<li class="pl-url-card${clip ? " is-clip" : ""}${meta === null ? " is-missing" : ""}" data-line="${row.line}">` +
-      `<span class="pl-card-thumb${info.adult ? " is-adult" : ""}"${clip ? ` data-uid="${esc(item.clipUID)}"` : ""}>${thumb}` +
+      `<span class="pl-card-thumb${info.adult ? " is-adult" : ""}"${clip ? ` data-uid="${esc(item.clipUID)}"` : ""}>${thumb}${kindBadgeHtml(clip)}` +
       (info.duration ? `<span class="pl-card-duration">${esc(S.formatClock(info.duration))}</span>` : "") + `</span>` +
       `<span class="pl-url-body"><span class="pl-card-title">${esc(title)}</span>` +
       (info.channelName
         ? `<span class="pl-card-name-row">${profileHtml(info.channelImageUrl)}<span class="pl-card-name">${esc(info.channelName)}</span>` +
-          (CheeseVerifiedMark.kind(info) ? `<span class="pl-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(info)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(info))} 채널"></span>` : "") + `</span>`
+          verifiedHtml(info) + `</span>`
         : "") +
-      `<span class="pl-url-kind"><span class="pl-badge${clip ? " is-clip" : ""}">${clip ? "클립" : "다시보기"}</span>${start}</span>` +
+      (start ? `<span class="pl-url-kind">${start}</span>` : "") +
       `</span></li>`
     );
   }
@@ -683,6 +767,7 @@
   $("plAddUrls").addEventListener("click", () => void addFromUrls());
   $("plUrls").addEventListener("input", scheduleUrlPreview);
   $("plUrlPreview").addEventListener("load", onResultImageLoad, true);
+  bindClockInputs($("plUrlPreview"), "input[data-url-start]");
   $("plUrlPreview").addEventListener("input", (event) => {
     const input = event.target.closest?.("[data-url-start]");
     if (!input) return;
@@ -762,6 +847,15 @@
       await mutate((current) => S.setStart(current, list.id, id, value));
     }
   });
+  bindClockInputs(items, "input[data-start]");
+  // 적는 동안 바로 알려 준다(저장은 Enter·칸을 벗어날 때).
+  items.addEventListener("input", (event) => {
+    const input = event.target.closest?.("input[data-start]");
+    if (!input) return;
+    const value = S.parseClock(input.value);
+    const tooLate = value != null && value > clockMax(input);
+    input.setAttribute("aria-invalid", String(value == null || tooLate));
+  });
   items.addEventListener("focusout", () => {
     // 시작 시간 입력 중에 미뤄 둔 그리기를 마저 한다.
     setTimeout(() => {
@@ -822,7 +916,25 @@
     clipCursor: null,
     clipToken: 0,
     clipLoaded: false,
+    videoBusy: false,
+    videoHasMore: false,
+    clipBusy: false,
   };
+
+  // ── 무한 스크롤 ── 결과 목록(자체 스크롤) 끝 가까이 내리면 다음 쪽을 받는다.
+  // 받은 결과가 적어 스크롤이 생기지 않아도 이어 받는다. 숨은 탭에서는 받지 않는다.
+  const MORE_THRESHOLD_PX = 240;
+  function nearListEnd(el) {
+    return el.offsetParent !== null && el.scrollTop + el.clientHeight >= el.scrollHeight - MORE_THRESHOLD_PX;
+  }
+  function maybeLoadMoreVideos() {
+    if (add.videoBusy || !add.videoHasMore || !nearListEnd($("plVideoResults"))) return;
+    void loadVideos(false);
+  }
+  function maybeLoadMoreClips() {
+    if (add.clipBusy || add.clipSource !== "channel" || !add.clipChannel || !add.clipCursor || !nearListEnd($("plClipResults"))) return;
+    void loadClips(false);
+  }
 
   function setAddTab(tab) {
     add.tab = tab;
@@ -832,6 +944,8 @@
     });
     if (tab === "video" && !add.videoPager) void loadVideos(true);
     if (tab === "clip" && !add.clipLoaded) void loadClips(true);
+    if (tab === "video") maybeLoadMoreVideos();
+    if (tab === "clip") maybeLoadMoreClips();
   }
 
   function setSegment(root, attr, value) {
@@ -877,7 +991,7 @@
         `<span class="pl-card-body">${profileHtml(item.channelImageUrl)}<span class="pl-card-text">` +
         `<span class="pl-card-title" title="${esc(item.title)}">${esc(item.title || "제목 없음")}</span>` +
         `<span class="pl-card-name-row"><span class="pl-card-name">${esc(item.channelName || "")}</span>` +
-        (CheeseVerifiedMark.kind(item) ? `<span class="pl-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(item)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(item))} 채널"></span>` : "") +
+        verifiedHtml(item) +
         `</span>` + (resultInfo(item) ? `<span class="pl-card-info">${esc(resultInfo(item))}</span>` : "") +
         `</span></span></button></li>`
       );
@@ -897,6 +1011,7 @@
   function applyResultView() {
     $("plVideoResults").classList.toggle("is-list", resultView.video === "list");
     setSegment($("plVideoView"), "data-result-view", resultView.video);
+    maybeLoadMoreVideos(); // 목록형은 줄이 낮아 끝이 가까워질 수 있다
   }
 
   // 클립 썸네일은 세로·가로가 섞여 있다. 클립 검색과 같이 가로 썸네일은 자르지 않고 가운데에 두고
@@ -939,20 +1054,51 @@
     const ids = new Set([...add.videoItems, ...add.clipItems].filter(needsChannelInfo).map((item) => item.channelId));
     for (const id of ids) {
       if (channelInfo.has(id)) continue;
-      const job = SOURCES.getJson(`${SOURCES.API}/service/v1/channels/${id}`)
-        .then((content) => {
-          const info = content ? { image: String(content.channelImageUrl || ""), verified: content.verifiedMark === true, verifiedMarkType: CheeseVerifiedMark.typeOf(content), name: String(content.channelName || "") } : null;
-          channelInfo.set(id, info);
-          return info;
-        })
-        .catch(() => {
-          channelInfo.set(id, null);
-          return null;
-        });
-      channelInfo.set(id, job);
-      job.then(() => scheduleResultsRender());
+      requestChannelInfo(id).then(() => scheduleResultsRender());
     }
   }
+  // 채널 정보 한 번 받기(받는 중이면 같은 약속을 돌려준다). 실패하면 null.
+  function requestChannelInfo(id) {
+    const cached = channelInfo.get(id);
+    if (cached !== undefined) return Promise.resolve(cached);
+    const job = SOURCES.getJson(`${SOURCES.API}/service/v1/channels/${id}`)
+      .then((content) => {
+        const info = content ? { image: String(content.channelImageUrl || ""), verified: content.verifiedMark === true, verifiedMarkType: CheeseVerifiedMark.typeOf(content), name: String(content.channelName || "") } : null;
+        channelInfo.set(id, info);
+        return info;
+      })
+      .catch(() => {
+        channelInfo.set(id, null);
+        return null;
+      });
+    channelInfo.set(id, job);
+    return job;
+  }
+  // 예전에 담아 인증 마크를 모르는 항목: 채널 정보로 한 채널에 한 번 확인해 저장한다(다음부터는 묻지 않는다).
+  const channelMarkAsked = new Set();
+  async function fillListChannelMarks() {
+    const list = currentList();
+    if (!list || !SOURCES?.getJson) return;
+    const ids = [...new Set(list.items
+      .filter((item) => typeof item.verifiedMark !== "boolean" && /^[0-9a-f]{32}$/.test(item.channelId || ""))
+      .map((item) => item.channelId))].filter((id) => !channelMarkAsked.has(id));
+    if (!ids.length) return;
+    ids.forEach((id) => channelMarkAsked.add(id));
+    const found = [];
+    for (let i = 0; i < ids.length; i += 4) {
+      const infos = await Promise.all(ids.slice(i, i + 4).map(requestChannelInfo));
+      infos.forEach((info, index) => {
+        if (info) found.push([ids[i + index], { verifiedMark: info.verified === true, verifiedMarkType: info.verifiedMarkType }]);
+      });
+    }
+    if (!found.length) return;
+    await mutate((current) => {
+      let next = current;
+      for (const [id, mark] of found) next = S.applyChannelMark(next, id, mark).state;
+      return { state: next };
+    });
+  }
+
   function withChannelInfo(item) {
     const info = channelInfo.get(item.channelId);
     if (!info || typeof info.then === "function") return item;
@@ -1033,8 +1179,14 @@
     const status = $("plVideoStatus");
     status.classList.remove("is-error");
     status.textContent = "불러오는 중…";
-    $("plVideoMore").hidden = true;
-    const snap = first ? await add.videoPager.loadFirst(true) : await add.videoPager.loadNext();
+    add.videoBusy = true;
+    add.videoHasMore = false;
+    let snap;
+    try {
+      snap = first ? await add.videoPager.loadFirst(true) : await add.videoPager.loadNext();
+    } finally {
+      if (token === add.videoToken) add.videoBusy = false;
+    }
     if (token !== add.videoToken) return;
     // 검색 결과는 재정렬 pager 가 고른 정렬(추천·인기·최신…)대로 온다.
     add.videoItems = add.videoPager.rows.map(videoItemFromRow).filter((item) => item.videoNo);
@@ -1045,7 +1197,8 @@
     } else {
       status.textContent = add.videoItems.length ? `${add.videoItems.length}개` : add.videoSource === "vault" && !add.videoQuery && !add.videoChannel ? "다시보기 보관함이 비어 있습니다." : "결과가 없습니다.";
     }
-    $("plVideoMore").hidden = snap.done || Boolean(snap.error);
+    add.videoHasMore = !snap.done && !snap.error;
+    maybeLoadMoreVideos();
   }
 
   // ── 클립 ──
@@ -1101,7 +1254,6 @@
     const token = ++add.clipToken;
     const status = $("plClipStatus");
     status.classList.remove("is-error");
-    $("plClipMore").hidden = true;
     if (first) {
       add.clipItems = [];
       add.clipCursor = null;
@@ -1120,15 +1272,18 @@
       return;
     }
     status.textContent = "불러오는 중…";
+    add.clipBusy = true;
     try {
-      const page = await fetchChannelClips(add.clipChannel, first ? null : add.clipCursor);
+      const page = await fetchChannelClips(add.clipChannel, first ? null : add.clipCursor).finally(() => {
+        if (token === add.clipToken) add.clipBusy = false;
+      });
       if (token !== add.clipToken) return;
       const seen = new Set(add.clipItems.map((item) => item.clipUID));
       add.clipItems = [...add.clipItems, ...page.items.filter((item) => !seen.has(item.clipUID))];
       add.clipCursor = page.cursor;
       renderResults();
       status.textContent = add.clipItems.length ? `${add.clipItems.length}개` : "클립이 없습니다.";
-      $("plClipMore").hidden = !page.cursor;
+      maybeLoadMoreClips();
     } catch (error) {
       if (token !== add.clipToken) return;
       status.textContent = loadErrorText(error);
@@ -1136,21 +1291,26 @@
     }
   }
 
+  let clipChannelSearchToken = 0;
+  let clipChannelSearchTimer = 0;
   async function searchClipChannels(keyword) {
+    const token = ++clipChannelSearchToken;
     const box = $("plClipChannels");
     const status = $("plClipStatus");
     status.classList.remove("is-error");
     status.textContent = "채널 찾는 중…";
     try {
       const page = await SOURCES.searchChannelsPage(keyword, 0);
+      if (token !== clipChannelSearchToken) return;
       add.channelRows = page.rows;
       box.innerHTML = page.rows.map((row, index) =>
         `<li><button type="button" data-channel="${index}">` +
         (row.channelImageUrl ? `<img src="${esc(row.channelImageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : "") +
-        `<span>${esc(row.channelName)}</span></button></li>`).join("");
+        `<span class="pl-channel-name"><span>${esc(row.channelName)}</span>${verifiedHtml(row)}</span></button></li>`).join("");
       box.hidden = false;
       status.textContent = page.rows.length ? "클립을 볼 채널을 고르세요." : "채널을 찾지 못했습니다.";
     } catch (error) {
+      if (token !== clipChannelSearchToken) return;
       status.textContent = loadErrorText(error);
       status.classList.add("is-error");
     }
@@ -1305,7 +1465,7 @@
   document.addEventListener("pointerdown", (event) => {
     if (!event.target.closest?.(".pl-video-search-wrap")) hideChannelSuggest();
   });
-  $("plVideoMore").addEventListener("click", () => void loadVideos(false));
+  $("plVideoResults").addEventListener("scroll", maybeLoadMoreVideos, { passive: true });
   $("plVideoResults").addEventListener("click", (event) => {
     const button = event.target.closest("[data-result]");
     if (button) void toggleResult(add.videoItems, Number(button.dataset.result));
@@ -1322,15 +1482,33 @@
     if (channelMode) $("plClipChannelSearch").querySelector("input").focus();
     void loadClips(true);
   });
-  $("plClipChannelSearch").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const keyword = $("plClipChannelSearch").querySelector("input").value.trim();
-    if (!keyword) return;
+  // 다시보기 검색처럼 적으면 바로 찾는다(잠깐 멈추면). Enter·찾기는 기다리지 않고 바로.
+  function startClipChannelSearch(keyword) {
+    clearTimeout(clipChannelSearchTimer);
     add.clipChannel = null;
+    add.clipCursor = null;
+    add.clipToken += 1; // 고른 채널의 클립을 받던 중이면 버린다
     $("plClipChannelHead").hidden = true;
     add.clipItems = [];
     renderResults();
+    if (!keyword) {
+      clipChannelSearchToken += 1;
+      $("plClipChannels").hidden = true;
+      $("plClipChannels").innerHTML = "";
+      $("plClipStatus").classList.remove("is-error");
+      $("plClipStatus").textContent = "채널을 찾아 고르면 그 채널의 클립이 나옵니다.";
+      return;
+    }
     void searchClipChannels(keyword);
+  }
+  $("plClipChannelSearch").addEventListener("submit", (event) => {
+    event.preventDefault();
+    startClipChannelSearch($("plClipChannelSearch").querySelector("input").value.trim());
+  });
+  $("plClipChannelSearch").querySelector("input").addEventListener("input", (event) => {
+    clearTimeout(clipChannelSearchTimer);
+    const keyword = event.target.value.trim();
+    clipChannelSearchTimer = setTimeout(() => startClipChannelSearch(keyword), keyword ? 250 : 0);
   });
   $("plClipChannels").addEventListener("click", (event) => {
     const button = event.target.closest("[data-channel]");
@@ -1340,7 +1518,7 @@
     $("plClipChannels").hidden = true;
     const head = $("plClipChannelHead");
     head.hidden = false;
-    head.querySelector("strong").textContent = row.channelName;
+    head.querySelector("strong").innerHTML = `<span>${esc(row.channelName)}</span>${verifiedHtml(row)}`;
     void loadClips(true);
   });
   $("plClipOrder").addEventListener("click", (event) => {
@@ -1350,7 +1528,7 @@
     setSegment($("plClipOrder"), "data-clip-order", add.clipOrder);
     void loadClips(true);
   });
-  $("plClipMore").addEventListener("click", () => void loadClips(false));
+  $("plClipResults").addEventListener("scroll", maybeLoadMoreClips, { passive: true });
   $("plClipResults").addEventListener("click", (event) => {
     const button = event.target.closest("[data-result]");
     if (button) void toggleResult(add.clipItems, Number(button.dataset.result));
