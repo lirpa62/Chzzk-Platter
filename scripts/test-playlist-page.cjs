@@ -182,8 +182,8 @@ const check = (condition, label) => {
       JSON.stringify(added.badges) === JSON.stringify(["다시보기", "클립", "다시보기"]),
       `제목·채널·길이는 배경(PLAYLIST_META)에서 받아 채우고, 못 받으면 '정보 없음' ${JSON.stringify(added.titles)}`);
     check(JSON.stringify(added.starts) === JSON.stringify(["2:57:54", ""]) &&
-      await ev("document.querySelectorAll('#plItems [data-start]')[1].placeholder === '0:00'") && added.href === "https://chzzk.naver.com/video/15679779?currentTime=10674",
-      "currentTime 은 시작 시간 칸·링크에 그대로, 0 이면 칸을 비우고 '0:00'은 자리표시자로(클립에는 시작 칸이 없다)");
+      await ev("document.querySelectorAll('#plItems [data-start]')[1].placeholder === '0:00:00'") && added.href === "https://chzzk.naver.com/video/15679779?currentTime=10674",
+      "currentTime 은 시작 시간 칸·링크에 그대로, 0 이면 칸을 비우고 '0:00:00'(시·분·초)은 자리표시자로(클립에는 시작 칸이 없다)");
     check(added.meta.includes("다시보기 2 · 클립 1") && added.meta.includes("총 "), `머리 요약 ${added.meta}`);
     // 목록 항목: 종류 배지는 썸네일 왼쪽 위, 채널 옆 인증 마크(모르면 채널 정보로 한 번 채워 저장)
     await until("!!document.querySelector('#plItems .pl-item-channel .pl-card-verified')", "목록 항목 인증 마크");
@@ -308,6 +308,74 @@ const check = (condition, label) => {
     await setStart(1, "https://chzzk.naver.com/video/15679779?currentTime=754");
     await until("window.__local.cheesePlaylists.lists[0].items[2].start === 754", "주소");
     check(await ev("document.querySelectorAll('#plItems [data-start]')[1].value === '12:34'"), "1h2m3s·치지직 주소(?currentTime=)도 시작 시간으로 읽는다");
+    // 조절판: 칸에 커서가 있으면 아래에 시·분·초 ▲▼, 눌러도 칸의 커서는 그대로, 누르고 있으면 계속
+    await setStart(1, "1:00:05");
+    await until("window.__local.cheesePlaylists.lists[0].items[2].start === 3605", "조절판 준비");
+    await startInput(0);
+    const panel = await ev(`(() => {
+      const p = document.getElementById('plClockPanel'), i = document.querySelectorAll('#plItems [data-start]')[1];
+      const pr = p.getBoundingClientRect(), ir = i.getBoundingClientRect();
+      return { shown: !p.hidden && pr.height > 0, below: pr.top >= ir.bottom, parts: [...p.querySelectorAll('output')].map((o) => o.textContent),
+        length: p.querySelector('[data-clock-length]').textContent, labels: [...p.querySelectorAll('small')].map((e) => e.textContent) };
+    })()`);
+    check(panel.shown && panel.below && JSON.stringify(panel.parts) === '["1","00","05"]' && panel.length === "영상 길이 5:33:20" && panel.labels.join("") === "시분초",
+      `칸을 누르면 아래에 시·분·초 조절판(지금 값·영상 길이) ${JSON.stringify(panel)}`);
+    const btn = (unit, step) => ev(`(() => { const r = document.querySelector('#plClockPanel [data-clock-unit="${unit}"] [data-clock-step="${step}"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+    const press = async ([x, y], holdMs = 0) => {
+      await call("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, sessionId);
+      await call("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 }, sessionId);
+      if (holdMs) await wait(holdMs);
+      await call("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 }, sessionId);
+    };
+    await press(await btn(60, 1));
+    const afterMinute = await ev("({ v: document.querySelectorAll('#plItems [data-start]')[1].value, focus: document.activeElement === document.querySelectorAll('#plItems [data-start]')[1], part: document.querySelector('#plClockPanel [data-clock-part=\"60\"]').textContent })");
+    check(afterMinute.v === "1:01:05" && afterMinute.focus && afterMinute.part === "01", `분 ▲: 한 번 누르면 1분, 칸의 커서는 그대로 ${JSON.stringify(afterMinute)}`);
+    await press(await btn(1, 1), 900);
+    const held = await ev("document.querySelectorAll('#plItems [data-start]')[1].value");
+    const heldSec = Number(held.split(":").pop());
+    await wait(200);
+    const afterRelease = await ev("document.querySelectorAll('#plItems [data-start]')[1].value");
+    check(heldSec >= 10 && afterRelease === held, `초 ▲ 를 누르고 있으면 계속 오르고, 떼면 멈춘다 1:01:05 → ${held}`);
+    await ev("(() => { const b = document.querySelector('#plClockPanel [data-clock-zero]'); b.click(); return true; })()");
+    const zero = await ev("({ v: document.querySelectorAll('#plItems [data-start]')[1].value, down: document.querySelector('#plClockPanel [data-clock-unit=\"1\"] [data-clock-step=\"-1\"]').disabled })");
+    check(zero.v === "0:00:00" && zero.down, `'처음부터'는 0:00, 더 내릴 수 없으면 ▼ 를 막는다 ${JSON.stringify(zero)}`);
+    await ev("document.querySelectorAll('#plItems [data-start]')[1].blur(); true");
+    await until("window.__local.cheesePlaylists.lists[0].items[2].start === 0", "조절판 저장");
+    check(await ev("document.getElementById('plClockPanel').hidden"), "칸을 벗어나면 조절판을 닫고 저장한다");
+
+    // 숫자를 누르면 칸에서 그 자리를 고르고, 숫자를 치면 그 자리만 바뀐다(두 자리면 다음 자리로)
+    const field = () => ev(`(() => { const i = document.querySelectorAll('#plItems [data-start]')[1]; return { v: i.value, sel: i.value.slice(i.selectionStart, i.selectionEnd), at: i.selectionStart,
+      active: document.querySelector('#plClockPanel .pl-clock-col.is-active')?.dataset.clockUnit || '', focus: document.activeElement === i }; })()`);
+    await startInput(0);
+    const partPos = (unit) => ev(`(() => { const r = document.querySelector('#plClockPanel [data-clock-part="${unit}"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+    await press(await partPos(60));
+    const picked = await field();
+    check(picked.v === "0:00:00" && picked.sel === "00" && picked.at === 2 && picked.active === "60" && picked.focus,
+      `조절판 '분' 숫자를 누르면 칸(세 자리 표기)에서 분 자리를 고른다 ${JSON.stringify(picked)}`);
+    await key("4", 52);
+    await key("5", 53);
+    const typedMin = await field();
+    await key("9", 57);
+    const typedSec = await field();
+    check(typedMin.v === "0:45:00" && typedMin.sel === "00" && typedMin.active === "1" && typedSec.v === "0:45:09" && typedSec.active === "1",
+      `숫자를 치면 그 자리만 바뀌고 두 자리를 채우면 다음 자리로(초에 9 처럼 6~9 는 한 자리로) ${JSON.stringify([typedMin, typedSec])}`);
+    await key("ArrowLeft", 37);
+    await key("ArrowUp", 38);
+    const moved = await field();
+    await key("Backspace", 8);
+    const cleared = await field();
+    await key("3", 51);
+    await key("0", 48);
+    const retyped = await field();
+    check(moved.v === "0:46:09" && moved.sel === "46" && cleared.v === "0:00:09" && retyped.v === "0:30:09" && retyped.active === "1",
+      `←→ 로 자리를 옮기고 ↑↓ 는 그 자리 단위로, Backspace 는 그 자리를 0 으로 ${JSON.stringify([moved, cleared, retyped])}`);
+    await ev("document.querySelectorAll('#plItems [data-start]')[1].blur(); true");
+    await until("window.__local.cheesePlaylists.lists[0].items[2].start === 1809", "자리 적기 저장");
+    check(await ev("document.querySelectorAll('#plItems [data-start]')[1].value === '30:09'"), "칸을 벗어나면 평소 표기(30:09)로 돌아가고 저장한다");
+    await startInput(0);
+    check(await field().then((f) => f.v === "0:30:09"), "칸을 누르면 세 자리(0:30:09)로 보인다");
+    await ev("document.querySelectorAll('#plItems [data-start]')[1].blur(); true");
+
     await setStart(1, "1:00:05"); // 뒤 확인(내보내기·공유 코드)이 쓰는 값으로 되돌린다
     await until("window.__local.cheesePlaylists.lists[0].items[2].start === 3605", "되돌리기");
 
@@ -417,8 +485,8 @@ const check = (condition, label) => {
     // 입력하면 채널 제안 → 고르면 그 채널 다시보기
     await ev("(() => { const i = document.querySelector('#plVideoSearch input'); i.value = '클립'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
     await until("!document.getElementById('plVideoChannelPopover').hidden && !!document.querySelector('#plVideoChannelPopover [data-pl-channel]')", "채널 제안");
-    check(await ev("document.querySelector('#plVideoChannelPopover .mv-video-channel-option-name').textContent === '클립채널' && !!document.querySelector('#plVideoChannelPopover .pl-card-verified') && !!document.querySelector('#plVideoChannelPopover [data-pl-keyword]')"),
-      "다시보기 검색칸에 입력하면 채널을 제안한다(파트너 배지, 키워드 검색 항목)");
+    check(await ev("document.querySelector('#plVideoChannelPopover .mv-video-channel-option-name').textContent === '클립채널' && !!document.querySelector('#plVideoChannelPopover .pl-card-verified') && !document.querySelector('#plVideoChannelPopover [data-pl-keyword], #plVideoChannelPopover .mv-video-channel-more')"),
+      "다시보기 검색칸에 입력하면 채널을 제안한다(파트너 배지, 검색어 검색은 옆 '검색' 버튼·Enter 로 — 제안에는 채널만)");
     await ev("document.querySelector('#plVideoChannelPopover [data-pl-channel]').click(); true");
     await until("document.querySelector('#plVideoResults .pl-card-title')?.textContent === '채널 다시보기'", "채널 다시보기");
     check(await ev("document.getElementById('plVideoScopeText').textContent === '채널: 클립채널 다시보기' && document.getElementById('plVideoRerank').hidden && document.getElementById('plVideoChannelPopover').hidden"),
@@ -462,6 +530,18 @@ const check = (condition, label) => {
       `클립 채널 찾기: 적으면 잠깐 뒤 바로 찾고, 빠르게 이어 적은 글자는 한 번만 묻는다 ${JSON.stringify(typedSearch)}`);
     check(await ev("document.querySelector('#plClipChannels [data-channel] .pl-channel-name .pl-card-verified')?.dataset.cheeseMark === 'partner'"),
       "클립 채널 찾기 결과에도 인증 마크");
+    check(await ev("(() => { const img = document.querySelector('#plClipChannels [data-channel] img'); return !!img && img.hasAttribute('data-mv-default-profile') && !!img.getAttribute('src'); })()"),
+      "프로필 이미지가 없는 채널은 기본 프로필(다시보기 채널 찾기와 같다)");
+    const clipProfile = await ev(`(() => { const img = document.querySelector('#plClipChannels [data-channel] img'); const cs = getComputedStyle(img);
+      return { bg: cs.backgroundColor, w: img.getBoundingClientRect().width }; })()`);
+    check(clipProfile.bg !== "rgba(0, 0, 0, 0)" && clipProfile.w === 30, `기본 프로필은 배경 위에(다시보기 채널 찾기와 같은 30px) ${JSON.stringify(clipProfile)}`);
+    const profileSrc = () => ev("document.querySelector('#plClipChannels [data-channel] img').getAttribute('src')");
+    const beforeTheme = await profileSrc();
+    await ev("document.getElementById('plTheme').click(); true");
+    const afterTheme = await profileSrc();
+    await ev("document.getElementById('plTheme').click(); true");
+    check(beforeTheme !== afterTheme && /default_profile_(light|dark)/.test(afterTheme) && (await profileSrc()) === beforeTheme,
+      `테마를 바꾸면 기본 프로필도 라이트/다크에 맞게 바꿔 끼운다 ${beforeTheme} → ${afterTheme}`);
     await ev("document.querySelector('#plClipChannels [data-channel]').click(); true");
     check(await ev("(() => { const s = document.querySelector('#plClipChannelHead strong'); return s.querySelector('span').textContent === '클립채널' && !!s.querySelector('.pl-card-verified'); })()"),
       "고른 채널 이름 옆에도 인증 마크");

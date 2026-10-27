@@ -35,7 +35,7 @@
 
   // ── 시작 시간 입력칸 ── ↑↓·휠로 커서가 있는 자리(시·분·초)를 1씩(Shift 10씩) 올리고 내린다.
   // 1:23:45 · 83:45 · 5025(초) · 1h2m3s · 1시간 2분 · 치지직 주소(?currentTime=)를 모두 읽는다. Esc 는 되돌린다.
-  const CLOCK_INPUT_TIP = "↑↓·휠: 커서 자리(시·분·초)를 1씩, Shift 는 10씩 · 1:23:45, 83:45, 1h2m, 1시간 2분, 치지직 주소도 됩니다 · Esc 되돌리기";
+  const CLOCK_INPUT_TIP = "조절판 숫자를 누르면 그 자리를 바로 적기 · ▲▼(누르고 있으면 계속)·↑↓·휠: 시·분·초를 1씩, Shift 는 10씩 · 1:23:45, 83:45, 1h2m, 1시간 2분, 치지직 주소도 됩니다 · Esc 되돌리기";
   // "1:23:45" 에서 커서가 1 → 3600, 23 → 60, 45 → 1. 콜론이 없으면(초·빈칸) 1.
   function clockUnitAt(value, caret) {
     const parts = String(value).split(":");
@@ -52,31 +52,259 @@
     const max = Number(input.dataset.clockMax);
     return input.dataset.clockMax && Number.isFinite(max) ? max : Infinity;
   }
+  // 칸에 커서가 있는 동안은 늘 시·분·초 세 자리(0:05:30)로 보여 자리를 고르기 쉽게 한다. 벗어나면 5:30.
+  function formatClockFull(total) {
+    const s = Math.max(0, Math.floor(Number(total) || 0));
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${Math.floor(s / 3600)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+  }
+  // 세 자리 표기에서 단위(3600·60·1) 자리의 [시작, 끝]
+  function clockSegmentRange(text, unit) {
+    const parts = text.split(":");
+    const index = parts.length - 1 - Math.round(Math.log(unit) / Math.log(60));
+    let start = 0;
+    for (let i = 0; i < index; i += 1) start += parts[i].length + 1;
+    return [start, start + (parts[index] || "").length];
+  }
+  // 값을 넣고(길이 안으로) 같은 단위 자리 끝에 커서를 둔다(분을 올리다 1시간을 넘겨도 분 자리 그대로).
+  // 조절판 숫자로 자리를 고른 중이면 그 자리를 다시 고른다.
+  function setClockValue(input, value, unit) {
+    const next = Math.min(clockMax(input), Math.max(0, value));
+    const text = document.activeElement === input ? formatClockFull(next) : S.formatClock(next);
+    input.value = text;
+    if (document.activeElement === input) {
+      const [start, end] = clockSegmentRange(text, clockEdit?.input === input ? clockEdit.unit : unit);
+      if (clockEdit?.input === input) {
+        clockEdit.buffer = "";
+        input.setSelectionRange(start, end);
+      } else {
+        input.setSelectionRange(end, end);
+      }
+    }
+    input.dataset.clockDirty = "1";
+    input.setAttribute("aria-invalid", "false");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
   function stepClockInput(input, direction, big) {
     const current = S.parseClock(input.value);
     if (current == null) return false;
     const unit = clockUnitAt(input.value.trim(), input.selectionStart ?? input.value.length);
-    const next = Math.min(clockMax(input), Math.max(0, current + direction * unit * (big ? 10 : 1)));
-    const text = S.formatClock(next);
-    input.value = text;
-    // 같은 단위 자리 끝에 커서를 둔다(분을 올리다 1시간을 넘겨도 분 자리 그대로).
-    const parts = text.split(":");
-    const index = Math.max(0, parts.length - 1 - Math.round(Math.log(unit) / Math.log(60)));
-    const caret = parts.slice(0, index + 1).join(":").length;
-    input.setSelectionRange(caret, caret);
+    setClockValue(input, current + direction * unit * (big ? 10 : 1), unit);
+    return true;
+  }
+
+  // ── 조절판 ── 칸에 커서가 있으면 아래에 시·분·초 ▲▼ 를 띄운다(누르고 있으면 계속). 평소 줄은 그대로다.
+  // 버튼은 포커스를 가져가지 않아(mousedown 기본 동작 막기) 칸에 커서가 남고, 칸을 벗어날 때 저장한다.
+  const CLOCK_UNITS = [["시", 3600], ["분", 60], ["초", 1]];
+  const CHEVRON = (up) =>
+    `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${up ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"}"/></svg>`;
+  let clockPanel = null;
+  let clockPanelInput = null;
+  let clockRepeatTimer = 0;
+  function ensureClockPanel() {
+    if (clockPanel) return clockPanel;
+    clockPanel = document.createElement("div");
+    clockPanel.className = "pl-clock-panel";
+    clockPanel.id = "plClockPanel";
+    clockPanel.setAttribute("role", "group");
+    clockPanel.setAttribute("aria-label", "시작 시간 조절");
+    clockPanel.hidden = true;
+    clockPanel.innerHTML =
+      `<div class="pl-clock-cols">` +
+      CLOCK_UNITS.map(([label, unit], index) =>
+        (index ? `<span class="pl-clock-sep" aria-hidden="true">:</span>` : "") +
+        `<div class="pl-clock-col" data-clock-unit="${unit}">` +
+        `<button type="button" tabindex="-1" data-clock-step="1" aria-label="${label} 올리기">${CHEVRON(true)}</button>` +
+        `<output data-clock-part="${unit}" title="눌러서 ${label} 바로 적기">0</output><small>${label}</small>` +
+        `<button type="button" tabindex="-1" data-clock-step="-1" aria-label="${label} 내리기">${CHEVRON(false)}</button>` +
+        `</div>`).join("") +
+      `</div>` +
+      `<div class="pl-clock-foot"><button type="button" tabindex="-1" data-clock-zero>처음부터</button><span data-clock-length></span></div>`;
+    document.body.append(clockPanel);
+    // 눌러도 칸의 커서를 빼앗지 않는다.
+    clockPanel.addEventListener("mousedown", (event) => event.preventDefault());
+    clockPanel.addEventListener("pointerdown", (event) => {
+      const button = event.target.closest("[data-clock-step]");
+      if (!button || !clockPanelInput || event.button !== 0) return;
+      const unit = Number(button.closest("[data-clock-unit]").dataset.clockUnit) * (event.shiftKey ? 10 : 1);
+      const direction = Number(button.dataset.clockStep);
+      const run = () => {
+        if (!clockPanelInput) return stopClockRepeat();
+        const current = S.parseClock(clockPanelInput.value) ?? 0;
+        setClockValue(clockPanelInput, current + direction * unit, Math.min(unit, 3600));
+      };
+      stopClockRepeat();
+      run();
+      // 누르고 있으면 잠깐 뒤부터 빠르게 이어 간다.
+      clockRepeatTimer = setTimeout(function repeat() {
+        run();
+        clockRepeatTimer = setTimeout(repeat, 70);
+      }, 420);
+      button.setPointerCapture?.(event.pointerId);
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) clockPanel.addEventListener(type, stopClockRepeat);
+    // 열 위에서 휠을 굴리면 그 단위로.
+    clockPanel.addEventListener("wheel", (event) => {
+      const col = event.target.closest("[data-clock-unit]");
+      if (!col || !clockPanelInput || !event.deltaY) return;
+      event.preventDefault();
+      const unit = Number(col.dataset.clockUnit);
+      const current = S.parseClock(clockPanelInput.value) ?? 0;
+      setClockValue(clockPanelInput, current + (event.deltaY < 0 ? 1 : -1) * unit * (event.shiftKey ? 10 : 1), unit);
+    }, { passive: false });
+    clockPanel.addEventListener("click", (event) => {
+      if (!clockPanelInput) return;
+      if (event.target.closest("[data-clock-zero]")) setClockValue(clockPanelInput, 0, 1);
+      // 숫자를 누르면 칸에서 그 자리를 골라 바로 숫자로 적게 한다(커서는 칸에 그대로).
+      const part = event.target.closest("[data-clock-part]");
+      if (part) selectClockSegment(clockPanelInput, Number(part.dataset.clockPart));
+    });
+    window.addEventListener("resize", () => clockPanelInput && positionClockPanel());
+    document.addEventListener("scroll", () => clockPanelInput && positionClockPanel(), true);
+    return clockPanel;
+  }
+  // ── 자리 골라 적기 ── 조절판 숫자를 누르면 그 자리(시·분·초)를 칸에서 고른다. 숫자를 치면 그 자리만 바뀌고
+  // 두 자리를 채우면(분·초는 6~9 한 자리여도) 다음 자리로 넘어간다. ←→·Tab 으로 자리를 옮기고, 다른 키나
+  // 칸을 직접 누르면 보통 입력으로 돌아간다.
+  let clockEdit = null; // { input, unit, buffer }
+  function markClockColumn(unit) {
+    clockPanel?.querySelectorAll("[data-clock-unit]").forEach((col) => {
+      col.classList.toggle("is-active", Number(col.dataset.clockUnit) === unit);
+    });
+  }
+  function endClockEdit() {
+    clockEdit = null;
+    markClockColumn(0);
+  }
+  function selectClockSegment(input, unit) {
+    const value = S.parseClock(input.value) ?? S.parseClock(input.dataset.clockOriginal) ?? 0;
+    const text = formatClockFull(value);
+    if (input.value !== text) {
+      input.value = text;
+      input.setAttribute("aria-invalid", "false");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    const [start, end] = clockSegmentRange(text, unit);
+    input.setSelectionRange(start, end);
+    clockEdit = { input, unit, buffer: "" };
+    markClockColumn(unit);
+  }
+  function setClockSegment(input, unit, part) {
+    const total = S.parseClock(input.value) ?? 0;
+    const parts = { 3600: Math.floor(total / 3600), 60: Math.floor((total % 3600) / 60), 1: total % 60 };
+    parts[unit] = unit === 3600 ? part : Math.min(59, part);
+    const next = Math.min(clockMax(input), parts[3600] * 3600 + parts[60] * 60 + parts[1]);
+    input.value = formatClockFull(next);
     input.dataset.clockDirty = "1";
     input.setAttribute("aria-invalid", "false");
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    return true;
   }
+  function typeClockDigit(digit) {
+    const { input, unit } = clockEdit;
+    const buffer = (clockEdit.buffer + digit).slice(-2);
+    setClockSegment(input, unit, Number(buffer));
+    const done = buffer.length >= 2 || (unit !== 3600 && Number(digit) > 5);
+    selectClockSegment(input, done && unit > 1 ? unit / 60 : unit);
+    if (!done) clockEdit.buffer = buffer; // 같은 자리에 이어 적는 중
+  }
+  // 자리 고르기 중 키: true 를 돌려주면 처리한 것.
+  function clockEditKey(event, input) {
+    if (clockEdit?.input !== input) return false;
+    const { unit } = clockEdit;
+    if (/^\d$/.test(event.key)) {
+      typeClockDigit(event.key);
+      return true;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      setClockSegment(input, unit, 0);
+      selectClockSegment(input, unit);
+      return true;
+    }
+    const forward = event.key === "ArrowRight" || (event.key === "Tab" && !event.shiftKey);
+    const backward = event.key === "ArrowLeft" || (event.key === "Tab" && event.shiftKey);
+    if (forward && unit > 1) {
+      selectClockSegment(input, unit / 60);
+      return true;
+    }
+    if (backward && unit < 3600) {
+      selectClockSegment(input, unit * 60);
+      return true;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") return false; // 아래에서 그 자리 단위로 올리고 내린다
+    endClockEdit();
+    return false;
+  }
+
+  function stopClockRepeat() {
+    clearTimeout(clockRepeatTimer);
+    clockRepeatTimer = 0;
+  }
+  function updateClockPanel() {
+    if (!clockPanel || !clockPanelInput) return;
+    const value = S.parseClock(clockPanelInput.value);
+    const total = value ?? 0;
+    const parts = { 3600: Math.floor(total / 3600), 60: Math.floor((total % 3600) / 60), 1: total % 60 };
+    clockPanel.classList.toggle("is-invalid", value == null);
+    for (const output of clockPanel.querySelectorAll("[data-clock-part]")) {
+      const unit = Number(output.dataset.clockPart);
+      output.textContent = value == null ? "--" : unit === 3600 ? String(parts[unit]) : String(parts[unit]).padStart(2, "0");
+    }
+    const max = clockMax(clockPanelInput);
+    clockPanel.querySelector("[data-clock-length]").textContent = Number.isFinite(max) ? `영상 길이 ${S.formatClock(max + 1)}` : "";
+    for (const button of clockPanel.querySelectorAll("[data-clock-step]")) {
+      const up = button.dataset.clockStep === "1";
+      button.disabled = value != null && (up ? total >= max : total <= 0);
+    }
+  }
+  function positionClockPanel() {
+    const rect = clockPanelInput.getBoundingClientRect();
+    if (!rect.width) return hideClockPanel();
+    const width = clockPanel.offsetWidth;
+    const height = clockPanel.offsetHeight;
+    const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 8);
+    const below = rect.bottom + 6;
+    const top = below + height > window.innerHeight - 8 ? rect.top - height - 6 : below;
+    clockPanel.style.left = `${Math.round(left)}px`;
+    clockPanel.style.top = `${Math.round(Math.max(8, top))}px`;
+  }
+  function showClockPanel(input) {
+    ensureClockPanel();
+    clockPanelInput = input;
+    clockPanel.hidden = false;
+    updateClockPanel();
+    positionClockPanel();
+  }
+  function hideClockPanel() {
+    stopClockRepeat();
+    endClockEdit();
+    clockPanelInput = null;
+    if (clockPanel) clockPanel.hidden = true;
+  }
+
   function bindClockInputs(root, selector) {
     root.addEventListener("focusin", (event) => {
       const input = event.target.closest?.(selector);
-      if (input) input.dataset.clockOriginal = input.value;
+      if (!input) return;
+      input.dataset.clockOriginal = input.value;
+      // 적힌 값은 세 자리로(빈칸은 그대로 — 자리표시자 0:00:00)
+      const value = input.value.trim() ? S.parseClock(input.value) : null;
+      if (value != null) input.value = formatClockFull(value);
+      showClockPanel(input);
+    });
+    root.addEventListener("input", (event) => {
+      if (event.target === clockPanelInput) updateClockPanel();
+    });
+    // 칸을 직접 누르면 자리 고르기를 끝내고 보통 입력으로.
+    root.addEventListener("mousedown", (event) => {
+      if (event.target.closest?.(selector) && clockEdit) endClockEdit();
     });
     root.addEventListener("keydown", (event) => {
       const input = event.target.closest?.(selector);
       if (!input || event.altKey || event.ctrlKey || event.metaKey) return; // Alt+↑/↓ 는 순서 바꾸기
+      if (clockEditKey(event, input)) {
+        event.preventDefault();
+        return;
+      }
       if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         if (stepClockInput(input, event.key === "ArrowUp" ? 1 : -1, event.shiftKey)) event.preventDefault();
       } else if (event.key === "Escape") {
@@ -98,6 +326,10 @@
     // ↑↓·휠로 바꾼 값은 브라우저 change 가 오지 않으므로 칸을 벗어날 때 직접 알린다.
     root.addEventListener("focusout", (event) => {
       const input = event.target.closest?.(selector);
+      if (input && input === clockPanelInput) hideClockPanel();
+      // 벗어나면 평소 표기(5:30)로
+      const value = input?.value.trim() ? S.parseClock(input.value) : null;
+      if (value != null && input.getAttribute("aria-invalid") !== "true") input.value = S.formatClock(value);
       if (!input?.dataset.clockDirty) return;
       delete input.dataset.clockDirty;
       input.dispatchEvent(new Event("change", { bubbles: true }));
@@ -208,7 +440,7 @@
     const thumb = item.thumb ? `<img src="${esc(item.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : "";
     const duration = item.duration ? `<span class="pl-duration">${esc(S.formatClock(item.duration))}</span>` : "";
     const start = item.type === "video"
-      ? `<label class="pl-start">시작 <input type="text" inputmode="numeric" data-start data-clock-max="${item.duration > 0 ? item.duration - 1 : ""}" value="${item.start ? esc(S.formatClock(item.start)) : ""}" placeholder="0:00" aria-label="${index + 1}번 시작 시간" title="${esc(CLOCK_INPUT_TIP)}"></label>`
+      ? `<label class="pl-start">시작 <input type="text" inputmode="numeric" data-start data-clock-max="${item.duration > 0 ? item.duration - 1 : ""}" value="${item.start ? esc(S.formatClock(item.start)) : ""}" placeholder="0:00:00" aria-label="${index + 1}번 시작 시간" title="${esc(CLOCK_INPUT_TIP)}"></label>`
       : "";
     return (
       `<li class="pl-item${selected ? " is-selected" : ""}" data-item-id="${esc(item.id)}">` +
@@ -553,8 +785,8 @@
     const title = info.title || (meta === "loading" || meta === undefined ? "불러오는 중…" : "정보를 찾지 못했습니다. 주소를 확인해 주세요.");
     const thumb = info.thumb ? `<img src="${esc(info.thumb)}" alt="" referrerpolicy="no-referrer">` : "";
     const start = clip ? "" :
-      `<span class="pl-url-start"><label class="pl-start">시작 <input type="text" inputmode="numeric" data-url-start value="${item.start ? esc(S.formatClock(item.start)) : ""}" ` +
-      `placeholder="0:00" aria-label="시작 시간(시:분:초)" title="${esc(CLOCK_INPUT_TIP)}"></label><small data-url-time>${item.start ? `currentTime=${item.start}` : "처음부터"}</small></span>`;
+      `<span class="pl-url-start"><label class="pl-start">시작 <input type="text" inputmode="numeric" data-url-start data-clock-max="${info.duration > 0 ? info.duration - 1 : ""}" value="${item.start ? esc(S.formatClock(item.start)) : ""}" ` +
+      `placeholder="0:00:00" aria-label="시작 시간(시:분:초)" title="${esc(CLOCK_INPUT_TIP)}"></label><small data-url-time>${item.start ? `currentTime=${item.start}` : "처음부터"}</small></span>`;
     return (
       `<li class="pl-url-card${clip ? " is-clip" : ""}${meta === null ? " is-missing" : ""}" data-line="${row.line}">` +
       `<span class="pl-card-thumb${info.adult ? " is-adult" : ""}"${clip ? ` data-uid="${esc(item.clipUID)}"` : ""}>${thumb}${kindBadgeHtml(clip)}` +
@@ -1305,7 +1537,8 @@
       add.channelRows = page.rows;
       box.innerHTML = page.rows.map((row, index) =>
         `<li><button type="button" data-channel="${index}">` +
-        (row.channelImageUrl ? `<img src="${esc(row.channelImageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : "") +
+        // 프로필이 없으면 기본 프로필(다시보기 채널 찾기와 같다)
+        SOURCES.profileImg(row.channelImageUrl, 'referrerpolicy="no-referrer"') +
         `<span class="pl-channel-name"><span>${esc(row.channelName)}</span>${verifiedHtml(row)}</span></button></li>`).join("");
       box.hidden = false;
       status.textContent = page.rows.length ? "클립을 볼 채널을 고르세요." : "채널을 찾지 못했습니다.";
@@ -1426,14 +1659,18 @@
     } catch {}
     if (token !== channelSuggestToken) return;
     channelSuggestRows = rows;
+    // 검색어로 다시보기 찾기는 옆 '검색' 버튼·Enter 로 한다(제안 목록에는 채널만). 채널이 없으면 닫는다.
+    if (!rows.length) {
+      hideChannelSuggest();
+      return;
+    }
     popover.innerHTML =
       rows.map((row, index) =>
         `<button type="button" class="mv-video-channel-option" role="option" data-pl-channel="${index}">` +
-        SOURCES.profileImg(row.channelImageUrl, 'alt=""') +
+        SOURCES.profileImg(row.channelImageUrl) +
         `<span class="mv-video-channel-option-name">${esc(row.channelName || "채널")}</span>` +
         (CheeseVerifiedMark.kind(row) ? `<span class="mv-card-verified pl-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(row)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(row))} 채널"></span>` : "") +
-        `</button>`).join("") +
-      `<button type="button" class="mv-video-channel-more" data-pl-keyword>"${esc(query)}" 다시보기 검색 (Enter)</button>`;
+        `</button>`).join("");
   }
   const videoSearchInput = $("plVideoSearch").querySelector("input");
   videoSearchInput.addEventListener("input", () => {
@@ -1449,10 +1686,6 @@
     if (event.key === "Escape") hideChannelSuggest();
   });
   $("plVideoChannelPopover").addEventListener("click", (event) => {
-    if (event.target.closest("[data-pl-keyword]")) {
-      $("plVideoSearch").requestSubmit();
-      return;
-    }
     const row = channelSuggestRows[Number(event.target.closest("[data-pl-channel]")?.dataset.plChannel)];
     if (!row) return;
     hideChannelSuggest();
@@ -1554,6 +1787,13 @@
       localStorage.setItem(THEME_KEY, next);
     } catch {}
     paintThemeButton();
+    // 채널 이미지가 없어 넣어 둔 기본 프로필(채널 찾기·결과 카드)도 테마에 맞는 것으로 바꾼다(멀티뷰와 같다).
+    const url = SOURCES?.defaultProfileUrl?.(next);
+    if (url) {
+      document.querySelectorAll("img[data-mv-default-profile]").forEach((img) => {
+        if (img.getAttribute("src") !== url) img.setAttribute("src", url);
+      });
+    }
   });
 
   const requested = new URLSearchParams(location.search).get("list") || "";
