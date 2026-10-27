@@ -96,7 +96,7 @@
       createdDate,
       attachments,
       hasAttachment: attachments.length > 0 || raw?.hasAttachment === true,
-      verifiedMark: raw?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(raw),
       buffCount: toCount(raw?.buffCount),
       childObjectCount: toCount(raw?.childObjectCount),
       link: `https://chzzk.naver.com/${channelId}/community/detail/${encodeURIComponent(commentId)}`,
@@ -423,8 +423,8 @@
           )}" data-fallback="${escapeHtml(fallback)}" alt="" width="52" height="52"></span>
           <span class="cheese-inbox-community-copy">
             <strong>${escapeHtml(item.channelName)}${
-              item.verifiedMark
-                ? '<i class="cheese-inbox-community-official-mark" aria-hidden="true"></i><span class="cheese-inbox-community-a11y">인증 마크</span>'
+              CheeseVerifiedMark.kind(item)
+                ? `<i class="cheese-inbox-community-official-mark" data-cheese-mark="${CheeseVerifiedMark.kind(item)}" aria-hidden="true"></i><span class="cheese-inbox-community-a11y">인증 마크</span>`
                 : ""
             }</strong>
             <span>${escapeHtml(item.excerpt || "새 커뮤니티 소식")}</span>

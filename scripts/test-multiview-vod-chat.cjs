@@ -6,6 +6,7 @@ const source = fs.readFileSync("src/multiviewVodChat.js", "utf8");
 const badgeSource = fs.readFileSync("src/achievementBadgeMap.js", "utf8");
 const context = { AbortController, DOMException, URL, setTimeout, clearTimeout, Date, Math };
 context.globalThis = context;
+vm.runInNewContext(fs.readFileSync("src/verifiedMark.js", "utf8"), context);
 vm.runInNewContext(badgeSource, context);
 vm.runInNewContext(source, context);
 

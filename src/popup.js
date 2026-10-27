@@ -85,8 +85,6 @@ const calendarMonths = {
 
 const STREAMER_SEARCH_COOLDOWN_MS = 900;
 const THEME_STORAGE_KEY = "cheeseSearchTheme";
-const OFFICIAL_MARK_ICON_URL =
-  "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png";
 const CACHE_TTL_MS = 1 * 60 * 60 * 1000;
 const CACHE_CHUNK_SEPARATOR = "#chunk:";
 const RESULT_INITIAL_RENDER_COUNT = 120;
@@ -920,8 +918,9 @@ function renderChannelCandidateButton(candidate, index) {
   const avatar = imageUrl
     ? `<span class="popup-channel-candidate-avatar-shimmer popup-candidate-shimmer"></span><img data-channel-candidate-avatar-img src="${escapeAttribute(imageUrl)}" alt="" referrerpolicy="no-referrer" loading="eager"><span class="popup-channel-candidate-avatar-initial" data-channel-candidate-avatar-fallback hidden>${escapeHtml(name.slice(0, 1) || "?")}</span>`
     : `<span class="popup-channel-candidate-avatar-shimmer popup-candidate-shimmer"></span><span class="popup-channel-candidate-avatar-initial" data-channel-candidate-avatar-fallback>${escapeHtml(name.slice(0, 1) || "?")}</span>`;
-  const verified = candidate?.verifiedMark
-    ? `<span class="popup-channel-candidate-verified-wrap"><img class="popup-channel-candidate-official" data-official-badge src="${escapeAttribute(OFFICIAL_MARK_ICON_URL)}" alt="인증"><em class="popup-channel-candidate-verified" hidden>인증</em></span>`
+  const markKind = CheeseVerifiedMark.kind(candidate);
+  const verified = markKind
+    ? `<span class="popup-channel-candidate-verified-wrap"><img class="popup-channel-candidate-official" data-official-badge data-cheese-mark="${markKind}" src="${escapeAttribute(CheeseVerifiedMark.icon(markKind))}" alt="인증"><em class="popup-channel-candidate-verified" hidden>인증</em></span>`
     : "";
   const channelId = String(candidate?.channelId || "");
   return `

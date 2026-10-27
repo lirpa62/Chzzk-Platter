@@ -315,6 +315,7 @@ const checks = [];
   await evaluate(
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
+  await evaluate(readFileSync("src/verifiedMark.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
   await evaluate(readFileSync("src/multiviewVideoSearchControls.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSort.js", "utf8"));
@@ -1772,6 +1773,7 @@ const checks = [];
   await evaluate(
     `{const s=document.createElement('style');s.textContent=${JSON.stringify(style)};document.head.append(s);}`,
   );
+  await evaluate(readFileSync("src/verifiedMark.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSources.js", "utf8"));
   await evaluate(readFileSync("src/multiviewVideoSearchControls.js", "utf8"));
   await evaluate(readFileSync("src/multiviewSort.js", "utf8"));

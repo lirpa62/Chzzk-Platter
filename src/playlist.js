@@ -478,7 +478,7 @@
       `<span class="pl-url-body"><span class="pl-card-title">${esc(title)}</span>` +
       (info.channelName
         ? `<span class="pl-card-name-row">${profileHtml(info.channelImageUrl)}<span class="pl-card-name">${esc(info.channelName)}</span>` +
-          (info.verifiedMark ? `<span class="pl-card-verified" role="img" aria-label="파트너 채널"></span>` : "") + `</span>`
+          (CheeseVerifiedMark.kind(info) ? `<span class="pl-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(info)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(info))} 채널"></span>` : "") + `</span>`
         : "") +
       `<span class="pl-url-kind"><span class="pl-badge${clip ? " is-clip" : ""}">${clip ? "클립" : "다시보기"}</span>${start}</span>` +
       `</span></li>`
@@ -877,7 +877,7 @@
         `<span class="pl-card-body">${profileHtml(item.channelImageUrl)}<span class="pl-card-text">` +
         `<span class="pl-card-title" title="${esc(item.title)}">${esc(item.title || "제목 없음")}</span>` +
         `<span class="pl-card-name-row"><span class="pl-card-name">${esc(item.channelName || "")}</span>` +
-        (item.verifiedMark ? `<span class="pl-card-verified" role="img" aria-label="파트너 채널"></span>` : "") +
+        (CheeseVerifiedMark.kind(item) ? `<span class="pl-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(item)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(item))} 채널"></span>` : "") +
         `</span>` + (resultInfo(item) ? `<span class="pl-card-info">${esc(resultInfo(item))}</span>` : "") +
         `</span></span></button></li>`
       );
@@ -941,7 +941,7 @@
       if (channelInfo.has(id)) continue;
       const job = SOURCES.getJson(`${SOURCES.API}/service/v1/channels/${id}`)
         .then((content) => {
-          const info = content ? { image: String(content.channelImageUrl || ""), verified: content.verifiedMark === true, name: String(content.channelName || "") } : null;
+          const info = content ? { image: String(content.channelImageUrl || ""), verified: content.verifiedMark === true, verifiedMarkType: CheeseVerifiedMark.typeOf(content), name: String(content.channelName || "") } : null;
           channelInfo.set(id, info);
           return info;
         })
@@ -960,6 +960,7 @@
       ...item,
       channelImageUrl: item.channelImageUrl || info.image,
       verifiedMark: item.verifiedMark === true || info.verified,
+      verifiedMarkType: CheeseVerifiedMark.typeOf(item, info),
       channelName: item.channelName || info.name,
     };
   }
@@ -1006,6 +1007,7 @@
       date: row.openedAt,
       channelImageUrl: row.channelImageUrl,
       // 다시보기 보관함은 파트너 표시를 저장하지 않은 항목이 있다 → 모르면 채널 정보로 채운다.
+      verifiedMarkType: CheeseVerifiedMark.typeOf(row),
       verifiedMark: row.verifiedMark === true ? true : add.videoSource === "vault" && !add.videoQuery && !add.videoChannel ? undefined : false,
     };
   }
@@ -1060,6 +1062,7 @@
       views: Number(row.readCount ?? row.playCount) || 0,
       date: clipDate(row.createdDate || row.publishDate || row.createdAt),
       channelImageUrl: String(row.ownerChannel?.channelImageUrl || row.channelImageUrl || channel?.channelImageUrl || ""),
+      verifiedMarkType: CheeseVerifiedMark.typeOf(row.ownerChannel, row, channel),
       verifiedMark: row.ownerChannel?.verifiedMark === true || row.verifiedMark === true || channel?.verifiedMark === true
         ? true
         : channel ? false : undefined, // 클립 보관함 항목은 파트너 표시를 모른다
@@ -1268,7 +1271,7 @@
         `<button type="button" class="mv-video-channel-option" role="option" data-pl-channel="${index}">` +
         SOURCES.profileImg(row.channelImageUrl, 'alt=""') +
         `<span class="mv-video-channel-option-name">${esc(row.channelName || "채널")}</span>` +
-        (row.verifiedMark ? `<span class="mv-card-verified pl-card-verified" role="img" aria-label="파트너 채널"></span>` : "") +
+        (CheeseVerifiedMark.kind(row) ? `<span class="mv-card-verified pl-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(row)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(row))} 채널"></span>` : "") +
         `</button>`).join("") +
       `<button type="button" class="mv-video-channel-more" data-pl-keyword>"${esc(query)}" 다시보기 검색 (Enter)</button>`;
   }

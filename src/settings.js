@@ -12521,7 +12521,7 @@
         channelImageUrl: String(raw?.channelImageUrl || "")
           .trim()
           .slice(0, 1500),
-        verifiedMark: raw?.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(raw),
         duration,
         durationSeconds: Math.max(
           0,

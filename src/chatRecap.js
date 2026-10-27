@@ -799,10 +799,11 @@
     }
   }
 
-  // 파트너 인증 마크. 내역 페이지와 같은 아이콘(.lps-mark)을 쓴다.
-  function verifiedMarkEl() {
+  // 인증 마크. 내역 페이지와 같은 아이콘(.lps-mark)을 쓰고, 종류(파트너·챌린저)는 data-cheese-mark 로 단다.
+  function verifiedMarkEl(source) {
     const i = document.createElement("i");
     i.className = "lps-mark";
+    i.dataset.cheeseMark = CheeseVerifiedMark.kind(source) || "partner";
     i.setAttribute("aria-hidden", "true");
     const sr = document.createElement("span");
     sr.className = "lps-a11y";
@@ -846,7 +847,7 @@
         const c = (await res.json())?.content || {};
         const info = {
           name: String(c.channelName || "").trim(),
-          verifiedMark: c.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(c),
           imageUrl: String(c.channelImageUrl || ""),
         };
         // 이름을 얻었을 때만 캐시한다(실패를 굳혀 두지 않는다).
@@ -854,8 +855,7 @@
           const previous = nameCache.get(id);
           info.name = info.name || previous?.name || "";
           info.imageUrl = info.imageUrl || previous?.imageUrl || "";
-          info.verifiedMark =
-            info.verifiedMark === true || previous?.verifiedMark === true;
+          Object.assign(info, CheeseVerifiedMark.fields(info, previous));
           nameCache.set(id, info);
         }
         return info;
@@ -878,10 +878,7 @@
     return {
       name: detail.name || known?.name || cached?.name || "",
       imageUrl: detail.imageUrl || known?.imageUrl || cached?.imageUrl || "",
-      verifiedMark:
-        detail.verifiedMark === true ||
-        known?.verifiedMark === true ||
-        cached?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(detail, known, cached),
     };
   }
 
@@ -932,7 +929,7 @@
           channelId: String(r?.channelId || "").toLowerCase(),
           name: String(r?.channelName || ""),
           imageUrl: String(r?.channelImageUrl || ""),
-          verifiedMark: r?.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(r),
           tierName: String(r?.tierName || ""),
           months: Number(r?.totalMonth) || 0,
         }))
@@ -2269,7 +2266,7 @@
       if (info.verifiedMark && !markEl) {
         markEl = document.createElement("span");
         markEl.className = "crc-stat-mark";
-        markEl.append(verifiedMarkEl());
+        markEl.append(verifiedMarkEl(info));
         name.after(markEl);
       }
     };
@@ -6366,7 +6363,7 @@
         text.className = "crc-name-text";
         text.textContent = info.name;
         el.append(text);
-        if (info.verifiedMark) el.append(verifiedMarkEl());
+        if (info.verifiedMark) el.append(verifiedMarkEl(info));
         // 실제 프로필은 로드가 끝난 뒤 기본 프로필 위에 교체해 깜빡임을 막는다.
         const avatar = list.querySelector(`[data-avatar="${id}"]`);
         if (avatar && info.imageUrl) {
@@ -8066,7 +8063,7 @@
         if (info.verifiedMark) {
           for (const name of el.querySelectorAll(".crc-card-name")) {
             if (!name.querySelector(".lps-mark")) {
-              name.append(verifiedMarkEl());
+              name.append(verifiedMarkEl(info));
             }
           }
         }
@@ -8684,8 +8681,7 @@
       nameCache.set(id, {
         name: cached?.name || channel.name || "",
         imageUrl: cached?.imageUrl || channel.imageUrl || "",
-        verifiedMark:
-          cached?.verifiedMark === true || channel.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(cached, channel),
       });
       if (channel.verifiedMark !== true) continue;
 
@@ -8698,7 +8694,7 @@
         `.crc-channel-name[data-channel="${id}"], .crc-card[data-card-for="${id}"] .crc-card-name`,
       );
       for (const name of names) {
-        if (!name.querySelector(".lps-mark")) name.append(verifiedMarkEl());
+        if (!name.querySelector(".lps-mark")) name.append(verifiedMarkEl(channel));
       }
     }
   }
@@ -8730,10 +8726,7 @@
           channelId: id,
           name: String(ch.channelName || "(이름 없음)"),
           imageUrl: String(ch.channelImageUrl || ""),
-          verifiedMark:
-            ch.verifiedMark === true ||
-            item?.verifiedMark === true ||
-            item?.streamer?.verifiedMark === true, // 파트너 인증 마크
+          ...CheeseVerifiedMark.fields(ch, item, item?.streamer), // 인증 마크(파트너·챌린저)
         });
       }
       const total = Number(json?.content?.totalPage);
@@ -8751,8 +8744,7 @@
               channelId: channel.channelId,
               name: previous.name || channel.name,
               imageUrl: previous.imageUrl || channel.imageUrl,
-              verifiedMark:
-                previous.verifiedMark === true || channel.verifiedMark === true,
+              ...CheeseVerifiedMark.fields(previous, channel),
             }
           : channel,
       );
@@ -8774,8 +8766,7 @@
         channelId: channel.channelId,
         name: channel.name || previous?.name || channel.channelId.slice(0, 8),
         imageUrl: channel.imageUrl || previous?.imageUrl || "",
-        verifiedMark:
-          channel.verifiedMark === true || previous?.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(channel, previous),
       });
     }
     followings = [...byId.values()].sort((a, b) =>
@@ -9016,7 +9007,7 @@
           channelId,
           name: info.name || channelId.slice(0, 8),
           imageUrl: info.imageUrl || "",
-          verifiedMark: info.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(info),
         });
       }
     };
@@ -10675,7 +10666,7 @@
     nameText.className = "crc-name-text";
     nameText.textContent = c.name;
     name.append(nameText);
-    if (c.verifiedMark) name.append(verifiedMarkEl());
+    if (c.verifiedMark) name.append(verifiedMarkEl(c));
     label.append(cb, avatarBox, name);
     if (state) {
       const badge = document.createElement("span");

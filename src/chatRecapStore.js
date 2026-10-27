@@ -589,7 +589,7 @@
     if (role.includes("streamer")) return "streamer";
     if (role.includes("manager")) return "manager";
     // 파트너는 역할 코드가 아니라 인증 마크로 구분한다(일반 시청자여도 붙는다).
-    if (profile?.verifiedMark === true) return "partner";
+    if (CheeseVerifiedMark.kind(profile) === "partner") return "partner";
     return "";
   }
 

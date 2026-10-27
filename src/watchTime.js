@@ -82,7 +82,9 @@
   // 이름 + 파트너 인증 마크(통나무파워 내역과 같은 아이콘).
   function channelNameHtml(id) {
     return `<span class="wt-name">${esc(channelName(id))}</span>` +
-      (state.meta[id]?.verified ? '<i class="wt-mark" aria-hidden="true"></i><span class="wt-a11y">인증 마크</span>' : "");
+      (state.meta[id]?.verified
+        ? `<i class="wt-mark" data-cheese-mark="${CheeseVerifiedMark.kind({ verifiedMark: true, verifiedMarkType: state.meta[id].verifiedMarkType })}" aria-hidden="true"></i><span class="wt-a11y">인증 마크</span>`
+        : "");
   }
 
   function avatarHtml(id, className = "wt-avatar") {
@@ -379,6 +381,7 @@
             name: String(content.channelName || ""),
             image: String(content.channelImageUrl || ""),
             verified: content.verifiedMark === true,
+            ...(CheeseVerifiedMark.typeOf(content) ? { verifiedMarkType: CheeseVerifiedMark.typeOf(content) } : {}),
             at: Date.now(),
           };
           changed = true;

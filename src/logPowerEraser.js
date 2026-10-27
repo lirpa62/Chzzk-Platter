@@ -220,8 +220,9 @@ function renderList(container, channels) {
       const isHidden = hiddenSet.has(channel.channelId);
 
       // 인증 마크
-      const verifiedIcon = channel.verifiedMark
-        ? '<i class="verified-mark"></i>'
+      const markKind = CheeseVerifiedMark.kind(channel);
+      const verifiedIcon = markKind
+        ? `<i class="verified-mark" data-cheese-mark="${markKind}"></i>`
         : "";
 
       // 숫자 포맷

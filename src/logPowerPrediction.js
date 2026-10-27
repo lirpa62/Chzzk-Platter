@@ -159,7 +159,7 @@
         channelId: p.channelId,
         channelName: p.channelName || "채널",
         channelImageUrl: p.channelImageUrl || "",
-        verifiedMark: p.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(p),
         claimType: "PREDICTION_BET",
       },
     });
@@ -177,7 +177,7 @@
       channelId: p.channelId,
       channelName: p.channelName || "채널",
       channelImageUrl: p.channelImageUrl || "",
-      verifiedMark: p.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(p),
       amount,
       fiveMinAmount: 0,
       // 부스팅은 시청 보상 전용 — 예측에는 붙지 않는다.
@@ -192,7 +192,7 @@
     return {
       channelName: String(c?.channelName || "").slice(0, 100),
       channelImageUrl: String(c?.channelImageUrl || ""),
-      verifiedMark: c?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(c),
     };
   }
 
@@ -230,7 +230,7 @@
       ? {
           channelName: known.channelName,
           channelImageUrl: known.channelImageUrl,
-          verifiedMark: known.verifiedMark,
+          ...CheeseVerifiedMark.fields(known),
         }
       : await channelMeta(channelId);
 

@@ -337,8 +337,7 @@
     channelId: String(channel?.channelId || "").toLowerCase(),
     channelName: String(channel?.channelName || "").trim(),
     channelImageUrl: String(channel?.channelImageUrl || ""),
-    verifiedMark:
-      channel?.verifiedMark === true || entry?.verifiedMark === true,
+    ...CheeseVerifiedMark.fields(channel, entry),
     liveTitle: String(live?.liveTitle || "").trim(),
     category: String(live?.liveCategoryValue || "").trim(),
     // 카테고리 칩을 누르면 그 카테고리 라이브를 부른다(categories/{type}/{id}/lives).
@@ -412,7 +411,7 @@
       ownerChannelId: HASH_RE.test(ownerChannelId) ? ownerChannelId : "",
       channelName: String(channel?.channelName || entry?.channelName || "").trim(),
       channelImageUrl: String(channel?.channelImageUrl || entry?.channelImageUrl || ""),
-      verifiedMark: channel?.verifiedMark === true || entry?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(channel, entry),
       liveTitle: String(video?.videoTitle || video?.title || entry?.videoTitle || "").trim(),
       liveImageUrl: thumbnail,
       category: String(video?.videoCategoryValue || video?.categoryName || video?.category || "").trim(),
@@ -580,7 +579,7 @@
         channelId: id,
         channelName: String(channel?.channelName || "").trim(),
         channelImageUrl: String(channel?.channelImageUrl || ""),
-        verifiedMark: channel?.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(channel),
         mediaType: "channel",
       };
     }).filter(Boolean);
@@ -721,7 +720,7 @@
           channelId: item?.channelId,
           channelName: item?.channelName,
           channelImageUrl: item?.channelImageUrl,
-          verifiedMark: item?.verifiedMark,
+          ...CheeseVerifiedMark.fields(item),
         },
       })).filter(Boolean);
     } catch {

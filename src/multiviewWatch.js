@@ -7419,7 +7419,7 @@
             channelId: quickVideoChannel.channelId,
             channelName: quickVideoChannel.channelName,
             channelImageUrl: quickVideoChannel.channelImageUrl,
-            verifiedMark: quickVideoChannel.verifiedMark === true,
+            ...CheeseVerifiedMark.fields(quickVideoChannel),
           } : null,
           videoChannelView: quickVideoChannelView,
           keyword: quickKeyword,
@@ -7880,9 +7880,7 @@
       `<span class="mv-quick-card-text">` +
       `<span class="mv-quick-card-title">${esc(r.liveTitle || "제목 없음")}</span>` +
       `<span class="mv-quick-card-name-row"><span class="mv-quick-card-name">${esc(r.channelName)}</span>` +
-      (r.verifiedMark
-        ? `<span class="mv-card-verified" role="img" aria-label="인증 채널"></span>`
-        : "") +
+      (CheeseVerifiedMark.kind(r) ? `<span class="mv-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(r)}" role="img" aria-label="인증 채널"></span>` : "") +
       `</span>` +
       (isVideo
         ? `<span class="mv-quick-card-video-info">조회수 ${fmtCount(r.viewers)}회${r.openedAt ? ` · ${esc(SOURCES.formatVideoDate(r.openedAt))}` : ""}</span>`
@@ -7899,7 +7897,7 @@
     return `<button type="button" class="mv-video-channel-option" role="option" data-mv-quick-video-channel="${esc(channel.channelId)}">` +
       SOURCES.profileImg(channel.channelImageUrl) +
       `<span class="mv-video-channel-option-name">${esc(channel.channelName || "채널")}</span>` +
-      (channel.verifiedMark ? `<span class="mv-card-verified" role="img" aria-label="파트너 채널"></span>` : "") +
+      (CheeseVerifiedMark.kind(channel) ? `<span class="mv-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(channel)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(channel))} 채널"></span>` : "") +
       `</button>`;
   }
 

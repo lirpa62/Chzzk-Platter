@@ -21,6 +21,7 @@ const { join } = require("node:path");
 
 const SRC = readFileSync(join(__dirname, "..", "src", "content.js"), "utf8");
 const CSS = readFileSync(join(__dirname, "..", "src", "content.css"), "utf8");
+const VERIFIED_MARK = readFileSync(join(__dirname, "..", "src", "verifiedMark.js"), "utf8");
 
 // ⚠ 렌더러를 손으로 베껴 두면 원본에서 클래스가 빠져도 이 검사가 통과한다.
 //   반드시 원본에서 떼어 온다.
@@ -154,6 +155,8 @@ const HARVEST = {
     return r.result.value;
   };
 
+  // 인증 마크 판단(content.js 앞에 실리는 공용 스크립트).
+  await ev(VERIFIED_MARK);
   // 렌더러와 그 의존 함수를 원본 그대로 올린다.
   await ev(`(()=>{
     window.CHANNEL_PROFILE_RADIUS_TARGET_CLASS = "cheese-channel-profile-radius-target";

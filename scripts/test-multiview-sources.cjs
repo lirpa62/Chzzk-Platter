@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+require("../src/verifiedMark.js");
 const SOURCES = require("../src/multiviewSources.js");
 
 const id = (n) => n.toString(16).padStart(32, "0");

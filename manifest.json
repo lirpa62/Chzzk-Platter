@@ -75,6 +75,7 @@
         "https://chzzk.naver.com/clip-editor*"
       ],
       "js": [
+        "src/verifiedMark.js",
         "src/searchQuery.js",
         "src/categoryAutocomplete.js",
         "src/chatRecapStore.js",
@@ -95,7 +96,7 @@
     },
     {
       "matches": ["https://chzzk.naver.com/*"],
-      "js": ["src/logPowerPrediction.js"],
+      "js": ["src/verifiedMark.js", "src/logPowerPrediction.js"],
       "run_at": "document_idle",
       "all_frames": false
     },
@@ -218,13 +219,13 @@
     },
     {
       "matches": ["https://game.naver.com/profile*"],
-      "js": ["src/logPowerEraser.js"],
+      "js": ["src/verifiedMark.js", "src/logPowerEraser.js"],
       "css": ["src/logPowerEraser.css"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://game.naver.com/notify*"],
-      "js": ["src/inboxCommunity.js", "src/inboxLogPower.js"],
+      "js": ["src/verifiedMark.js", "src/inboxCommunity.js", "src/inboxLogPower.js"],
       "css": ["src/inboxCommunity.css", "src/inboxLogPower.css"],
       "run_at": "document_idle",
       "all_frames": true
@@ -246,6 +247,7 @@
         "popup.html",
         "src/popup.css",
         "src/themeInit.js",
+        "src/verifiedMark.js",
         "src/searchQuery.js",
         "src/categoryAutocomplete.js",
         "src/popup.js",

@@ -5357,7 +5357,7 @@
         const meta = {
           channelName: String(c?.channelName || "").trim(),
           channelImageUrl: String(c?.channelImageUrl || "").trim(),
-          verifiedMark: c?.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(c),
         };
         mapSetCapped(channelMetaCache, channelId, meta, 300);
         return meta;
@@ -8462,8 +8462,9 @@
               .map((x, i) => {
                 const active = x.active !== false;
                 const nameColor = active ? "inherit" : "#888";
-                const verified = x.verifiedMark
-                  ? `<img src="https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png" alt="인증" class="cheese-logpower-popup-verified">`
+                const markKind = CheeseVerifiedMark.kind(x);
+                const verified = markKind
+                  ? `<img src="${CheeseVerifiedMark.icon(markKind)}" alt="인증" class="cheese-logpower-popup-verified" data-cheese-mark="${markKind}">`
                   : "";
                 return (
                   `<div class="cheese-logpower-popup-row">` +
@@ -9298,7 +9299,7 @@
           channelName:
             meta?.channelName || (await resolveChannelName(channelId)),
           channelImageUrl: meta?.channelImageUrl || "",
-          verifiedMark: meta?.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(meta),
           amount: oc.amount,
           fiveMinAmount: 0,
           boost: 1,
@@ -9326,7 +9327,7 @@
         channelName:
           logMeta?.channelName || (await resolveChannelName(channelId)),
         channelImageUrl: logMeta?.channelImageUrl || "",
-        verifiedMark: logMeta?.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(logMeta),
         amount: hourRewardAmount,
         fiveMinAmount: 0,
         // 구독 부스팅 배수(1 = 미구독, 1.2 = 티어1, 2 = 티어2). 통계에서 활용한다.
@@ -9449,7 +9450,7 @@
           channelId,
           channelName: name,
           channelImageUrl: meta?.channelImageUrl || "",
-          verifiedMark: meta?.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(meta),
           amount,
           fiveMinAmount: 0,
           // 티어 부스팅은 시청 보상에만 적용된다 → 항상 1.
@@ -15947,8 +15948,7 @@
           channelId.slice(0, 8),
       ),
       imageUrl: String(remote?.channelImageUrl || followed?.imageUrl || ""),
-      verifiedMark:
-        remote?.verifiedMark === true || followed?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(remote, followed),
     };
     recapSearchChannelCache.set(channelId, meta.name);
     recapSearchChannelMetaCache.set(channelId, meta);
@@ -16592,10 +16592,12 @@
       const name = document.createElement("strong");
       name.textContent = meta.name;
       statusChannel.append(profile, name);
-      if (meta.verifiedMark) {
+      const markKind = CheeseVerifiedMark.kind(meta);
+      if (markKind) {
         const mark = document.createElement("i");
         mark.className = `${RECAP_SEARCH_WINDOW_CLASS}-status-official`;
-        mark.setAttribute("aria-label", "파트너 채널");
+        mark.dataset.cheeseMark = markKind;
+        mark.setAttribute("aria-label", `${CheeseVerifiedMark.label(markKind)} 채널`);
         statusChannel.append(mark);
       }
       statusChannel.hidden = false;
@@ -27442,7 +27444,7 @@ html.cheese-sidebar-resizing div#layout-body {
       channelId,
       channelName: item?.channel?.channelName || "",
       channelImageUrl: item?.channel?.channelImageUrl || "",
-      verifiedMark: item?.channel?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(item?.channel),
       achievementBadgeUrls: getAchievementBadgeUrls(
         item?.channel?.activatedChannelBadgeIds,
       ),
@@ -27572,6 +27574,7 @@ html.cheese-sidebar-resizing div#layout-body {
 
   function createHeaderFollowTooltipHtml(item, href) {
     const channelName = item.channelName || "팔로우 채널";
+    const markKind = CheeseVerifiedMark.kind(item);
     const badgeHtml = item.achievementBadgeUrls
       .map(
         (url) =>
@@ -27585,7 +27588,7 @@ html.cheese-sidebar-resizing div#layout-body {
       `<span class="cheese-header-follow-tooltip-box">` +
       `<strong class="cheese-header-follow-tooltip-name">` +
       `<span>${escapeHtml(channelName)}</span>` +
-      `${item.verifiedMark ? `<i class="cheese-header-follow-official-mark" aria-hidden="true"></i><span class="blind">인증 마크</span>` : ""}` +
+      `${markKind ? `<i class="cheese-header-follow-official-mark" data-cheese-mark="${markKind}" aria-hidden="true"></i><span class="blind">인증 마크</span>` : ""}` +
       badgeHtml +
       `</strong>` +
       `${item.category ? `<span class="cheese-header-follow-tooltip-category">${escapeHtml(item.category)}</span>` : ""}` +
@@ -27818,7 +27821,7 @@ html.cheese-sidebar-resizing div#layout-body {
       createdDate,
       attachments,
       hasAttachment: attachments.length > 0 || raw?.hasAttachment === true,
-      verifiedMark: raw?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(raw),
       buffCount: toInboxCommunityCount(raw?.buffCount),
       childObjectCount: toInboxCommunityCount(raw?.childObjectCount),
       link: `https://chzzk.naver.com/${channelId}/community/detail/${encodeURIComponent(commentId)}`,
@@ -27939,7 +27942,7 @@ html.cheese-sidebar-resizing div#layout-body {
         channelId: String(channel.channelId),
         channelName: String(channel.channelName || "").trim() || "채널",
         channelImageUrl: String(channel.channelImageUrl || "").trim(),
-        verifiedMark: channel.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(channel),
       }));
   }
 
@@ -30552,9 +30555,13 @@ html.cheese-sidebar-resizing div#layout-body {
     if (nameText) nameText.textContent = channelName;
     else if (nameRoot) nameRoot.prepend(document.createTextNode(channelName));
     nameRoot?.querySelectorAll("i").forEach((icon) => icon.remove());
-    if (channel?.verifiedMark && nameRoot) {
-      const verified = getCategoryVideoVerifiedMarkTemplate();
-      if (verified) nameRoot.append(verified.cloneNode(true));
+    const markKind = CheeseVerifiedMark.kind(channel);
+    if (markKind && nameRoot) {
+      const verified = getCategoryVideoVerifiedMarkTemplate()?.cloneNode(true);
+      if (verified) {
+        verified.dataset.cheeseMark = markKind;
+        nameRoot.append(verified);
+      }
     }
 
     const information = Array.from(
@@ -32364,11 +32371,13 @@ html.cheese-sidebar-resizing div#layout-body {
     // 2) 캐시 미스(뒤 페이지 채널 등) → API 값으로 폴백 생성. 원본처럼 인증마크 + 첫 업적
     //    배지 1개만. 구조 템플릿이 없으면(스트리머 섹션 없는 검색어) 직접 만들어 붙인다.
     //    인증마크는 배경이미지 없이 _icon_ 클래스의 CSS 로 그려지므로 클래스만 맞으면 된다.
-    if (channel.verifiedMark === true) {
+    const markKind = CheeseVerifiedMark.kind(channel);
+    if (markKind) {
       const v = searchRerankVerifiedTemplate
         ? searchRerankVerifiedTemplate.cloneNode(true)
         : buildSearchRerankIconFromScratch("", "인증 마크");
       v.classList.add("cheese-search-rerank-channel-icon");
+      v.dataset.cheeseMark = markKind;
       iconHost.appendChild(v);
     }
     const badgeIds = Array.isArray(channel.activatedChannelBadgeIds)
@@ -40234,8 +40243,9 @@ html.cheese-sidebar-resizing div#layout-body {
     // 인증마크 + 업적 배지: 네이티브는 모두 _icon_ 에 background-image(인라인). harvest 한
     // _icon_ 클래스를 쓰고, 인증마크는 클래스 기본 배경, 배지는 인라인 background-image.
     const iconCls = c(h?.icon, "cheese-cf-official");
-    const officialHtml = item.verifiedMark
-      ? `<i class="${iconCls}" style="width:13px;height:13px" aria-hidden="true"></i><span class="blind">인증 마크</span>`
+    const markKind = CheeseVerifiedMark.kind(item);
+    const officialHtml = markKind
+      ? `<i class="${iconCls}" data-cheese-mark="${markKind}" style="width:13px;height:13px" aria-hidden="true"></i><span class="blind">인증 마크</span>`
       : "";
     // 업적 배지는 첫 1개만 표시(네이티브 근사 + 폭 절약).
     const firstBadge = (item.achievementBadgeUrls || [])[0];
@@ -45066,7 +45076,7 @@ html.cheese-sidebar-resizing div#layout-body {
       const meta = {
         channelName: c?.channel?.channelName || "",
         channelImageUrl: c?.channel?.channelImageUrl || "",
-        verifiedMark: c?.channel?.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(c?.channel),
         title: c?.liveTitle || "",
         category: c?.liveCategoryValue || c?.liveCategory || "",
         viewers: Number.isFinite(Number(c?.concurrentUserCount))
@@ -45643,8 +45653,8 @@ html.cheese-sidebar-resizing div#layout-body {
           : "") +
         `</span>` +
         `<span class="cheese-follow-preview-meta-name">${escapeHtml(meta.channelName)}</span>` +
-        (meta.verifiedMark
-          ? `<i class="cheese-follow-preview-meta-verified" aria-hidden="true"></i>`
+        (CheeseVerifiedMark.kind(meta)
+          ? `<i class="cheese-follow-preview-meta-verified" data-cheese-mark="${CheeseVerifiedMark.kind(meta)}" aria-hidden="true"></i>`
           : "") +
         `<span class="cheese-follow-preview-meta-row-side">` +
         (elapsed
@@ -45672,8 +45682,8 @@ html.cheese-sidebar-resizing div#layout-body {
         : "") +
       `<span class="cheese-follow-preview-meta-sub">` +
       `<span class="cheese-follow-preview-meta-name">${escapeHtml(meta.channelName)}</span>` +
-      (meta.verifiedMark
-        ? `<i class="cheese-follow-preview-meta-verified" aria-hidden="true"></i>`
+      (CheeseVerifiedMark.kind(meta)
+        ? `<i class="cheese-follow-preview-meta-verified" data-cheese-mark="${CheeseVerifiedMark.kind(meta)}" aria-hidden="true"></i>`
         : "") +
       (meta.category
         ? `<span class="cheese-follow-preview-meta-category">${escapeHtml(meta.category)}</span>`
@@ -47890,7 +47900,7 @@ html.cheese-sidebar-resizing div#layout-body {
       const html = createHeaderFollowTooltipHtml(
         {
           channelName: it.name,
-          verifiedMark: it.verifiedMark,
+          ...CheeseVerifiedMark.fields(it),
           achievementBadgeUrls: it.achievementBadgeUrls || [],
           category: it.category,
           title: it.title,
@@ -48074,7 +48084,7 @@ html.cheese-sidebar-resizing div#layout-body {
           imageUrl: ch.channelImageUrl || "",
           // 오프라인 채널도 배지가 붙도록 전체 팔로잉 API 의 channel 에서 함께 뽑는다
           // (라이브 API 에만 의존하면 오프라인엔 배지가 없다). 없으면 빈 값.
-          verifiedMark: ch.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(ch),
           achievementBadgeUrls: getAchievementBadgeUrls(
             ch.activatedChannelBadgeIds,
           ),
@@ -48185,7 +48195,7 @@ html.cheese-sidebar-resizing div#layout-body {
         name: live?.channelName || ch.name || "(이름 없음)",
         imageUrl: live?.channelImageUrl || ch.imageUrl || "",
         // 라이브 메타 우선, 없으면(오프라인) 전체 팔로잉에서 뽑은 값으로 폴백.
-        verifiedMark: live?.verifiedMark === true || ch.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(live, ch),
         achievementBadgeUrls:
           (live?.achievementBadgeUrls?.length
             ? live.achievementBadgeUrls
@@ -48218,7 +48228,7 @@ html.cheese-sidebar-resizing div#layout-body {
         channelId: id,
         name: live.channelName || "(이름 없음)",
         imageUrl: live.channelImageUrl || "",
-        verifiedMark: live.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(live),
         achievementBadgeUrls: live.achievementBadgeUrls || [],
         followDate: null,
         live: true,
@@ -48292,6 +48302,7 @@ html.cheese-sidebar-resizing div#layout-body {
         item.name,
         item.imageUrl,
         item.verifiedMark === true,
+        item.verifiedMarkType || "",
         item.achievementBadgeUrls || [],
         item.followDate,
         item.live === true,
@@ -54974,7 +54985,7 @@ html.cheese-sidebar-resizing div#layout-body {
       channelImageUrl: String(raw?.channelImageUrl || "")
         .trim()
         .slice(0, 1500),
-      verifiedMark: raw?.verifiedMark === true,
+      ...CheeseVerifiedMark.fields(raw),
       duration,
       durationSeconds,
       readCount: Math.max(0, Number(raw?.readCount) || 0),
@@ -55348,7 +55359,7 @@ html.cheese-sidebar-resizing div#layout-body {
         channelName: item.channelName || meta.channelName || "",
         channelId: item.channelId || meta.channelId || "",
         channelImageUrl: item.channelImageUrl || meta.channelImageUrl || "",
-        verifiedMark: item.verifiedMark || meta.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(meta, item),
         duration: item.duration || meta.duration || "",
         durationSeconds: item.durationSeconds || meta.durationSeconds || 0,
         readCount: meta.readCount || item.readCount || 0,
@@ -55379,6 +55390,7 @@ html.cheese-sidebar-resizing div#layout-body {
         merged.channelId !== item.channelId ||
         merged.channelImageUrl !== item.channelImageUrl ||
         merged.verifiedMark !== item.verifiedMark ||
+        merged.verifiedMarkType !== item.verifiedMarkType ||
         merged.duration !== item.duration ||
         merged.durationSeconds !== item.durationSeconds ||
         merged.readCount !== item.readCount ||
@@ -55817,8 +55829,7 @@ html.cheese-sidebar-resizing div#layout-body {
         channelImageUrl: String(
           channel.channelImageUrl || saved.channelImageUrl || "",
         ).trim(),
-        verifiedMark:
-          channel.verifiedMark === true || saved.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(channel, saved),
         duration:
           durationSeconds > 0
             ? formatDuration(durationSeconds)
@@ -56080,8 +56091,9 @@ html.cheese-sidebar-resizing div#layout-body {
     const channelProfile = channelHref
       ? `<a class="cheese-video-vault-profile" href="${channelHref}" aria-label="${escapeAttribute(channelName)} 채널로 이동"><img src="${escapeAttribute(profileUrl)}" alt="" loading="lazy" draggable="false"></a>`
       : `<span class="cheese-video-vault-profile"><img src="${escapeAttribute(profileUrl)}" alt="" loading="lazy" draggable="false"></span>`;
-    const officialMark = item.verifiedMark
-      ? `<i class="cheese-video-vault-official" aria-hidden="true"></i><span class="blind">인증 마크</span>`
+    const markKind = CheeseVerifiedMark.kind(item);
+    const officialMark = markKind
+      ? `<i class="cheese-video-vault-official" data-cheese-mark="${markKind}" aria-hidden="true"></i><span class="blind">인증 마크</span>`
       : "";
     const channelText = channelHref
       ? `<a class="cheese-video-vault-channel" href="${channelHref}"><span>${escapeHtml(channelName)}</span>${officialMark}</a>`
@@ -56178,7 +56190,7 @@ html.cheese-sidebar-resizing div#layout-body {
     const sig = `${videoVaultSort}|group:${videoVaultGroupByStreamer}:${videoVaultGroupByDate}|${normalizeClipVaultSearchText(videoVaultSearch)}|${shown
       .map(
         (item) =>
-          `${item.videoNo}:${item.title}:${item.thumb}:${item.channelName}:${item.channelId}:${item.channelImageUrl}:${item.verifiedMark}:${item.duration}:${item.durationSeconds}:${item.readCount}:${item.livePv}:${item.publishDateAt}:${item.badgeLabel}:${item.categoryType}:${item.videoCategory}:${item.videoCategoryValue}:${item.tags.join(";")}:${item.watchTimeline}:${item.adultKnown}:${item.adult}:${item.metaKnown}:${item.detailFetchedAt}:${item.at}`,
+          `${item.videoNo}:${item.title}:${item.thumb}:${item.channelName}:${item.channelId}:${item.channelImageUrl}:${item.verifiedMark}:${item.verifiedMarkType || ""}:${item.duration}:${item.durationSeconds}:${item.readCount}:${item.livePv}:${item.publishDateAt}:${item.badgeLabel}:${item.categoryType}:${item.videoCategory}:${item.videoCategoryValue}:${item.tags.join(";")}:${item.watchTimeline}:${item.adultKnown}:${item.adult}:${item.metaKnown}:${item.detailFetchedAt}:${item.at}`,
       )
       .join(",")}`;
     if (sig === videoVaultRenderSig) return;

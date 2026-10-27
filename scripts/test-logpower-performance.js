@@ -3,6 +3,8 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
+require("../src/verifiedMark.js");
+const { CheeseVerifiedMark } = globalThis;
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 const content = readFileSync(resolve(__dirname, "../src/content.js"), "utf8");
@@ -33,7 +35,7 @@ function claimHarness() {
   let channel = "A", live = true, radio = false;
   let getCount = 0;
   const puts = [], logs = [], timers = [], toasts = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     featureFlags: { chatLogPowerAuto: true, chatLogPower: false, chatLogPowerToast: false },
     getLogPowerChannelId: () => channel,
     getCurrentLiveChannelId: () => live ? channel : "",
@@ -165,7 +167,7 @@ test("seen claim memory is bounded per channel and across channel navigation", a
 });
 
 test("reward-unit cache is bounded without changing parsed unit amounts", async () => {
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     LOGPOWER_CLAIM_BASE: "https://fixture.invalid", LOGPOWER_CACHE_CHANNEL_LIMIT: 100,
     fetchLogPowerResponse: async () => ({ content: { claimList: [
       { claimType: "WATCH_1_HOUR", amount: 100 },
@@ -180,7 +182,7 @@ test("reward-unit cache is bounded without changing parsed unit amounts", async 
 test("balance and eligibility GET share only the in-flight response, then refetch fresh data", async () => {
   const gate = deferred();
   let reads = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     LOGPOWER_CHANNEL_BASE: "https://fixture.invalid",
     fetchLogPowerResponse: () => { reads++; return gate.promise; },
   });
@@ -201,7 +203,7 @@ test("balance and eligibility GET share only the in-flight response, then refetc
 for (const mode of ["content", "background"]) {
   test(`${mode}: request deadline includes stalled JSON body and cleans the timer`, async () => {
     let expire, cleared = 0;
-    const context = vm.createContext({ AbortController,
+    const context = vm.createContext({ CheeseVerifiedMark, AbortController,
       setTimeout: (callback, ms) => { assert.equal(ms, 15000); expire = callback; return 1; },
       clearTimeout: () => cleared++,
       fetch: async (url, { signal }) => ({ ok: true, json: () => new Promise((resolve, reject) => {
@@ -221,7 +223,7 @@ for (const mode of ["content", "background"]) {
 
 test("PUT wrapper preserves success/status without reading its response body", async () => {
   let cleared = 0, method;
-  const context = vm.createContext({ AbortController,
+  const context = vm.createContext({ CheeseVerifiedMark, AbortController,
     setTimeout: () => 1, clearTimeout: () => cleared++, LOGPOWER_CLAIM_BASE: "https://fixture.invalid",
     logPowerContentRequests: new Map([["A", "old GET"]]),
     fetch: async (url, options) => { method = options.method; return { ok: true, status: 204, json: () => assert.fail("body read") }; },
@@ -239,7 +241,7 @@ test("PUT wrapper preserves success/status without reading its response body", a
 test("post-claim GET stays registered when an invalidated older GET completes", async () => {
   const old = deferred(), fresh = deferred();
   let calls = 0;
-  const context = vm.createContext({ LOGPOWER_CHANNEL_BASE: "https://fixture.invalid",
+  const context = vm.createContext({ CheeseVerifiedMark, LOGPOWER_CHANNEL_BASE: "https://fixture.invalid",
     fetchLogPowerResponse: () => ++calls === 1 ? old.promise : fresh.promise,
   });
   vm.runInContext("const logPowerContentRequests = new Map();" +
@@ -258,7 +260,7 @@ test("post-claim GET stays registered when an invalidated older GET completes", 
 test("background alarms share a pending channel inspection and release it on error", async () => {
   let calls = 0;
   let gate = deferred();
-  const context = vm.createContext({ lpCollectProgress: () => { calls++; return gate.promise; } });
+  const context = vm.createContext({ CheeseVerifiedMark, lpCollectProgress: () => { calls++; return gate.promise; } });
   vm.runInContext(section(background, "const lpProgressRequests", "async function lpCollectProgress("), context);
   const first = context.lpCheckProgress("A");
   for (let i = 0; i < 100; i++) assert.equal(context.lpCheckProgress("A"), first);
@@ -273,7 +275,7 @@ test("background alarms share a pending channel inspection and release it on err
 
 test("detached input observers release their DOM reference before replacement exists", () => {
   let disconnects = 0, waits = 0, clears = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     logPowerBadgeObserver: { disconnect: () => disconnects++ },
     logPowerObservedArea: { isConnected: false }, logPowerAreaWaitTimer: 0,
     featureFlags: { chatLogPowerAuto: true }, getCurrentLiveChannelId: () => "A",
@@ -295,7 +297,7 @@ test("detached input observers release their DOM reference before replacement ex
 test("disabled badge does not reappear after an outstanding balance request", async () => {
   const gate = deferred();
   let renders = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     featureFlags: { chatLogPower: true }, getCurrentLiveChannelId: () => "A",
     ensureLogPowerBadge: () => {}, removeLogPowerBadge: () => {},
     fetchLogPowerBalanceCached: () => gate.promise,
@@ -321,7 +323,7 @@ test("unchanged indicators do not rewrite hidden/class attributes on every timer
   const badge = { querySelector: (key) => elements.get(key), classList: {
     contains: () => earning, toggle: (key, value) => { writes++; earning = value; },
   } };
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     document: { getElementById: () => badge }, LOGPOWER_BADGE_ID: "badge",
     getCurrentLiveChannelId: () => "A", logPowerHourChannelId: "A", logPowerHourEndsAt: Date.now() + 60000,
     logPowerWatchActiveUntil: 0, logPowerWatchActive: true, logPowerWatchActiveChannelId: "A",
@@ -340,7 +342,7 @@ test("unchanged indicators do not rewrite hidden/class attributes on every timer
 
 test("hidden hour countdown skips DOM work but still expires at its absolute deadline", () => {
   let updates = 0, cleared = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     document: { hidden: true, getElementById: () => ({ querySelector: () => assert.fail("hidden DOM work") }) },
     LOGPOWER_BADGE_ID: "badge", logPowerHourEndsAt: Date.now() + 60000,
     logPowerHourChannelId: "A", getCurrentLiveChannelId: () => "A",

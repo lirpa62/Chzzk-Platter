@@ -1451,3 +1451,9 @@ body {
   background: color-mix(in srgb, var(--popup-surface) 18%, transparent);
   outline: none;
 }
+
+/* 인증 마크 종류(src/verifiedMark.js 의 kind → data-cheese-mark). 챌린저 마크(2026-11 도입)는 같은 자리에
+   아이콘만 바꾼다. 지금은 kind 가 파트너만 돌려주므로 쓰이지 않는다. */
+:not(img)[data-cheese-mark="challenger"] {
+  background-image: url("https://ssl.pstatic.net/static/nng/glive/image/icon_challenger_mark.png") !important;
+}

@@ -5,6 +5,7 @@ const path = require("node:path");
 const root = path.join(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 require("../src/achievementBadgeMap.js");
+require("../src/verifiedMark.js");
 require("../src/multiviewVodChat.js");
 const badgeChat = require("../src/multiviewBadgeChat.js");
 const MAP = globalThis.CheeseAchievementBadgeMap;

@@ -4,6 +4,8 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { getEventListeners } = require("node:events");
 const vm = require("node:vm");
+require("../src/verifiedMark.js");
+const { CheeseVerifiedMark } = globalThis;
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 const source = readFileSync(resolve(__dirname, "../src/content.js"), "utf8");
@@ -49,7 +51,7 @@ function mediaHarness() {
     querySelector: (selector) => selector.includes("video") ? video : null,
     remove() { this.isConnected = false; } };
   const state = { session: 1, mediaGeneration: 0, currentChannelId: "A", playbackCache: new Map() };
-  const context = vm.createContext({ Hls, followPreviewState: state,
+  const context = vm.createContext({ CheeseVerifiedMark, Hls, followPreviewState: state,
     followPreviewGuardVideos: new WeakSet(), followPreviewUserAudioTouched: false,
     followPreviewLastPointerAt: 0, followPreviewVolumeGuard: false,
     followPreviewMuted: true, followPreviewVolume: 0.5, followPreviewLiveEdge: false,
@@ -162,7 +164,7 @@ test("aborted live-detail responses neither populate cache nor release a newer r
   const requests = [], timers = new Map();
   let next = 0;
   const state = { playbackCache: new Map(), fetching: "", fetchController: null };
-  const context = vm.createContext({ followPreviewState: state, AbortController,
+  const context = vm.createContext({ CheeseVerifiedMark, followPreviewState: state, AbortController,
     pruneFollowPreviewCache: () => {}, parsePublishDate: () => 0,
     setTimeout: (cb) => { timers.set(++next, cb); return next; }, clearTimeout: (id) => timers.delete(id),
     fetch: (url, options) => { const gate = deferred(); requests.push({ ...gate, signal: options.signal }); return gate.promise; },
@@ -190,7 +192,7 @@ test("A-B-A metadata responses only attach the latest session and stop old media
   let stopped = 0;
   const el = { isConnected: true, classList: classes(), dataset: {}, querySelector: () => null };
   const state = { session: 0 };
-  const context = vm.createContext({ followPreviewState: state,
+  const context = vm.createContext({ CheeseVerifiedMark, followPreviewState: state,
     followPreviewOn: true, cardLivePreviewOn: false, document: { hidden: false },
     followPreviewThumbOnly: false, followPreviewFullTitle: false, followPreviewHeaderBottom: false,
     followPreviewCardLayout: false, followPreviewBadgePos: "top", followPreviewOpenSuppressUntil: 0,
@@ -227,7 +229,7 @@ function navigationHarness() {
   const timers = new Map(), opened = [], listeners = [];
   let next = 0, closed = 0, now = 1000;
   const state = { session: 1, currentChannelId: "A", openTimer: 0, pinned: true };
-  const context = vm.createContext({ followPreviewState: state,
+  const context = vm.createContext({ CheeseVerifiedMark, followPreviewState: state,
     followPreviewOn: true, cardLivePreviewOn: false, FOLLOW_PREVIEW_ID: "preview",
     document: { hidden: false, addEventListener: (type, fn, options) => listeners.push({ owner: "document", type, fn, options }) },
     window: { addEventListener: (type, fn, options) => listeners.push({ owner: "window", type, fn, options }) },
@@ -360,7 +362,7 @@ function viewersHarness() {
   let next = 0, updates = 0;
   const state = { session: 1, currentChannelId: "A", viewersController: null };
   const el = { isConnected: true, querySelectorAll: () => { updates++; return []; }, querySelector: () => null };
-  const context = vm.createContext({ followPreviewState: state, AbortController,
+  const context = vm.createContext({ CheeseVerifiedMark, followPreviewState: state, AbortController,
     document: { hidden: false },
     setTimeout: (callback) => { timers.set(++next, callback); return next; }, clearTimeout: (id) => timers.delete(id),
     clearInterval: () => {},
@@ -408,7 +410,7 @@ test("viewer request deadline also aborts a stalled JSON body", async () => {
 test("HLS injection with no reply times out, cleans timers, and permits a later retry", async () => {
   const timers = new Map();
   let next = 0, sends = 0;
-  const context = vm.createContext({
+  const context = vm.createContext({ CheeseVerifiedMark,
     chrome: { runtime: { sendMessage: () => sends++ } },
     setTimeout: (cb) => { timers.set(++next, cb); return next; },
     clearTimeout: (id) => timers.delete(id),

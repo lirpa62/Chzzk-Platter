@@ -90,7 +90,7 @@
         channelId: String(it?.channelId || ""),
         channelName: String(it?.channelName || "").slice(0, 100),
         channelImageUrl: String(it?.channelImageUrl || ""),
-        verifiedMark: it?.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(it),
         amount: Number(it?.amount) || 0,
         fiveMinAmount: Number(it?.fiveMinAmount) || 0,
         boost: Number(it?.boost) || 1,
@@ -508,8 +508,9 @@
         `<img class="cheese-inbox-logpower-profile" src="${escapeHtml(it.channelImageUrl || fallback)}" ` +
         `data-fallback="${escapeHtml(fallback)}" alt="" width="28" height="28" loading="lazy">`;
       // 파트너(인증) 배지 — 치지직 공식 아이콘을 CSS 배경으로 붙인다.
-      const mark = it.verifiedMark
-        ? `<i class="cheese-inbox-logpower-mark" aria-hidden="true"></i><span class="cheese-inbox-logpower-a11y">인증 마크</span>`
+      const markKind = CheeseVerifiedMark.kind(it);
+      const mark = markKind
+        ? `<i class="cheese-inbox-logpower-mark" data-cheese-mark="${markKind}" aria-hidden="true"></i><span class="cheese-inbox-logpower-a11y">인증 마크</span>`
         : "";
       // 예측 상세는 접어 둔다. ⚠ 목록에 있는 모든 예측을 미리 그리면 선택지
       //   막대가 수십 개씩 쌓인다 — 펼칠 때 채운다(아래 toggle 위임).

@@ -97,7 +97,7 @@ check(/SEEK_HISTORY_MS = 90000/.test(read("src/multiviewVodChat.js")), "재생 �
 check(/MAX_BUFFER_MESSAGES = 2000/.test(read("src/multiviewVodChat.js")) && !/DISPLAY_WINDOW_SEC/.test(read("src/multiviewVodChat.js")), "시간이 지나도 채팅은 유지하고 개수로 메모리 상한 적용");
 check(/privateUserBlock === true/.test(read("src/multiviewVodChat.js")), "차단된 비공개 이용자 채팅 제외");
 check(/parseObject\(message\.profile\)/.test(read("src/multiviewVodChat.js")), "JSON 문자열 profile에서 닉네임·역할 정보를 읽음");
-check(/userRoleCode[\s\S]*?verifiedMark/.test(read("src/multiviewVodChat.js")), "방장·매니저·파트너 역할을 구분");
+check(/userRoleCode[\s\S]*?CheeseVerifiedMark\.kind\([^)]*\) === "partner"/.test(read("src/multiviewVodChat.js")), "방장·매니저·파트너 역할을 구분(파트너는 인증 마크 종류로)");
 check(/getNicknameColorCode/.test(read("src/multiviewVodChat.js")) && /darkRgbValue/.test(read("src/multiviewVodChat.js")) && /lightRgbValue/.test(read("src/multiviewVodChat.js")) && /resolveNicknameStyle/.test(watch) && /effectType === "HIGHLIGHT"/.test(read("src/multiviewVodChat.js")) && /effectType === "GRADATION"/.test(read("src/multiviewVodChat.js")) && /nickname\/color\/codes/.test(watch) && /service\/v2\/nickname\/color\/codes/.test(read("src/background.js")), "닉네임 색상 코드 API의 테마별 전경색·강조 배경·그라데이션 처리");
 check(/nicknameTitleColor/.test(read("src/multiviewVodChat.js")) && /message\.nicknameTitleColor/.test(watch), "관리자 닉네임은 프로필 제목 색상을 우선 사용");
 check(/nicknameMessageColor/.test(read("src/multiviewVodChat.js")) && /message\.nicknameMessageColor\s*\|\|\s*globalThis\.CheeseMultiviewVodChat\.resolveNicknameColor/.test(watch), "방장·매니저 채팅 메시지에 닉네임과 동일한 색을 적용");

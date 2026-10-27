@@ -1,4 +1,20 @@
 const SERVICE_API_BASE = "https://api.chzzk.naver.com/service/v1";
+
+// 채널 인증 마크: verifiedMark 와 함께 verifiedMarkType(2026-11 챌린저 마크 도입)을 그대로 옮긴다.
+// 판단은 화면 쪽 src/verifiedMark.js(CheeseVerifiedMark.kind)가 한다. 배경은 그 파일을 불러오지 않으므로 같은 모양으로 둔다.
+function verifiedMarkFields(...sources) {
+  let type = null;
+  for (const source of sources) {
+    const t = source?.verifiedMarkType;
+    if (typeof t === "string" && t) {
+      type = t.slice(0, 40);
+      break;
+    }
+  }
+  const verifiedMark = sources.some((source) => source?.verifiedMark === true);
+  // 타입은 있을 때만 붙인다(저장 기록이 줄마다 null 로 늘지 않게, 지금 저장 모양 그대로).
+  return type ? { verifiedMark, verifiedMarkType: type } : { verifiedMark };
+}
 const API_BASE = `${SERVICE_API_BASE}/channels`;
 const MANAGE_API_BASE = "https://api.chzzk.naver.com/manage/v1";
 const CREATORHUB_API_BASE = "https://creatorhub-api.naver.com/api/v5.0";
@@ -819,7 +835,7 @@ function slimEntryForPersist(entry) {
             channelId: channelObj.channelId,
             channelName: channelObj.channelName,
             channelImageUrl: channelObj.channelImageUrl,
-            verifiedMark: channelObj.verifiedMark,
+            ...verifiedMarkFields(channelObj),
           }
         : null;
       if (channelMeta) slim.channel = channelMeta;
@@ -3703,7 +3719,7 @@ async function findCachedChannelByNickname(nickname) {
       channelId: String(matched.channel.channelId || "").trim(),
       channelName: String(matched.channel.channelName || nickname).trim(),
       channelImageUrl: String(matched.channel.channelImageUrl || "").trim(),
-      verifiedMark: matched.channel.verifiedMark === true,
+      ...verifiedMarkFields(matched.channel),
     };
   }
   return null;
@@ -3714,7 +3730,7 @@ function normalizeChannelCandidate(channel) {
     channelId: String(channel?.channelId || "").trim(),
     channelName: String(channel?.channelName || "").trim(),
     channelImageUrl: String(channel?.channelImageUrl || "").trim(),
-    verifiedMark: channel?.verifiedMark === true,
+    ...verifiedMarkFields(channel),
   };
 }
 
@@ -4055,7 +4071,7 @@ async function lpFetchChannelMeta(channelId) {
     return {
       channelName: String(c.channelName || ""),
       channelImageUrl: String(c.channelImageUrl || ""),
-      verifiedMark: c.verifiedMark === true,
+      ...verifiedMarkFields(c),
     };
   } catch {
     return null;
@@ -4444,7 +4460,7 @@ function lpNormalizeEntry(entry, accountId) {
     channelId: String(entry?.channelId || ""),
     channelName: String(entry?.channelName || "").slice(0, 100),
     channelImageUrl: String(entry?.channelImageUrl || "").slice(0, 300),
-    verifiedMark: entry?.verifiedMark === true,
+    ...verifiedMarkFields(entry),
     amount,
     fiveMinAmount: Number(entry?.fiveMinAmount) || 0,
     boost: Number(entry?.boost) || 1,
@@ -4691,7 +4707,7 @@ async function lpAppendLog(entry) {
         channelId: String(entry?.channelId || ""),
         channelName: String(entry?.channelName || "").slice(0, 100),
         channelImageUrl: String(entry?.channelImageUrl || "").slice(0, 300),
-        verifiedMark: entry?.verifiedMark === true,
+        ...verifiedMarkFields(entry),
         amount,
         fiveMinAmount: Number(entry?.fiveMinAmount) || 0,
         boost: Number(entry?.boost) || 1,
@@ -4835,7 +4851,7 @@ async function lpFlushRunLocked(onlyChannelId) {
     channelId,
     channelName: meta?.channelName || "",
     channelImageUrl: meta?.channelImageUrl || "",
-    verifiedMark: meta?.verifiedMark === true,
+    ...verifiedMarkFields(meta),
     amount: run.amount,
     fiveMinAmount: 0,
     boost: Number((unit / 10).toFixed(2)) || 1,
@@ -5299,7 +5315,7 @@ async function lpReconcile() {
           channelId: id,
           channelName: b.channelName || "채널",
           channelImageUrl: b.channelImageUrl || "",
-          verifiedMark: b.verifiedMark === true,
+          ...verifiedMarkFields(b),
           amount: other,
           fiveMinAmount: 0,
           boost: 1,
@@ -8055,7 +8071,7 @@ async function playlistFetchMeta(item) {
       channelId: String(channel.channelId || "").trim(),
       channelName: String(channel.channelName || "").trim(),
       channelImageUrl: String(channel.channelImageUrl || "").trim(),
-      verifiedMark: channel.verifiedMark === true,
+      ...verifiedMarkFields(channel),
       duration: Number(content.duration) || 0,
       adult: content.adult === true,
       views: Number(content.readCount) || 0,
@@ -8078,7 +8094,7 @@ async function playlistFetchMeta(item) {
       channelId: String(owner.channelId || d?.ownerChannelId || "").trim(),
       channelName: String(owner.channelName || "").trim(),
       channelImageUrl: String(owner.channelImageUrl || "").trim(),
-      verifiedMark: owner.verifiedMark === true,
+      ...verifiedMarkFields(owner),
       duration: Number(d?.duration ?? p?.duration) || 0,
       adult: d?.adult === true || p?.adult === true,
       views: Number(d?.readCount) || 0,

@@ -92,9 +92,9 @@
       ...(Array.isArray(extras.badges) ? extras.badges : []),
     ]) add(badge, badge?.name || badge?.badgeName || "채팅 배지");
 
-    const verified = profile.verifiedMark === true || userProfile.verifiedMark === true ||
-      user.verifiedMark === true || message.verifiedMark === true;
-    if (verified) add(ROLE_BADGE_URLS.partner, "파트너", "after");
+    // 인증 마크(파트너·챌린저)는 CheeseVerifiedMark 가 종류를 정한다.
+    const markKind = CheeseVerifiedMark.kind(profile, userProfile, user, message);
+    if (markKind) add(CheeseVerifiedMark.icon(markKind), CheeseVerifiedMark.label(markKind), "after");
     // 업적 배지는 활성화된 것 중 첫 번째 하나만 보여 준다(치지직·배지 모아 챗과 같다:
     // streamingProperty.activatedAchievementBadgeIds[0]). 첫 번째가 매핑 표에 없으면
     // 다음 것으로 넘어가지 않는다.
@@ -401,9 +401,7 @@
     if (rawRole.includes("streamer") || rawRole.includes("broadcaster") || rawRole.includes("owner")) roles.push("streamer");
     else if (rawRole.includes("operator") || rawRole.includes("admin") || rawRole.includes("staff")) roles.push("operator");
     else if (rawRole.includes("manager")) roles.push("manager");
-    if (profile.verifiedMark === true || user.verifiedMark === true ||
-        userProfile.verifiedMark === true ||
-        message.verifiedMark === true) roles.push("partner");
+    if (CheeseVerifiedMark.kind(profile, user, userProfile, message) === "partner") roles.push("partner");
     const titleColor = roles.includes("streamer") || roles.includes("manager") || roles.includes("operator")
       ? [profile.title, userProfile.title, user.title, message.title]
         .map((title) => normalizeColorValue(parseObject(title).color))

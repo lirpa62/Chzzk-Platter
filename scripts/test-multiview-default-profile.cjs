@@ -16,6 +16,7 @@ const check = (condition, label) => {
 };
 
 // ── 프로필 <img> 만들기 ───────────────────────────────────────────────────
+require("../src/verifiedMark.js");
 const SOURCES = require("../src/multiviewSources.js");
 const withTheme = (theme, fn) => {
   const previous = globalThis.document;

@@ -148,7 +148,7 @@
         channelId: String(it?.channelId || ""),
         channelName: String(it?.channelName || "").slice(0, 100),
         channelImageUrl: String(it?.channelImageUrl || ""),
-        verifiedMark: it?.verifiedMark === true,
+        ...CheeseVerifiedMark.fields(it),
         amount: Number(it?.amount) || 0,
         fiveMinAmount: Number(it?.fiveMinAmount) || 0,
         boost: Number(it?.boost) || 1,
@@ -841,10 +841,13 @@
     return tier ? `${tier}티어 구독 ×${boost}` : `구독 ×${boost}`;
   }
 
-  const markHtml = (on) =>
-    on
-      ? `<i class="lps-mark" aria-hidden="true"></i><span class="lps-a11y">인증 마크</span>`
+  // 인증 마크(파트너·챌린저). 종류는 CheeseVerifiedMark 가 정한다.
+  const markHtml = (source) => {
+    const markKind = CheeseVerifiedMark.kind(source);
+    return markKind
+      ? `<i class="lps-mark" data-cheese-mark="${markKind}" aria-hidden="true"></i><span class="lps-a11y">인증 마크</span>`
       : "";
+  };
 
   // 이 이상 걸리면 '명승부' 배지를 붙인다(100만 파워).
   const POT_BADGE_MIN = 1000000;
@@ -965,7 +968,7 @@
       leading +
       `<div class="lps-row-main">` +
       `<div class="lps-row-top">` +
-      `<strong>${escapeHtml(e.channelName || "채널")}${markHtml(e.verifiedMark)}</strong>` +
+      `<strong>${escapeHtml(e.channelName || "채널")}${markHtml(e)}</strong>` +
       `<span class="lps-when">${escapeHtml(formatWhen(e.at))}</span>` +
       `</div>` +
       `<div class="lps-row-sub">` +
@@ -2073,7 +2076,7 @@
         channelId: e.channelId,
         channelName: e.channelName,
         channelImageUrl: e.channelImageUrl,
-        verifiedMark: e.verifiedMark,
+        ...CheeseVerifiedMark.fields(e),
         local: true,
       });
       if (out.length >= 8) break;
@@ -2101,7 +2104,7 @@
           channelId: String(c.channelId).trim(),
           channelName: String(c.channelName || "").trim(),
           channelImageUrl: String(c.channelImageUrl || "").trim(),
-          verifiedMark: c.verifiedMark === true,
+          ...CheeseVerifiedMark.fields(c),
         }));
     } catch {
       return [];
@@ -2585,7 +2588,7 @@
             channelId: entry.channelId,
             channelName: entry.channelName,
             channelImageUrl: entry.channelImageUrl,
-            verifiedMark: entry.verifiedMark,
+            ...CheeseVerifiedMark.fields(entry),
           }
         : null,
     );
@@ -2648,7 +2651,7 @@
           channelId: known.channelId,
           channelName: known.channelName,
           channelImageUrl: known.channelImageUrl,
-          verifiedMark: known.verifiedMark,
+          ...CheeseVerifiedMark.fields(known),
         };
       }
     }
@@ -2699,7 +2702,7 @@
       channelId: picked?.channelId || prev?.channelId || "",
       channelName: name.slice(0, 100),
       channelImageUrl: picked?.channelImageUrl || prev?.channelImageUrl || "",
-      verifiedMark: (picked?.verifiedMark ?? prev?.verifiedMark) === true,
+      ...CheeseVerifiedMark.fields(picked?.verifiedMark !== undefined ? picked : prev),
       amount: Math.round(amount),
       fiveMinAmount: Math.round(five),
       // ⚠ 부스팅은 시청 보상에만 붙는다. 종류를 바꿔 저장하면 예전 값(기타=1)이

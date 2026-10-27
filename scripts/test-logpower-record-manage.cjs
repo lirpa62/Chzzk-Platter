@@ -47,7 +47,8 @@ function makeBackground(initial) {
   const end = background.indexOf("// ── 연속 5분 보상 묶기");
   assert.ok(start > 0 && end > start, "배경 통나무파워 구간을 찾지 못했다");
   vm.runInNewContext(
-    `${background.slice(start, end).replace(/^const LP_SNAP_KEY = .*$/m, "")}
+    `${background.slice(background.indexOf("function verifiedMarkFields("), background.indexOf("\n}\n", background.indexOf("function verifiedMarkFields(")) + 3)}
+    ${background.slice(start, end).replace(/^const LP_SNAP_KEY = .*$/m, "")}
     globalThis.api = { LP_WRITE_OPS, lpMutateLog, lpEnqueueWrite, lpAppendLog, lpLogRecordingOn };`,
     Object.assign(ctx, { globalThis: ctx }),
   );

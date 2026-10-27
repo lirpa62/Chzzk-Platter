@@ -2,6 +2,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+require("../src/verifiedMark.js");
 require("../src/chatRecapStore.js");
 
 const api = globalThis.CheeseChatRecapStore;
