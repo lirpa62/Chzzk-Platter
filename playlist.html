@@ -131,7 +131,19 @@
             <div class="pl-tab-tools">
               <div class="pl-segmented" role="radiogroup" aria-label="클립 목록" id="plClipSource">
                 <button type="button" role="radio" data-clip-source="vault" aria-checked="true">클립 보관함</button>
+                <button type="button" role="radio" data-clip-source="popular" aria-checked="false">인기 클립</button>
                 <button type="button" role="radio" data-clip-source="channel" aria-checked="false">채널 클립</button>
+              </div>
+            </div>
+            <!-- 치지직 '인기 클립'(/clips)과 같은 기간·정렬 -->
+            <div class="pl-tab-tools pl-clip-popular" id="plClipPopular" hidden>
+              <div class="pl-segmented" role="radiogroup" aria-label="인기 클립 기간" id="plClipPeriod">
+                <button type="button" role="radio" data-clip-period="WITHIN_1_DAY" aria-checked="true">실시간</button>
+                <button type="button" role="radio" data-clip-period="WITHIN_7_DAYS" aria-checked="false">주간</button>
+              </div>
+              <div class="pl-segmented" role="radiogroup" aria-label="인기 클립 정렬" id="plClipRank">
+                <button type="button" role="radio" data-clip-rank="RECOMMEND" aria-checked="true">추천순</button>
+                <button type="button" role="radio" data-clip-rank="POPULAR" aria-checked="false">인기순</button>
               </div>
             </div>
             <form class="pl-search" id="plClipChannelSearch" hidden>

@@ -734,6 +734,22 @@ async function test(name, run) {
     assert.equal(valid(new URL(followingVideos.replace("size=50", "size=51"))), false);
     assert.equal(valid(new URL(`${followingVideos}&unexpected=1`)), false);
     assert.equal(valid(new URL(`${followingVideos}&nextNo=123`)), false);
+    // 재생목록 '인기 클립'(치지직 /clips): 기간 2 × 정렬 2, next 는 응답이 준 base64url 값만(약 50쪽 한도)
+    const popularClips = "https://api.chzzk.naver.com/service/v1/home/recommended/clips";
+    for (const filterType of ["WITHIN_1_DAY", "WITHIN_7_DAYS"]) {
+      for (const orderType of ["RECOMMEND", "POPULAR"]) {
+        assert.equal(valid(new URL(`${popularClips}?next=&filterType=${filterType}&orderType=${orderType}`)), true);
+      }
+    }
+    assert.equal(valid(new URL(`${popularClips}?next=H4sIAAAAAAAA_02OwW-x&filterType=WITHIN_1_DAY&orderType=POPULAR`)), true);
+    assert.equal(valid(new URL(`${popularClips}?next=${"A".repeat(20000)}&filterType=WITHIN_1_DAY&orderType=POPULAR`)), true);
+    assert.equal(valid(new URL(`${popularClips}?next=${"A".repeat(20001)}&filterType=WITHIN_1_DAY&orderType=POPULAR`)), false);
+    assert.equal(valid(new URL(`${popularClips}?next=a%2Fb&filterType=WITHIN_1_DAY&orderType=POPULAR`)), false);
+    assert.equal(valid(new URL(`${popularClips}?filterType=WITHIN_1_DAY&orderType=POPULAR`)), false, "next 는 늘 붙인다(빈 값 포함)");
+    assert.equal(valid(new URL(`${popularClips}?next=&filterType=WITHIN_30_DAYS&orderType=POPULAR`)), false);
+    assert.equal(valid(new URL(`${popularClips}?next=&filterType=WITHIN_1_DAY&orderType=RECENT`)), false);
+    assert.equal(valid(new URL(`${popularClips}?next=&filterType=WITHIN_1_DAY&orderType=POPULAR&size=50`)), false);
+    assert.equal(valid(new URL(`${popularClips}?next=&filterType=WITHIN_1_DAY&orderType=POPULAR&orderType=RECOMMEND`)), false);
     const cursor = "2103509840029549570";
     const rawFollowingResponse = `{"content":{"data":[{"videoTitle":${JSON.stringify(`literal "nextNo":${cursor}`)}}],"page":{"next":{"nextNo":${cursor}},"prev":null}}}`;
     assert.notEqual(String(JSON.parse(rawFollowingResponse).content.page.next.nextNo), cursor,

@@ -1146,6 +1146,9 @@
     clipOrder: "RECENT",
     clipItems: [],
     clipCursor: null,
+    clipNext: "", // 인기 클립 이어 받기 값(응답이 준다)
+    clipPeriod: "WITHIN_1_DAY",
+    clipRank: "RECOMMEND",
     clipToken: 0,
     clipLoaded: false,
     videoBusy: false,
@@ -1163,8 +1166,13 @@
     if (add.videoBusy || !add.videoHasMore || !nearListEnd($("plVideoResults"))) return;
     void loadVideos(false);
   }
+  function clipHasMore() {
+    if (add.clipSource === "channel") return Boolean(add.clipChannel && add.clipCursor);
+    if (add.clipSource === "popular") return Boolean(add.clipNext);
+    return false;
+  }
   function maybeLoadMoreClips() {
-    if (add.clipBusy || add.clipSource !== "channel" || !add.clipChannel || !add.clipCursor || !nearListEnd($("plClipResults"))) return;
+    if (add.clipBusy || !clipHasMore() || !nearListEnd($("plClipResults"))) return;
     void loadClips(false);
   }
 
@@ -1450,7 +1458,7 @@
       verifiedMarkType: CheeseVerifiedMark.typeOf(row.ownerChannel, row, channel),
       verifiedMark: row.ownerChannel?.verifiedMark === true || row.verifiedMark === true || channel?.verifiedMark === true
         ? true
-        : channel ? false : undefined, // 클립 보관함 항목은 파트너 표시를 모른다
+        : channel || row.ownerChannel ? false : undefined, // 클립 보관함 항목은 파트너 표시를 모른다
     };
   }
 
@@ -1480,6 +1488,22 @@
     };
   }
 
+  // 치지직 '인기 클립'(/clips): 실시간·주간 × 추천순·인기순. 30개씩, next 로 이어 받는다.
+  const POPULAR_CLIP_NEXT_MAX = 20000; // 이어 받기 값은 쪽마다 길어진다(배경 허용 한도와 같다)
+  async function fetchPopularClips(next) {
+    const url = new URL(`${SOURCES.API}/service/v1/home/recommended/clips`);
+    url.searchParams.set("next", next || "");
+    url.searchParams.set("filterType", add.clipPeriod);
+    url.searchParams.set("orderType", add.clipRank);
+    const content = await SOURCES.getJson(url.toString());
+    const rows = Array.isArray(content?.data) ? content.data : [];
+    const following = String(content?.page?.next?.next || "");
+    return {
+      items: rows.map((row) => clipItemFromRow(row)).filter((item) => item.clipUID),
+      next: /^[A-Za-z0-9_-]+$/.test(following) && following.length <= POPULAR_CLIP_NEXT_MAX ? following : "",
+    };
+  }
+
   async function loadClips(first) {
     if (!SOURCES) return;
     add.clipLoaded = true;
@@ -1489,7 +1513,30 @@
     if (first) {
       add.clipItems = [];
       add.clipCursor = null;
+      add.clipNext = "";
       renderResults();
+      $("plClipResults").scrollTop = 0;
+    }
+    if (add.clipSource === "popular") {
+      status.textContent = "불러오는 중…";
+      add.clipBusy = true;
+      try {
+        const page = await fetchPopularClips(first ? "" : add.clipNext).finally(() => {
+          if (token === add.clipToken) add.clipBusy = false;
+        });
+        if (token !== add.clipToken) return;
+        const seen = new Set(add.clipItems.map((item) => item.clipUID));
+        add.clipItems = [...add.clipItems, ...page.items.filter((item) => !seen.has(item.clipUID))];
+        add.clipNext = page.next;
+        renderResults();
+        status.textContent = add.clipItems.length ? `${add.clipItems.length}개` : "클립이 없습니다.";
+        maybeLoadMoreClips();
+      } catch (error) {
+        if (token !== add.clipToken) return;
+        status.textContent = loadErrorText(error);
+        status.classList.add("is-error");
+      }
+      return;
     }
     if (add.clipSource === "vault") {
       const items = await loadClipVault().catch(() => []);
@@ -1709,6 +1756,7 @@
     add.clipSource = button.dataset.clipSource;
     setSegment($("plClipSource"), "data-clip-source", add.clipSource);
     const channelMode = add.clipSource === "channel";
+    $("plClipPopular").hidden = add.clipSource !== "popular";
     $("plClipChannelSearch").hidden = !channelMode;
     $("plClipChannels").hidden = !channelMode || !$("plClipChannels").children.length || Boolean(add.clipChannel);
     $("plClipChannelHead").hidden = !channelMode || !add.clipChannel;
@@ -1753,6 +1801,32 @@
     head.hidden = false;
     head.querySelector("strong").innerHTML = `<span>${esc(row.channelName)}</span>${verifiedHtml(row)}`;
     void loadClips(true);
+  });
+  // 인기 클립 기간·정렬(마지막에 고른 값 기억)
+  const CLIP_POPULAR_KEY = "cheesePlaylistClipPopular";
+  try {
+    const saved = JSON.parse(localStorage.getItem(CLIP_POPULAR_KEY) || "{}");
+    if (saved.period === "WITHIN_7_DAYS") add.clipPeriod = saved.period;
+    if (saved.rank === "POPULAR") add.clipRank = saved.rank;
+  } catch {}
+  setSegment($("plClipPeriod"), "data-clip-period", add.clipPeriod);
+  setSegment($("plClipRank"), "data-clip-rank", add.clipRank);
+  function pickPopularClips(changes) {
+    Object.assign(add, changes);
+    setSegment($("plClipPeriod"), "data-clip-period", add.clipPeriod);
+    setSegment($("plClipRank"), "data-clip-rank", add.clipRank);
+    try {
+      localStorage.setItem(CLIP_POPULAR_KEY, JSON.stringify({ period: add.clipPeriod, rank: add.clipRank }));
+    } catch {}
+    void loadClips(true);
+  }
+  $("plClipPeriod").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-clip-period]");
+    if (button && button.dataset.clipPeriod !== add.clipPeriod) pickPopularClips({ clipPeriod: button.dataset.clipPeriod });
+  });
+  $("plClipRank").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-clip-rank]");
+    if (button && button.dataset.clipRank !== add.clipRank) pickPopularClips({ clipRank: button.dataset.clipRank });
   });
   $("plClipOrder").addEventListener("click", (event) => {
     const button = event.target.closest("[data-clip-order]");

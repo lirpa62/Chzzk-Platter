@@ -128,6 +128,15 @@ const check = (condition, label) => {
                   ? { data: [{ clipUID: 'chanClip1', clipTitle: '채널 클립 1', duration: 40, readCount: 2500, createdDate: '2026-10-01 12:00:00', thumbnailImageUrl: window.__img(320, 180) }, { clipUID: 'chanClip2', clipTitle: '채널 클립 2', duration: 50, thumbnailImageUrl: window.__img(180, 320) }], page: { next: { clipUID: 'chanClip2', readCount: 7 } } }
                   : { data: [{ clipUID: 'chanClip3', clipTitle: '채널 클립 3', duration: 60 }], page: { next: null } };
               }
+              else if (p === '/service/v1/home/recommended/clips') {
+                const owner = (id, name, verified) => ({ channelId: id.repeat(32), channelName: name, channelImageUrl: '', verifiedMark: verified, verifiedMarkType: null });
+                content = url.searchParams.get('next') === ''
+                  ? { size: 30, data: [
+                      { clipUID: 'popClip1', clipTitle: '인기 클립 1', ownerChannel: owner('c', '클립채널', true), readCount: 145156, duration: 30, createdDate: '2026-10-27 16:02:12', thumbnailImageUrl: window.__img(180, 320) },
+                      { clipUID: 'popClip2', clipTitle: '인기 클립 2', ownerChannel: owner('e', '일반채널', false), readCount: 900, duration: 20 },
+                    ], page: { next: { next: 'H4sIAAAA_tok-A' } } }
+                  : { size: 30, data: [{ clipUID: 'popClip3', clipTitle: '인기 클립 3', ownerChannel: owner('e', '일반채널', false), readCount: 10, duration: 15 }], page: { next: null } };
+              }
               else if (p === '/service/v1/channels/' + 'a'.repeat(32)) content = { channelId: 'a'.repeat(32), channelName: '치즈채널', verifiedMark: true };
               else if (p === '/service/v1/channels/' + 'f'.repeat(32)) content = { channelId: 'f'.repeat(32), channelName: '보관채널', channelImageUrl: 'https://nng-phinf.pstatic.net/f.png', verifiedMark: true };
               reply = { ok: true, content };
@@ -520,7 +529,28 @@ const check = (condition, label) => {
     await until("document.querySelector('#plClipResults .pl-card-title')?.textContent === '즐겨찾기 클립'", "클립 보관함");
     await until("!!document.querySelector('#plClipResults .pl-card-verified')", "클립 보관함 채널");
     check(true, "클립 탭은 처음에 클립 보관함(즐겨찾기)을 보이고, 빠진 채널 프로필·파트너 배지를 채운다");
+    // 인기 클립(치지직 /clips): 실시간·추천순으로 시작, 목록 끝이 보이면 next 로 이어 받는다
+    await ev("document.querySelector('[data-clip-source=\"popular\"]').click(); true");
+    await until("document.querySelectorAll('#plClipResults .pl-card').length === 3", "인기 클립");
+    const popular = await ev(`({
+      api: (window.__api || []).filter((u) => u.startsWith('/service/v1/home/recommended/clips')),
+      controls: !document.getElementById('plClipPopular').hidden, search: document.getElementById('plClipChannelSearch').hidden,
+      marks: [...document.querySelectorAll('#plClipResults .pl-card')].map((c) => !!c.querySelector('.pl-card-verified')),
+      info: document.querySelector('#plClipResults .pl-card-info')?.textContent,
+      checked: [...document.querySelectorAll('#plClipPeriod [aria-checked="true"], #plClipRank [aria-checked="true"]')].map((b) => b.textContent),
+    })`);
+    check(popular.api.length === 2 && popular.api[0].includes("next=&filterType=WITHIN_1_DAY&orderType=RECOMMEND") && popular.api[1].includes("next=H4sIAAAA_tok-A") &&
+      popular.controls && popular.search && JSON.stringify(popular.marks) === "[true,false,false]" && /^조회수 14\.5만회 · \S/.test(popular.info || "") && popular.checked.join() === "실시간,추천순",
+      `인기 클립: 실시간·추천순으로 시작해 next 로 이어 받고(마지막 쪽에서 멈춤), 인증 마크·조회수·날짜 ${JSON.stringify(popular)}`);
+    await ev("document.querySelector('[data-clip-period=\"WITHIN_7_DAYS\"]').click(); true");
+    await until("(window.__api || []).some((u) => u.includes('filterType=WITHIN_7_DAYS&orderType=RECOMMEND'))", "주간");
+    await ev("document.querySelector('[data-clip-rank=\"POPULAR\"]').click(); true");
+    await until("(window.__api || []).some((u) => u.includes('next=&filterType=WITHIN_7_DAYS&orderType=POPULAR')) && document.querySelectorAll('#plClipResults .pl-card').length === 3", "주간 인기순");
+    check(await ev("localStorage.getItem('cheesePlaylistClipPopular') === JSON.stringify({ period: 'WITHIN_7_DAYS', rank: 'POPULAR' })"),
+      "기간·정렬을 바꾸면 처음부터 다시 받고, 마지막에 고른 값을 기억한다");
+    await ev("localStorage.removeItem('cheesePlaylistClipPopular'); true");
     await ev("document.querySelector('[data-clip-source=\"channel\"]').click(); true");
+    check(await ev("document.getElementById('plClipPopular').hidden && !document.getElementById('plClipChannelSearch').hidden"), "채널 클립으로 바꾸면 기간·정렬을 숨긴다");
     // 다시보기 검색처럼 적으면 바로 찾는다(찾기를 누르지 않아도)
     const searchedBefore = await ev("(window.__api || []).filter((u) => u.startsWith('/service/v1/search/channels')).length");
     await ev("(() => { const i = document.querySelector('#plClipChannelSearch input'); i.focus(); i.value = '클'; i.dispatchEvent(new Event('input', { bubbles: true })); i.value = '클립'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
@@ -548,7 +578,7 @@ const check = (condition, label) => {
     // 첫 쪽이 적어 목록 끝이 보이면 다음 쪽을 이어 받는다(무한 스크롤), 마지막 쪽이면 멈춘다
     await until("document.querySelectorAll('#plClipResults .pl-card').length === 3", "무한 스크롤");
     await wait(300);
-    const clipApi = await ev("window.__api.filter((u) => u.includes('/clips?'))");
+    const clipApi = await ev("window.__api.filter((u) => u.startsWith('/service/v1/channels/') && u.includes('/clips?'))");
     check(clipApi.length === 2 && clipApi[1].includes("clipUID=chanClip2") && clipApi[1].includes("readCount=7") && clipApi[0].includes("orderType=RECENT"),
       `채널을 찾아 고르면 그 채널 클립을 불러오고, 목록 끝에서 다음 커서로 이어 받는다(마지막 쪽 뒤로는 묻지 않음) ${JSON.stringify(clipApi)}`);
     check(await ev("document.querySelector('#plClipResults [data-uid=\"chanClip1\"]').closest('.pl-card').querySelector('.pl-card-info').textContent === '조회수 2,500회 · 10.01'"),

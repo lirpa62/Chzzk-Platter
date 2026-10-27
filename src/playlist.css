@@ -1586,3 +1586,12 @@ body {
 .pl-clock-foot span {
   color: var(--popup-muted);
 }
+
+/* 인기 클립 기간·정렬(치지직 /clips 와 같다) */
+.pl-clip-popular[hidden] {
+  display: none;
+}
+.pl-clip-popular > .pl-segmented {
+  flex: 1;
+  min-width: 0;
+}

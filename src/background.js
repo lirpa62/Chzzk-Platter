@@ -6335,6 +6335,8 @@ const MULTIVIEW_API_PATHS = new Set([
   "/commercial/v1/subscribe/channels",
   // 멀티뷰 '카테고리' 검색: 이름이 맞는 카테고리 목록.
   "/manage/v1/auto-complete/categories",
+  // 재생목록 '인기 클립'(치지직 /clips 의 실시간·주간 × 추천순·인기순).
+  "/service/v1/home/recommended/clips",
 ]);
 
 // 검색 결과 채널의 방송 정보는 live-detail 로 하나씩 받는다. 채널 id 가 경로에
@@ -6461,6 +6463,14 @@ function validMultiviewApiQuery(url) {
       ["ALL", "WITHIN_SEVEN_DAYS", "WITHIN_THIRTY_DAYS"].includes(url.searchParams.get("filterType")) &&
       ["RECENT", "POPULAR"].includes(url.searchParams.get("orderType")) &&
       url.searchParams.has("size") && uint("size", 1, 50);
+  }
+  if (url.pathname === "/service/v1/home/recommended/clips") {
+    // next 는 응답이 준 이어 받기 값(base64url, 쪽마다 약 350자씩 길어진다 → 약 50쪽까지).
+    const next = url.searchParams.get("next");
+    return only(new Set(["next", "filterType", "orderType"])) &&
+      next !== null && /^[A-Za-z0-9_-]{0,20000}$/.test(next) &&
+      ["WITHIN_1_DAY", "WITHIN_7_DAYS"].includes(url.searchParams.get("filterType")) &&
+      ["RECOMMEND", "POPULAR"].includes(url.searchParams.get("orderType"));
   }
   if (MULTIVIEW_LIVE_DETAIL_RE.test(url.pathname)) return keys.length === 0;
   if (MULTIVIEW_CHANNEL_INFO_RE.test(url.pathname)) return keys.length === 0;
