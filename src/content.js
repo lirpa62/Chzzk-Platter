@@ -40987,6 +40987,19 @@ html.cheese-sidebar-resizing div#layout-body {
       );
   }
 
+  // 그룹 창 채널 이름 + 인증 마크(사이드바 목록과 같은 아이콘). 이름이 길면 이름만 말줄임하고 마크는 남긴다.
+  function customFollowGroupModalNameHtml(channel, className) {
+    const markKind = CheeseVerifiedMark.kind(channel);
+    return (
+      `<span class="${className} cheese-cf-group-modal-name">` +
+      `<span class="cheese-cf-group-modal-name-text">${escapeHtml(channel.name)}</span>` +
+      (markKind
+        ? `<i class="cheese-cf-official" data-cheese-mark="${markKind}" aria-hidden="true"></i><span class="blind">인증 마크</span>`
+        : "") +
+      `</span>`
+    );
+  }
+
   function renderCustomFollowGroupModalChannels() {
     const overlay = document.getElementById(CUSTOM_FOLLOW_GROUP_MODAL_ID);
     const list = overlay?.querySelector("[data-cf-modal-channel-list]");
@@ -41034,7 +41047,7 @@ html.cheese-sidebar-resizing div#layout-body {
           `<input type="checkbox" data-cf-modal-channel="${escapeAttribute(channel.channelId)}"${selected ? " checked" : ""}>` +
           `<span class="cheese-cf-group-modal-profile${channel.live ? " is-live" : ""}">${image}</span>` +
           `<span class="cheese-cf-group-modal-channel-copy">` +
-          `<span class="cheese-cf-group-modal-channel-name">${escapeHtml(channel.name)}</span>` +
+          customFollowGroupModalNameHtml(channel, "cheese-cf-group-modal-channel-name") +
           (tags.length
             ? `<small class="cheese-cf-group-modal-channel-tags">${escapeHtml(
                 tags
@@ -41102,7 +41115,7 @@ html.cheese-sidebar-resizing div#layout-body {
           `<span class="cheese-cf-group-modal-picked-grip" aria-hidden="true">${customFollowLucideIcon("grip-vertical", 14)}</span>` +
           `<span class="cheese-cf-group-modal-picked-num">${index + 1}</span>` +
           `<span class="cheese-cf-group-modal-profile${item.live ? " is-live" : ""}">${image}</span>` +
-          `<span class="cheese-cf-group-modal-picked-name">${escapeHtml(item.name)}</span>` +
+          customFollowGroupModalNameHtml(item, "cheese-cf-group-modal-picked-name") +
           `<button type="button" data-cf-modal-picked-remove="${escapeAttribute(item.channelId)}" aria-label="${escapeAttribute(item.name)} 빼기" title="빼기">${customFollowLucideIcon("x", 13)}</button>` +
           `</li>`
         );
