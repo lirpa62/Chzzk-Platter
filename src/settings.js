@@ -310,6 +310,7 @@
     "cheeseLogPowerPopupLimit",
     "cheeseLogPowerPopupAutoHeight",
     "cheeseVodClockTimeZone",
+    "cheeseSidebarSchedulePopover",
     "cheeseLogPowerProgressMode",
     "cheeseLogPowerTimerMode",
     "cheeseLogPowerEraser",
@@ -5598,6 +5599,8 @@
     ["[data-live-auto-sync]", "cheeseAudioMixer.autoSync", false],
     // 통나무파워 상위 보유 팝업 높이를 표시 개수(최대 10)에 맞춘다(기본 꺼짐).
     ["[data-logpower-popup-auto-height]", "cheeseLogPowerPopupAutoHeight", false],
+    // 사이드바 '편성표' 호버 팝오버(기본 꺼짐).
+    ["[data-sidebar-schedule-popover]", "cheeseSidebarSchedulePopover", false],
   ].forEach(([sel, key, defaultOn]) => {
     const input = document.querySelector(sel);
     if (!input) return;

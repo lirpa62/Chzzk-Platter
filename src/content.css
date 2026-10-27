@@ -19546,3 +19546,480 @@ html.cheese-chat-hide-input-placeholder
 .cheese-recap-capture-surface.is-search .cheese-recap-search-window-date {
   position: static;
 }
+
+/* ── 사이드바 편성표 미리보기(팝오버) ── 창 본체 계열(전용 팔로잉 그룹 창)과 같은 배경·테두리. */
+.cheese-schedule-popover {
+  position: fixed;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 360px;
+  /* 높이 고정: 필터를 바꿔 일정 수가 달라져도 팝오버가 들썩이지 않는다(목록만 스크롤). */
+  height: min(520px, calc(100vh - 16px));
+  padding: 10px 10px 8px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base, #35383d)
+    );
+  border-radius: 10px;
+  background: var(
+    --sem-color-background-neutral-weak,
+    var(--cheese-platter-background-neutral-weak, #202226)
+  );
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary, #f2f4f5)
+  );
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+  font-size: 12px;
+}
+.cheese-schedule-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 8px;
+}
+.cheese-schedule-head .cheese-schedule-open {
+  margin-left: auto;
+}
+/* 날짜 버튼: 목록 맨 위에 걸린 날짜 + 달력·화살표 아이콘(치지직 편성표와 같은 모양). */
+.cheese-schedule-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cheese-schedule-date:hover,
+.cheese-schedule-date[aria-expanded="true"] {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered, rgba(255, 255, 255, 0.08))
+  );
+}
+.cheese-schedule-date-icon {
+  margin-left: 4px;
+}
+.cheese-schedule-date[aria-expanded="true"] .cheese-schedule-date-arrow {
+  transform: rotate(180deg);
+}
+[data-schedule-jumping] .cheese-schedule-date {
+  cursor: progress;
+  opacity: 0.7;
+}
+.cheese-schedule-calendar {
+  position: absolute;
+  top: calc(100% - 2px);
+  left: 0;
+  right: 0;
+  z-index: 3;
+  padding: 10px 10px 12px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base, #35383d)
+    );
+  border-radius: 10px;
+  background: var(
+    --sem-color-background-neutral-weak,
+    var(--cheese-platter-background-neutral-weak, #202226)
+  );
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+}
+.cheese-schedule-calendar[hidden] {
+  display: none;
+}
+.cheese-schedule-cal-head {
+  position: relative;
+  padding: 2px 0 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base, #35383d)
+    );
+  text-align: center;
+}
+.cheese-schedule-cal-head strong {
+  font-size: 14px;
+}
+.cheese-schedule-cal-close {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.cheese-schedule-cal-close:hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered, rgba(255, 255, 255, 0.08))
+  );
+}
+.cheese-schedule-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+.cheese-schedule-cal-week {
+  padding: 4px 0;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #a1a5ab)
+  );
+  font-size: 11px;
+  text-align: center;
+}
+.cheese-schedule-cal-week.is-sun,
+.cheese-schedule-cal-cell.is-sun {
+  color: #e5484d;
+}
+.cheese-schedule-cal-cell {
+  position: relative;
+  height: 36px;
+  padding: 0 0 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+/* 일정 있는 날: 아래 초록 점 */
+.cheese-schedule-cal-cell:not(.is-dimmed):not(.is-empty)::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base, #00c37a)
+  );
+}
+.cheese-schedule-cal-cell:not(:disabled):not(.is-empty):hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(--cheese-platter-surface-interaction-lighten-hovered, rgba(255, 255, 255, 0.08))
+  );
+}
+.cheese-schedule-cal-cell.is-dimmed {
+  font-weight: 500;
+  opacity: 0.45;
+  cursor: default;
+}
+.cheese-schedule-cal-cell.is-today {
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base, #00c37a)
+  );
+  font-size: 11px;
+}
+.cheese-schedule-cal-cell.is-selected {
+  border-color: rgba(0, 195, 122, 0.35);
+  background: rgba(0, 195, 122, 0.12);
+}
+.cheese-schedule-cal-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 16px 0;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #a1a5ab)
+  );
+  text-align: center;
+}
+.cheese-schedule-bone.is-cal {
+  height: 30px;
+  margin: 3px 2px;
+  border-radius: 8px;
+}
+.cheese-schedule-head strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+.cheese-schedule-open {
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base, #00c37a)
+  );
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 7px 4px;
+  text-decoration: none;
+}
+.cheese-schedule-open:hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(
+      --cheese-platter-surface-interaction-lighten-hovered,
+      rgba(255, 255, 255, 0.06)
+    )
+  );
+}
+.cheese-schedule-filters {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-bottom: 8px;
+}
+.cheese-schedule-filter {
+  padding: 4px 9px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base, #35383d)
+    );
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 15px; /* 높이 25px 고정 — 칩 스켈레톤과 같게 */
+  cursor: pointer;
+}
+.cheese-schedule-filter:hover,
+.cheese-schedule-filter.is-active {
+  border-color: var(
+    --sem-color-border-brand-base,
+    var(--cheese-platter-content-brand-base, #00c37a)
+  );
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base, #00c37a)
+  );
+}
+.cheese-schedule-list {
+  position: relative; /* 날짜 묶음 offsetTop 의 기준(달력에서 고른 날로 스크롤) */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+/* 날짜 머리: 반투명 띠, 두 번째 날부터는 위로 띄워 날짜 묶음끼리 갈라 보이게 한다. */
+.cheese-schedule-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  /* 띠는 반투명 회색을 팝오버 배경 위에 겹쳐 불투명하게(스크롤되는 줄이 비치지 않게) */
+  background-color: var(
+    --sem-color-background-neutral-weak,
+    var(--cheese-platter-background-neutral-weak, #202226)
+  );
+  background-image: linear-gradient(
+    rgba(128, 128, 128, 0.14),
+    rgba(128, 128, 128, 0.14)
+  );
+  color: var(
+    --sem-color-content-neutral-primary,
+    var(--cheese-platter-content-neutral-primary, #f2f4f5)
+  );
+  font-size: 12px;
+  font-weight: 800;
+}
+.cheese-schedule-day-group + .cheese-schedule-day-group {
+  margin-top: 12px;
+}
+.cheese-schedule-day-tag {
+  padding: 0 3px;
+  color: var(
+    --sem-color-content-brand-base,
+    var(--cheese-platter-content-brand-base, #00c37a)
+  );
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}
+.cheese-schedule-day.cheese-schedule-skeleton {
+  border-left-color: transparent;
+}
+.cheese-schedule-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 4px;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+.cheese-schedule-row:hover {
+  background: var(
+    --sem-color-surface-interaction-lighten-hovered,
+    var(
+      --cheese-platter-surface-interaction-lighten-hovered,
+      rgba(255, 255, 255, 0.06)
+    )
+  );
+}
+.cheese-schedule-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #a1a5ab)
+  );
+}
+.cheese-schedule-row.is-live .cheese-schedule-time {
+  color: inherit;
+}
+.cheese-schedule-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.cheese-schedule-title {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-schedule-live {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #ff3b3b;
+  color: #fff;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+.cheese-schedule-match {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-schedule-match small {
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #a1a5ab)
+  );
+  font-size: 10px;
+}
+.cheese-schedule-channel {
+  overflow: hidden;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #a1a5ab)
+  );
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cheese-schedule-empty {
+  margin: 0;
+  padding: 18px 4px;
+  color: var(
+    --sem-color-content-neutral-cool-weak,
+    var(--cheese-platter-content-neutral-cool-weak, #a1a5ab)
+  );
+  text-align: center;
+}
+.cheese-schedule-empty .cheese-schedule-retry {
+  display: block;
+  margin: 10px auto 0;
+}
+.cheese-schedule-tail {
+  padding: 8px 4px 4px;
+  text-align: center;
+}
+.cheese-schedule-retry {
+  padding: 5px 12px;
+  border: 1px solid
+    var(
+      --sem-color-border-neutral-weak,
+      var(--cheese-platter-border-neutral-base, #35383d)
+    );
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+/* 스켈레톤: 불러오는 동안 줄·칩 자리만 잡아 둔다. */
+.cheese-schedule-skeleton {
+  pointer-events: none;
+}
+.cheese-schedule-bone {
+  display: block;
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    rgba(128, 128, 128, 0.16) 25%,
+    rgba(128, 128, 128, 0.3) 50%,
+    rgba(128, 128, 128, 0.16) 75%
+  );
+  background-size: 200% 100%;
+  animation: cheese-schedule-shimmer 1.2s linear infinite;
+}
+.cheese-schedule-bone.is-time {
+  width: 34px;
+  margin-top: 1px;
+}
+.cheese-schedule-bone.is-title {
+  width: 78%;
+  height: 13px;
+}
+.cheese-schedule-bone.is-sub {
+  width: 42%;
+  height: 11px;
+  margin-top: 3px;
+}
+.cheese-schedule-bone.is-day {
+  width: 92px;
+  height: 11px;
+}
+.cheese-schedule-bone.is-chip {
+  display: inline-block;
+  width: 58px;
+  height: 25px;
+  border-radius: 999px;
+}
+@keyframes cheese-schedule-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cheese-schedule-bone {
+    animation: none;
+  }
+}

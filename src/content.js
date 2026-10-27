@@ -26312,6 +26312,630 @@ html.cheese-sidebar-resizing div#layout-body {
     return (ariaLabel + " " + titleText + " " + blindText).replace(/\s+/g, "");
   }
 
+  // ── 사이드바 편성표 미리보기 ──────────────────────────────────────────────
+  // 사이드바 '편성표'에 마우스를 0.5초 올리면 편성표(/schedule)를 팝오버로 보여 준다(기본 꺼짐).
+  // 데이터는 편성표 페이지와 같은 공개 API(로그인 불필요): 필터 목록, 일정(커서 없이 부르면 지금 시각
+  // 근처부터 30개, 다음은 direction=NEXT + 커서). 알림받기는 로그인·치지직 내부 동작이 필요해 넣지 않고
+  // '편성표 열기'로 넘긴다. 사이드바는 다시 그려지므로 문서 위임으로 링크 호버를 잡는다.
+  // 팝오버 높이는 고정이고(필터를 바꿀 때 들썩이지 않게) 목록만 스크롤한다. 다음 묶음은 끝 가까이 내리면 받는다.
+  const SCHEDULE_POPOVER_KEY = "cheeseSidebarSchedulePopover";
+  const SCHEDULE_POPOVER_FILTER_KEY = "cheeseSidebarScheduleFilter"; // 마지막 필터(화면 상태, 백업 안 함)
+  const SCHEDULE_POPOVER_ID = "cheese-schedule-popover";
+  const SCHEDULE_POPOVER_OPEN_DELAY_MS = 500;
+  const SCHEDULE_POPOVER_CLOSE_DELAY_MS = 250;
+  const SCHEDULE_CACHE_MS = 60 * 1000;
+  const SCHEDULE_FILTER_CACHE_MS = 10 * 60 * 1000;
+  const SCHEDULE_API = "https://api.chzzk.naver.com/service/v1";
+  const SCHEDULE_LINK_SELECTOR = 'aside#sidebar a[href^="/schedule"]';
+  const SCHEDULE_MORE_THRESHOLD_PX = 160; // 목록 끝에서 이만큼 남으면 다음 묶음을 받는다
+  let schedulePopoverOn = false;
+  let scheduleFilterId = "";
+  let scheduleOpenTimer = 0;
+  let scheduleCloseTimer = 0;
+  let scheduleAnchor = null;
+  let scheduleRequestToken = 0;
+  let scheduleFiltersCache = { at: 0, list: null };
+  const scheduleCache = new Map(); // filterId → { at, items, next }
+  const scheduleMoreLoads = new Map(); // filterId → 다음 묶음 받는 중인 Promise(스크롤로 겹쳐 부르지 않게)
+  const scheduleDaysCache = new Map(); // filterId → { at, days: ["2026-10-27", …] } 일정 있는 날
+  const SCHEDULE_JUMP_MAX_PAGES = 30; // 날짜로 건너뛸 때 이어 받는 최대 묶음 수(30개씩)
+  let scheduleJumpToken = 0;
+
+  function scheduleLinkFrom(target) {
+    const link = target?.closest?.(SCHEDULE_LINK_SELECTOR);
+    // 우리 목록 안 링크(전용 팔로잉 등)는 제외한다.
+    if (!link || link.closest(`#${CUSTOM_FOLLOW_NAV_ID}`)) return null;
+    return link;
+  }
+
+  function clearScheduleTimers() {
+    clearTimeout(scheduleOpenTimer);
+    clearTimeout(scheduleCloseTimer);
+    scheduleOpenTimer = 0;
+    scheduleCloseTimer = 0;
+  }
+
+  function closeSchedulePopover() {
+    clearScheduleTimers();
+    scheduleAnchor = null;
+    document.getElementById(SCHEDULE_POPOVER_ID)?.remove();
+  }
+
+  function scheduleCloseSoon() {
+    clearTimeout(scheduleOpenTimer);
+    scheduleOpenTimer = 0;
+    clearTimeout(scheduleCloseTimer);
+    scheduleCloseTimer = window.setTimeout(closeSchedulePopover, SCHEDULE_POPOVER_CLOSE_DELAY_MS);
+  }
+
+  function onSchedulePointerOver(event) {
+    if (!schedulePopoverOn || !IS_TOP_FRAME) return;
+    const link = scheduleLinkFrom(event.target);
+    const popover = document.getElementById(SCHEDULE_POPOVER_ID);
+    if (popover && popover.contains(event.target)) {
+      clearTimeout(scheduleCloseTimer);
+      scheduleCloseTimer = 0;
+      return;
+    }
+    if (!link) return;
+    clearTimeout(scheduleCloseTimer);
+    scheduleCloseTimer = 0;
+    if (popover && scheduleAnchor === link) return;
+    clearTimeout(scheduleOpenTimer);
+    scheduleOpenTimer = window.setTimeout(() => {
+      scheduleOpenTimer = 0;
+      if (link.isConnected && link.matches(":hover")) openSchedulePopover(link);
+    }, SCHEDULE_POPOVER_OPEN_DELAY_MS);
+  }
+
+  // 링크·팝오버 둘 다 '머무는 곳' 이다. 그 밖으로 나갈 때만 잠시 뒤 닫는다(링크에서 팝오버로 옮겨 가는 사이는 유지).
+  function inSchedulePopoverZone(el) {
+    return !!el && (!!scheduleLinkFrom(el) || !!el.closest?.(`#${SCHEDULE_POPOVER_ID}`));
+  }
+
+  function onSchedulePointerOut(event) {
+    if (!scheduleOpenTimer && !document.getElementById(SCHEDULE_POPOVER_ID)) return;
+    if (!inSchedulePopoverZone(event.target)) return;
+    if (inSchedulePopoverZone(event.relatedTarget)) return;
+    scheduleCloseSoon();
+  }
+
+  async function fetchScheduleJson(url) {
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json())?.content;
+  }
+
+  async function loadScheduleFilters() {
+    if (scheduleFiltersCache.list && Date.now() - scheduleFiltersCache.at < SCHEDULE_FILTER_CACHE_MS) {
+      return scheduleFiltersCache.list;
+    }
+    try {
+      const content = await fetchScheduleJson(`${SCHEDULE_API}/program-schedule-filters`);
+      const list = (Array.isArray(content?.programScheduleFilters) ? content.programScheduleFilters : [])
+        .filter((f) => f && typeof f.filterId === "string" && typeof f.filterTitle === "string")
+        .map((f) => ({ id: f.filterId, title: f.filterTitle }));
+      scheduleFiltersCache = { at: Date.now(), list };
+      return list;
+    } catch {
+      return scheduleFiltersCache.list || [];
+    }
+  }
+
+  // 일정 한 묶음(30개). more=true 면 이어서 다음 묶음을 붙인다.
+  function loadSchedules(filterId, more = false) {
+    if (!more) return fetchScheduleBatch(filterId, false);
+    const entry = scheduleCache.get(filterId);
+    if (!entry || !entry.next) return Promise.resolve(entry);
+    let job = scheduleMoreLoads.get(filterId);
+    if (!job) {
+      job = fetchScheduleBatch(filterId, true).finally(() => scheduleMoreLoads.delete(filterId));
+      scheduleMoreLoads.set(filterId, job);
+    }
+    return job;
+  }
+
+  async function fetchScheduleBatch(filterId, more) {
+    let entry = scheduleCache.get(filterId);
+    if (!more && entry && Date.now() - entry.at < SCHEDULE_CACHE_MS) return entry;
+    const params = new URLSearchParams({ filterId });
+    if (more) {
+      params.set("direction", "NEXT");
+      params.set("scheduleDate", entry.next.scheduleDate);
+      params.set("seq", String(entry.next.seq));
+    }
+    const content = await fetchScheduleJson(`${SCHEDULE_API}/program-schedules?${params}`);
+    const items = Array.isArray(content?.data) ? content.data : [];
+    const next = content?.page?.next?.scheduleDate ? content.page.next : null;
+    entry = more
+      ? { at: entry.at, items: entry.items.concat(items), next }
+      : { at: Date.now(), items, next };
+    scheduleCache.set(filterId, entry);
+    return entry;
+  }
+
+  // "2026-10-27 03:50:00"(KST) → 시각 표기와 날짜 키. 편성표 페이지처럼 KST 그대로 쓴다.
+  function scheduleParts(dateText) {
+    const m = String(dateText || "").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if (!m) return null;
+    return { key: `${m[1]}-${m[2]}-${m[3]}`, month: Number(m[2]), day: Number(m[3]), time: `${m[4]}:${m[5]}` };
+  }
+
+  function scheduleTodayKey() {
+    return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+
+  // 날짜 키("2026-10-27") → { month, day, weekday(0=일), tag(오늘·내일) }. 날짜만 보므로 UTC 로 계산한다.
+  function scheduleDayInfo(key) {
+    const at = Date.parse(`${key}T00:00:00Z`);
+    const diff = Math.round((at - Date.parse(`${scheduleTodayKey()}T00:00:00Z`)) / 86400000);
+    const d = new Date(at);
+    return {
+      month: d.getUTCMonth() + 1,
+      day: d.getUTCDate(),
+      weekday: d.getUTCDay(),
+      tag: diff === 0 ? "오늘" : diff === 1 ? "내일" : "",
+    };
+  }
+
+  function scheduleDayLabel(key) {
+    const info = scheduleDayInfo(key);
+    return { date: `${info.month}월 ${info.day}일 (${"일월화수목금토"[info.weekday]})`, tag: info.tag };
+  }
+
+  function scheduleRowHtml(item, parts, now) {
+    const channel = item.channel;
+    const channelId = String(channel.channelId);
+    const startAt = parsePublishDate(item.scheduleDate);
+    const live = channel.openLive === true && Number.isFinite(startAt) && startAt <= now;
+    const meta = item.type === "MATCH" && item.meta ? item.meta : null;
+    const match = meta && (meta.homeTeamName || meta.awayTeamName)
+      ? `<span class="cheese-schedule-match">${escapeHtml(meta.homeTeamName || "")} <small>VS</small> ${escapeHtml(meta.awayTeamName || "")}</span>`
+      : "";
+    return (
+      `<a class="cheese-schedule-row${live ? " is-live" : ""}" href="/live/${escapeAttribute(channelId)}" data-schedule-live="${escapeAttribute(channelId)}">` +
+      `<span class="cheese-schedule-time">${escapeHtml(parts.time)}</span>` +
+      `<span class="cheese-schedule-body">` +
+      `<span class="cheese-schedule-title">${live ? `<em class="cheese-schedule-live">LIVE</em>` : ""}${escapeHtml(item.scheduleTitle || "")}</span>` +
+      match +
+      `<span class="cheese-schedule-channel">${escapeHtml(channel.channelName || "")}</span>` +
+      `</span></a>`
+    );
+  }
+
+  // 일정 → 날짜 묶음 [{ key, rows }]. 날짜 머리는 묶음(section) 안에서만 붙어 있어 묶음 위치로 바로 스크롤할 수 있다.
+  function scheduleGroups(items) {
+    const now = Date.now();
+    const groups = [];
+    for (const item of items) {
+      const parts = scheduleParts(item?.scheduleDate);
+      if (!parts || !/^[0-9a-f]{32}$/i.test(String(item?.channel?.channelId || ""))) continue;
+      let group = groups[groups.length - 1];
+      if (!group || group.key !== parts.key) {
+        group = { key: parts.key, rows: "" };
+        groups.push(group);
+      }
+      group.rows += scheduleRowHtml(item, parts, now);
+    }
+    return groups;
+  }
+
+  function scheduleGroupHtml(group) {
+    const label = scheduleDayLabel(group.key);
+    return (
+      `<section class="cheese-schedule-day-group" data-schedule-day="${escapeAttribute(group.key)}">` +
+      `<div class="cheese-schedule-day">${escapeHtml(label.date)}` +
+      (label.tag ? ` <span class="cheese-schedule-day-tag">${escapeHtml(label.tag)}</span>` : "") +
+      `</div>${group.rows}</section>`
+    );
+  }
+
+  // 불러오는 동안 자리만 잡아 두는 줄(시각·제목·채널 모양).
+  function scheduleSkeletonRows(count) {
+    const row =
+      `<div class="cheese-schedule-row cheese-schedule-skeleton">` +
+      `<span class="cheese-schedule-bone is-time"></span>` +
+      `<span class="cheese-schedule-body"><span class="cheese-schedule-bone is-title"></span>` +
+      `<span class="cheese-schedule-bone is-sub"></span></span></div>`;
+    return row.repeat(count);
+  }
+
+  function scheduleTailHtml(entry, moreError) {
+    if (!entry?.next) return "";
+    return moreError
+      ? `<div class="cheese-schedule-tail" data-schedule-tail><button type="button" class="cheese-schedule-retry" data-schedule-retry="more">다시 불러오기</button></div>`
+      : `<div class="cheese-schedule-more" data-schedule-tail data-schedule-more aria-hidden="true">${scheduleSkeletonRows(2)}</div>`;
+  }
+
+  // entry 없음 = 처음 불러오는 중, error = 처음 묶음 실패.
+  function renderSchedulePopoverBody(popover, entry, { error = false } = {}) {
+    const list = popover.querySelector("[data-schedule-list]");
+    if (!list) return;
+    list.dataset.count = "0";
+    if (error) {
+      list.removeAttribute("aria-busy");
+      list.innerHTML =
+        `<div class="cheese-schedule-empty">편성표를 불러오지 못했습니다.` +
+        `<button type="button" class="cheese-schedule-retry" data-schedule-retry>다시 불러오기</button></div>`;
+      return;
+    }
+    if (!entry) {
+      list.setAttribute("aria-busy", "true");
+      list.innerHTML =
+        `<div class="cheese-schedule-day cheese-schedule-skeleton"><span class="cheese-schedule-bone is-day"></span></div>` +
+        scheduleSkeletonRows(8);
+      return;
+    }
+    list.removeAttribute("aria-busy");
+    const groups = scheduleGroups(entry.items);
+    list.innerHTML = groups.length
+      ? groups.map(scheduleGroupHtml).join("") + scheduleTailHtml(entry)
+      : `<p class="cheese-schedule-empty">표시할 일정이 없습니다.</p>`;
+    list.dataset.count = String(entry.items.length);
+  }
+
+  // 다음 묶음은 이미 그린 줄 뒤에 덧붙인다(통째로 다시 그리면 진행 중인 부드러운 스크롤이 끊긴다).
+  // 아직 안 그린 항목만 붙이므로 같은 묶음을 두 번 받아도 겹치지 않는다.
+  function appendScheduleItems(popover, entry, { moreError = false } = {}) {
+    const list = popover.querySelector("[data-schedule-list]");
+    if (!list) return;
+    const drawn = Number(list.dataset.count) || 0;
+    const groups = scheduleGroups(entry.items.slice(drawn));
+    list.querySelector("[data-schedule-tail]")?.remove();
+    const last = list.querySelector(".cheese-schedule-day-group:last-of-type");
+    if (groups.length && last && last.dataset.scheduleDay === groups[0].key) {
+      last.insertAdjacentHTML("beforeend", groups.shift().rows);
+    }
+    list.insertAdjacentHTML("beforeend", groups.map(scheduleGroupHtml).join("") + scheduleTailHtml(entry, moreError));
+    list.dataset.count = String(entry.items.length);
+  }
+
+  // 목록 끝(다음 묶음 자리)이 가까우면 이어 받는다. 받은 줄이 적어 스크롤이 안 생겨도 여기서 이어 받는다.
+  function maybeLoadMoreSchedules(popover) {
+    const list = popover.querySelector("[data-schedule-list]");
+    if (!list?.querySelector("[data-schedule-more]")) return;
+    if (list.scrollTop + list.clientHeight < list.scrollHeight - SCHEDULE_MORE_THRESHOLD_PX) return;
+    if (scheduleMoreLoads.has(scheduleFilterId)) return;
+    void showScheduleFilter(popover, true);
+  }
+
+  // filters 가 null 이면 아직 받는 중: 저장된 필터를 그대로 두고 칩 자리만 잡는다.
+  function renderScheduleFilters(popover, filters) {
+    const box = popover.querySelector("[data-schedule-filters]");
+    if (!box) return;
+    const all = [{ id: "", title: "전체" }, ...(filters || [])];
+    if (filters && !all.some((f) => f.id === scheduleFilterId)) scheduleFilterId = "";
+    const bones = filters ? "" : `<span class="cheese-schedule-bone is-chip"></span>`.repeat(3);
+    box.innerHTML = all
+      .map(
+        (f) =>
+          `<button type="button" class="cheese-schedule-filter${f.id === scheduleFilterId ? " is-active" : ""}" data-schedule-filter="${escapeAttribute(f.id)}" aria-pressed="${String(f.id === scheduleFilterId)}">${escapeHtml(f.title)}</button>`,
+      )
+      .join("") + bones;
+    const open = popover.querySelector("[data-schedule-open]");
+    if (open) open.setAttribute("href", `/schedule?filterId=${encodeURIComponent(scheduleFilterId || "ALL")}`);
+  }
+
+  // 반환: 다 그렸으면 true(실패·취소면 false). 날짜로 건너뛸 때 이어 받기를 기다리는 데 쓴다.
+  async function showScheduleFilter(popover, more = false) {
+    const token = more ? scheduleRequestToken : ++scheduleRequestToken;
+    const filterId = scheduleFilterId;
+    const list = popover.querySelector("[data-schedule-list]");
+    if (!more) {
+      const cached = scheduleCache.get(filterId);
+      renderSchedulePopoverBody(popover, cached && Date.now() - cached.at < SCHEDULE_CACHE_MS ? cached : null);
+      if (list) list.scrollTop = 0;
+      updateScheduleCurrentDay(popover);
+    }
+    try {
+      const entry = await loadSchedules(filterId, more);
+      if (token !== scheduleRequestToken || !popover.isConnected) return false;
+      if (more) {
+        appendScheduleItems(popover, entry);
+      } else {
+        renderSchedulePopoverBody(popover, entry);
+        if (list) list.scrollTop = 0;
+        updateScheduleCurrentDay(popover);
+      }
+      maybeLoadMoreSchedules(popover);
+      return true;
+    } catch {
+      if (token !== scheduleRequestToken || !popover.isConnected) return false;
+      if (more) appendScheduleItems(popover, scheduleCache.get(filterId), { moreError: true });
+      else renderSchedulePopoverBody(popover, null, { error: true });
+      return false;
+    }
+  }
+
+  // ── 날짜 고르기(달력) ── 일정 있는 날(program-schedule-days)만 누를 수 있고, 누르면 목록의 그날로 부드럽게 스크롤한다.
+  async function loadScheduleDays(filterId) {
+    const cached = scheduleDaysCache.get(filterId);
+    if (cached && Date.now() - cached.at < SCHEDULE_CACHE_MS) return cached.days;
+    const content = await fetchScheduleJson(`${SCHEDULE_API}/program-schedule-days?${new URLSearchParams({ filterId })}`);
+    const days = (Array.isArray(content?.days) ? content.days : []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    scheduleDaysCache.set(filterId, { at: Date.now(), days });
+    return days;
+  }
+
+  // 목록 맨 위에 걸린 날짜(스크롤을 따라감). 처음 그리기 전이면 오늘.
+  function scheduleVisibleDay(popover) {
+    const list = popover.querySelector("[data-schedule-list]");
+    const groups = list ? [...list.querySelectorAll(".cheese-schedule-day-group")] : [];
+    let key = groups[0]?.dataset.scheduleDay || scheduleTodayKey();
+    for (const group of groups) {
+      if (group.offsetTop > list.scrollTop + 1) break;
+      key = group.dataset.scheduleDay;
+    }
+    return key;
+  }
+
+  function updateScheduleCurrentDay(popover) {
+    const key = popover.dataset.jumpDay || scheduleVisibleDay(popover);
+    if (popover.dataset.currentDay === key) return;
+    popover.dataset.currentDay = key;
+    const label = popover.querySelector("[data-schedule-date-label]");
+    if (label) {
+      const info = scheduleDayInfo(key);
+      label.textContent = `${info.month}월 ${info.day}일${info.tag === "오늘" ? " 오늘" : ""}`;
+    }
+    if (popover.querySelector("[data-schedule-calendar]:not([hidden])")) renderScheduleCalendar(popover);
+  }
+
+  function renderScheduleCalendar(popover) {
+    const box = popover.querySelector("[data-schedule-calendar]");
+    if (!box) return;
+    const cached = scheduleDaysCache.get(scheduleFilterId);
+    const selected = popover.dataset.currentDay || scheduleTodayKey();
+    const info = scheduleDayInfo(selected);
+    let cells = "";
+    if (cached === undefined || popover.dataset.daysError === scheduleFilterId) {
+      cells = popover.dataset.daysError === scheduleFilterId
+        ? `<p class="cheese-schedule-cal-note">날짜를 불러오지 못했습니다.</p>`
+        : `<span class="cheese-schedule-bone is-cal"></span>`.repeat(28);
+    } else {
+      const days = new Set(cached.days);
+      const today = scheduleTodayKey();
+      const last = cached.days.reduce((max, d) => (d > max ? d : max), today);
+      const start = Date.parse(`${today}T00:00:00Z`);
+      cells = `<span class="cheese-schedule-cal-cell is-empty" aria-hidden="true"></span>`.repeat(new Date(start).getUTCDay());
+      for (let at = start; ; at += 86400000) {
+        const key = new Date(at).toISOString().slice(0, 10);
+        if (key > last) break;
+        const d = scheduleDayInfo(key);
+        const has = days.has(key);
+        const cls = ["cheese-schedule-cal-cell"];
+        if (d.weekday === 0) cls.push("is-sun");
+        if (!has) cls.push("is-dimmed");
+        if (key === today) cls.push("is-today");
+        if (key === selected) cls.push("is-selected");
+        cells +=
+          `<button type="button" class="${cls.join(" ")}" data-schedule-cal-day="${key}"${has ? "" : " disabled"}` +
+          `${key === today ? ' aria-current="date"' : ""} aria-pressed="${String(key === selected)}"` +
+          ` aria-label="${d.month}월 ${d.day}일${has ? ", 방송 일정 있음" : ""}">` +
+          `${key === today ? "오늘" : d.day}</button>`;
+      }
+    }
+    box.innerHTML =
+      `<div class="cheese-schedule-cal-head"><strong>${info.month}월 ${info.day}일</strong>` +
+      `<button type="button" class="cheese-schedule-cal-close" data-schedule-cal-close aria-label="달력 닫기">` +
+      `<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M16.6 4.933A1.083 1.083 0 1 0 15.066 3.4L10 8.468 4.933 3.4A1.083 1.083 0 0 0 3.4 4.933L8.468 10 3.4 15.067A1.083 1.083 0 1 0 4.933 16.6L10 11.532l5.067 5.067a1.083 1.083 0 1 0 1.532-1.532L11.532 10l5.067-5.067Z"/></svg></button></div>` +
+      `<div class="cheese-schedule-cal-grid">` +
+      "일월화수목금토".split("").map((w, i) => `<span class="cheese-schedule-cal-week${i === 0 ? " is-sun" : ""}">${w}</span>`).join("") +
+      cells +
+      `</div>`;
+  }
+
+  function setScheduleCalendarOpen(popover, open) {
+    const box = popover.querySelector("[data-schedule-calendar]");
+    const toggle = popover.querySelector("[data-schedule-date]");
+    if (!box || !toggle) return;
+    box.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    if (!open) return;
+    renderScheduleCalendar(popover);
+    const filterId = scheduleFilterId;
+    if (!scheduleDaysCache.has(filterId) || Date.now() - scheduleDaysCache.get(filterId).at >= SCHEDULE_CACHE_MS) {
+      void refreshScheduleDays(popover);
+    }
+  }
+
+  async function refreshScheduleDays(popover) {
+    const filterId = scheduleFilterId;
+    try {
+      await loadScheduleDays(filterId);
+      if (popover.dataset.daysError === filterId) delete popover.dataset.daysError;
+    } catch {
+      popover.dataset.daysError = filterId;
+    }
+    if (popover.isConnected && filterId === scheduleFilterId && !popover.querySelector("[data-schedule-calendar]")?.hidden) {
+      renderScheduleCalendar(popover);
+    }
+  }
+
+  function releaseScheduleJumpDay(popover) {
+    if (!popover.dataset.jumpDay) return;
+    delete popover.dataset.jumpDay;
+    updateScheduleCurrentDay(popover);
+  }
+
+  // 그날 묶음이 목록에 생길 때까지 다음 묶음을 이어 받고(넘치지 않게 횟수 제한), 그 묶음 위치로 부드럽게 스크롤한다.
+  async function scrollScheduleToDay(popover, key) {
+    const token = ++scheduleJumpToken;
+    const filterId = scheduleFilterId;
+    const list = popover.querySelector("[data-schedule-list]");
+    if (!list) return;
+    popover.dataset.jumpDay = key;
+    updateScheduleCurrentDay(popover);
+    let scrolled = false;
+    try {
+      for (let round = 0; round <= SCHEDULE_JUMP_MAX_PAGES; round += 1) {
+        const groups = [...list.querySelectorAll(".cheese-schedule-day-group")];
+        // 그날이 없으면(받은 사이 일정이 빠진 경우) 그 뒤 첫 날로.
+        const target = groups.find((g) => g.dataset.scheduleDay >= key);
+        const entry = scheduleCache.get(filterId);
+        if (target || !entry?.next || round === SCHEDULE_JUMP_MAX_PAGES) {
+          if (!target) return;
+          const smooth = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+          list.scrollTo({ top: target.offsetTop, behavior: smooth ? "smooth" : "auto" });
+          scrolled = true;
+          return;
+        }
+        popover.setAttribute("data-schedule-jumping", "");
+        const ok = await showScheduleFilter(popover, true);
+        if (!ok || token !== scheduleJumpToken || filterId !== scheduleFilterId || !popover.isConnected) return;
+      }
+    } finally {
+      if (token === scheduleJumpToken && popover.isConnected) {
+        popover.removeAttribute("data-schedule-jumping");
+        // 고른 날 표시는 사용자가 직접 스크롤할 때 푼다(마지막 날처럼 짧은 묶음은 맨 위까지 못 올라와도 고른 날로 둔다).
+        if (!scrolled) releaseScheduleJumpDay(popover);
+      }
+    }
+  }
+
+  function positionSchedulePopover(popover, link) {
+    const rect = link.getBoundingClientRect();
+    const sidebar = document.getElementById("sidebar")?.getBoundingClientRect();
+    const width = popover.offsetWidth;
+    let left = Math.round(Math.max(rect.right, sidebar?.right || 0) + 8);
+    // 사이드바를 오른쪽에 둔 경우: 왼쪽으로 띄운다.
+    if (left + width > window.innerWidth - 8) {
+      left = Math.round(Math.min(rect.left, sidebar?.left ?? rect.left) - width - 8);
+    }
+    left = Math.max(8, left);
+    const height = popover.offsetHeight;
+    const top = Math.round(Math.min(Math.max(8, rect.top - 40), window.innerHeight - height - 8));
+    popover.style.left = `${left}px`;
+    popover.style.top = `${Math.max(8, top)}px`;
+  }
+
+  function openSchedulePopover(link) {
+    document.getElementById(SCHEDULE_POPOVER_ID)?.remove();
+    scheduleAnchor = link;
+    const popover = document.createElement("div");
+    popover.id = SCHEDULE_POPOVER_ID;
+    popover.className = "cheese-schedule-popover";
+    popover.setAttribute("role", "dialog");
+    popover.setAttribute("aria-label", "편성표 미리보기");
+    popover.innerHTML =
+      `<div class="cheese-schedule-head"><strong>편성표</strong>` +
+      `<button type="button" class="cheese-schedule-date" data-schedule-date aria-haspopup="dialog" aria-expanded="false" aria-controls="cheese-schedule-calendar">` +
+      `<span data-schedule-date-label></span><span class="blind">날짜 선택</span>` +
+      `<svg class="cheese-schedule-date-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.85" y="5.85" width="16.3" height="14.3" rx="3.15" stroke="currentColor" stroke-width="1.7"/><path d="M4 10h16M8 4v3.5M16 4v3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>` +
+      `<svg class="cheese-schedule-date-arrow" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M6.598 9.9a.85.85 0 0 1 1.202 0l4.199 4.198L16.198 9.9a.85.85 0 0 1 1.202 1.202l-4.8 4.8a.85.85 0 0 1-1.202 0l-4.8-4.8a.85.85 0 0 1 0-1.202Z" clip-rule="evenodd"/></svg>` +
+      `</button>` +
+      `<a class="cheese-schedule-open" data-schedule-open href="/schedule?filterId=ALL">편성표 열기</a>` +
+      `<div class="cheese-schedule-calendar" id="cheese-schedule-calendar" data-schedule-calendar role="dialog" aria-label="날짜 선택" hidden></div></div>` +
+      `<div class="cheese-schedule-filters" data-schedule-filters></div>` +
+      `<div class="cheese-schedule-list" data-schedule-list></div>`;
+    document.body.appendChild(popover);
+    // scroll 은 버블링되지 않아 목록에 직접 단다(팝오버를 닫으면 같이 사라진다).
+    popover.querySelector("[data-schedule-list]").addEventListener(
+      "scroll",
+      () => {
+        maybeLoadMoreSchedules(popover);
+        updateScheduleCurrentDay(popover);
+      },
+      { passive: true },
+    );
+    // 휠·터치·스크롤바 잡기·키보드 = 사용자가 직접 스크롤 → 날짜 버튼이 다시 맨 위 날짜를 따라간다.
+    for (const type of ["wheel", "touchstart", "pointerdown", "keydown"]) {
+      popover.querySelector("[data-schedule-list]").addEventListener(type, () => releaseScheduleJumpDay(popover), { passive: true });
+    }
+    updateScheduleCurrentDay(popover);
+    renderScheduleFilters(popover, scheduleFiltersCache.list);
+    positionSchedulePopover(popover, link);
+    void loadScheduleFilters().then((filters) => {
+      if (popover.isConnected) renderScheduleFilters(popover, filters);
+    });
+    void showScheduleFilter(popover);
+    void refreshScheduleDays(popover);
+  }
+
+  function onSchedulePopoverClick(event) {
+    const popover = event.target?.closest?.(`#${SCHEDULE_POPOVER_ID}`);
+    if (!popover) return;
+    const calendar = popover.querySelector("[data-schedule-calendar]");
+    if (event.target.closest("[data-schedule-date]")) {
+      setScheduleCalendarOpen(popover, calendar?.hidden === true);
+      return;
+    }
+    if (event.target.closest("[data-schedule-cal-close]")) {
+      setScheduleCalendarOpen(popover, false);
+      return;
+    }
+    const day = event.target.closest("[data-schedule-cal-day]");
+    if (day) {
+      if (day.disabled) return;
+      setScheduleCalendarOpen(popover, false);
+      void scrollScheduleToDay(popover, day.dataset.scheduleCalDay);
+      return;
+    }
+    if (calendar?.contains(event.target)) return;
+    // 달력 밖을 누르면 달력만 닫고 누른 동작은 그대로 이어 간다.
+    if (calendar && !calendar.hidden) setScheduleCalendarOpen(popover, false);
+    const filter = event.target.closest("[data-schedule-filter]");
+    if (filter) {
+      scheduleFilterId = filter.dataset.scheduleFilter || "";
+      try {
+        chrome.storage?.local?.set({ [SCHEDULE_POPOVER_FILTER_KEY]: scheduleFilterId });
+      } catch {}
+      scheduleJumpToken += 1;
+      popover.removeAttribute("data-schedule-jumping");
+      delete popover.dataset.jumpDay;
+      renderScheduleFilters(popover, scheduleFiltersCache.list || []);
+      void showScheduleFilter(popover);
+      void refreshScheduleDays(popover);
+      return;
+    }
+    const retry = event.target.closest("[data-schedule-retry]");
+    if (retry) {
+      const more = retry.dataset.scheduleRetry === "more";
+      if (more) {
+        retry.closest("[data-schedule-tail]")?.insertAdjacentHTML("afterend", scheduleTailHtml(scheduleCache.get(scheduleFilterId)));
+        retry.closest("[data-schedule-tail]")?.remove();
+      }
+      void showScheduleFilter(popover, more);
+      return;
+    }
+    // 이동은 치지직 라우터로(새 탭 수정키는 브라우저에 맡긴다).
+    const target = event.target.closest("[data-schedule-live], [data-schedule-open]");
+    if (!target || event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    const href = target.getAttribute("href");
+    closeSchedulePopover();
+    if (href) spaNavigate(href);
+  }
+
+  function applySchedulePopoverSetting(on) {
+    schedulePopoverOn = on === true;
+    if (!schedulePopoverOn) closeSchedulePopover();
+  }
+
+  if (IS_TOP_FRAME) {
+    document.addEventListener("mouseover", onSchedulePointerOver, true);
+    document.addEventListener("mouseout", onSchedulePointerOut, true);
+    document.addEventListener("click", onSchedulePopoverClick, true);
+    document.addEventListener("keydown", (event) => {
+      const popover = document.getElementById(SCHEDULE_POPOVER_ID);
+      if (event.key !== "Escape" || !popover) return;
+      // 달력이 열려 있으면 달력만 닫는다.
+      if (popover.querySelector("[data-schedule-calendar]:not([hidden])")) setScheduleCalendarOpen(popover, false);
+      else closeSchedulePopover();
+    });
+    try {
+      chrome.storage?.local?.get([SCHEDULE_POPOVER_KEY, SCHEDULE_POPOVER_FILTER_KEY]).then((data) => {
+        if (typeof data?.[SCHEDULE_POPOVER_FILTER_KEY] === "string") scheduleFilterId = data[SCHEDULE_POPOVER_FILTER_KEY];
+        applySchedulePopoverSetting(data?.[SCHEDULE_POPOVER_KEY] === true);
+      }).catch(() => {});
+      chrome.storage?.onChanged?.addListener((changes, area) => {
+        if (area === "local" && changes[SCHEDULE_POPOVER_KEY]) {
+          applySchedulePopoverSetting(changes[SCHEDULE_POPOVER_KEY].newValue === true);
+        }
+      });
+    } catch {}
+  }
+
   // ── 사이드바 멀티뷰 진입 버튼 ────────────────────────────────────────────
   // '서비스 바로가기' nav 안에 우리 항목을 하나 얹는다(서비스 바로가기를 숨겨도 이 항목은 남는다). 치지직 원본 항목의 클래스를
   // harvest 해 같은 모양을 쓰고, 사이드바가 재렌더되면 옵저버가 이 함수를 다시 불러
