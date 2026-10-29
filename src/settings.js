@@ -281,6 +281,8 @@
     "cheeseFollowPreviewSize",
     "cheeseChatWidth",
     "cheeseSidebarWidth",
+    "cheeseSidebarMultiviewPosition",
+    "cheeseSidebarTopMenuOrder",
     "cheeseChatFoldState",
     "cheeseCommentFeatureEnabled",
     "cheeseCommentMarkersEnabled",
@@ -13894,6 +13896,189 @@
   [syncCdBase, syncCdMax].forEach((el) =>
     el?.addEventListener("change", saveSyncCooldownCustom),
   );
+
+  // ── 사이드바 멀티뷰 바로가기 위치 + 맨 위 메뉴 순서 ───────────────────────────
+  // 순서는 content.js·sidebarEarlyHide.js 와 같은 id 목록이다. 멀티뷰는 맨 위 메뉴에 둘 때만 목록에 보이고,
+  // 보이지 않을 때 순서를 바꿔도 멀티뷰의 자리(앞 항목 기준)는 그대로 둔다.
+  const SIDEBAR_MV_POSITION_KEY = "cheeseSidebarMultiviewPosition";
+  const SIDEBAR_TOP_MENU_ORDER_KEY = "cheeseSidebarTopMenuOrder";
+  const SIDEBAR_TOP_MENU = [
+    ["lives", "전체 방송", "sbLives"],
+    ["clips", "인기 클립", "sbClips"],
+    ["category", "카테고리", "sbCategory"],
+    ["schedule", "편성표", "sbSchedule"],
+    ["following", "팔로잉", "sbFollowing"],
+    ["cheezefarm", "치즈팜", "sbCheezefarm"],
+    ["multiview", "멀티뷰", "sbMultiview"],
+  ];
+  const SIDEBAR_TOP_MENU_IDS = SIDEBAR_TOP_MENU.map(([id]) => id);
+  const normalizeSidebarTopMenuOrder = (value) => {
+    const list = Array.isArray(value)
+      ? value.filter(
+          (id, index) =>
+            SIDEBAR_TOP_MENU_IDS.includes(id) && value.indexOf(id) === index,
+        )
+      : [];
+    return [...list, ...SIDEBAR_TOP_MENU_IDS.filter((id) => !list.includes(id))];
+  };
+  const sidebarMvPositionButtons = Array.from(
+    document.querySelectorAll("[data-sidebar-multiview-position-value]"),
+  );
+  const sidebarTopMenuList = document.querySelector(
+    "[data-sidebar-top-menu-order]",
+  );
+  let sidebarMvPosition = "services";
+  let sidebarTopMenuOrder = [...SIDEBAR_TOP_MENU_IDS];
+  const featureHiddenInput = (flag) =>
+    document.querySelector(`[data-feature="${flag}"]`);
+  // 목록에 보일 항목(멀티뷰는 맨 위 메뉴에 둘 때만)
+  const visibleTopMenuIds = () =>
+    sidebarTopMenuOrder.filter(
+      (id) => id !== "multiview" || sidebarMvPosition === "top",
+    );
+  function reflectSidebarMvPosition() {
+    sidebarMvPositionButtons.forEach((btn) => {
+      const active =
+        btn.dataset.sidebarMultiviewPositionValue === sidebarMvPosition;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  function renderSidebarTopMenuOrder() {
+    if (!sidebarTopMenuList) return;
+    const ids = visibleTopMenuIds();
+    sidebarTopMenuList.innerHTML = ids
+      .map((id, i) => {
+        const [, label, flag] = SIDEBAR_TOP_MENU.find(([key]) => key === id);
+        const hidden = Boolean(featureHiddenInput(flag)?.checked);
+        return (
+          `<li class="cf-fav-order-item${hidden ? " is-hidden" : ""}" draggable="true" data-id="${id}">` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⠿</span>` +
+          `<span class="cf-fav-order-name">${label}</span>` +
+          (hidden ? `<span class="cf-fav-order-tag">숨김</span>` : "") +
+          `<span class="cf-fav-order-btns">` +
+          `<button type="button" data-dir="up" aria-label="${label} 위로" title="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
+          `<button type="button" data-dir="down" aria-label="${label} 아래로" title="아래로"${i === ids.length - 1 ? " disabled" : ""}>↓</button>` +
+          `</span></li>`
+        );
+      })
+      .join("");
+  }
+  // 보이는 항목의 새 순서를 저장 순서로 바꾼다. 목록에 없는 멀티뷰는 원래 앞에 있던 항목 바로 뒤에 둔다.
+  function commitSidebarTopMenuOrder(visible) {
+    let next = [...visible];
+    if (!next.includes("multiview") && sidebarTopMenuOrder.includes("multiview")) {
+      const at = sidebarTopMenuOrder.indexOf("multiview");
+      const prev = sidebarTopMenuOrder
+        .slice(0, at)
+        .reverse()
+        .find((id) => next.includes(id));
+      next.splice(prev ? next.indexOf(prev) + 1 : 0, 0, "multiview");
+    }
+    sidebarTopMenuOrder = normalizeSidebarTopMenuOrder(next);
+    renderSidebarTopMenuOrder();
+    try {
+      cachedStorageSet({ [SIDEBAR_TOP_MENU_ORDER_KEY]: sidebarTopMenuOrder });
+    } catch {}
+  }
+  (async () => {
+    try {
+      const data = await cachedStorageGet([
+        SIDEBAR_MV_POSITION_KEY,
+        SIDEBAR_TOP_MENU_ORDER_KEY,
+      ]);
+      sidebarMvPosition =
+        data?.[SIDEBAR_MV_POSITION_KEY] === "top" ? "top" : "services";
+      sidebarTopMenuOrder = normalizeSidebarTopMenuOrder(
+        data?.[SIDEBAR_TOP_MENU_ORDER_KEY],
+      );
+    } catch {}
+    reflectSidebarMvPosition();
+    renderSidebarTopMenuOrder();
+  })();
+  sidebarMvPositionButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      sidebarMvPosition =
+        btn.dataset.sidebarMultiviewPositionValue === "top" ? "top" : "services";
+      reflectSidebarMvPosition();
+      renderSidebarTopMenuOrder();
+      try {
+        cachedStorageSet({ [SIDEBAR_MV_POSITION_KEY]: sidebarMvPosition });
+      } catch {}
+    });
+  });
+  // 숨김 스위치를 바꾸면 목록의 흐림 표시도 바꾼다.
+  document.addEventListener("change", (event) => {
+    const flag = event.target?.dataset?.feature;
+    if (SIDEBAR_TOP_MENU.some(([, , key]) => key === flag)) {
+      renderSidebarTopMenuOrder();
+    }
+  });
+  document
+    .querySelector("[data-sidebar-top-menu-order-reset]")
+    ?.addEventListener("click", () => {
+      // 기본 순서(멀티뷰는 맨 끝)로 — 목록에 없는 멀티뷰의 자리도 함께 되돌린다.
+      sidebarTopMenuOrder = [];
+      commitSidebarTopMenuOrder(SIDEBAR_TOP_MENU_IDS);
+    });
+  if (sidebarTopMenuList) {
+    sidebarTopMenuList.addEventListener("click", (event) => {
+      const btn = event.target.closest?.("button[data-dir]");
+      const li = btn?.closest(".cf-fav-order-item");
+      if (!li) return;
+      const ids = visibleTopMenuIds();
+      const i = ids.indexOf(li.dataset.id);
+      const j = btn.dataset.dir === "up" ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+      commitSidebarTopMenuOrder(ids);
+      sidebarTopMenuList
+        .querySelector(
+          `[data-id="${ids[j]}"] button[data-dir="${btn.dataset.dir}"]:not(:disabled)`,
+        )
+        ?.focus();
+    });
+    // 드래그 정렬 — 탭 순서와 같은 방식(실시간 insertBefore + dragend 저장).
+    let dragEl = null;
+    const dragAfter = (y) => {
+      let closest = { offset: -Infinity, el: null };
+      for (const child of sidebarTopMenuList.querySelectorAll(
+        ".cf-fav-order-item:not(.cf-fav-order-dragging)",
+      )) {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) {
+          closest = { offset, el: child };
+        }
+      }
+      return closest.el;
+    };
+    sidebarTopMenuList.addEventListener("dragstart", (event) => {
+      const li = event.target.closest?.(".cf-fav-order-item");
+      if (!li) return;
+      dragEl = li;
+      event.dataTransfer.effectAllowed = "move";
+      requestAnimationFrame(() => li.classList.add("cf-fav-order-dragging"));
+    });
+    sidebarTopMenuList.addEventListener("dragover", (event) => {
+      if (!dragEl) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const after = dragAfter(event.clientY);
+      if (after == null) sidebarTopMenuList.appendChild(dragEl);
+      else if (after !== dragEl) sidebarTopMenuList.insertBefore(dragEl, after);
+    });
+    sidebarTopMenuList.addEventListener("dragend", () => {
+      if (!dragEl) return;
+      dragEl.classList.remove("cf-fav-order-dragging");
+      dragEl = null;
+      commitSidebarTopMenuOrder(
+        [...sidebarTopMenuList.querySelectorAll(".cf-fav-order-item")].map(
+          (li) => li.dataset.id,
+        ),
+      );
+    });
+  }
 
   // ── 팔로우 채널 자동 갱신(0=끔/30/60초 프리셋 + 커스텀 3~600초) ────────────
   const FOLLOW_REFRESH_KEY = "cheeseFollowRefreshSec";

@@ -1544,6 +1544,8 @@ html.settings-tab-view .settings-item-desc {
 .settings-item:has([data-popup-player-audio]),
 .settings-item:has([data-cf-group-placement]),
 .settings-item:has([data-cf-section-order]),
+.settings-item:has([data-sidebar-top-menu-order]),
+.settings-item:has([data-sidebar-multiview-position]),
 .settings-item:has([data-chat-os-position]),
 .settings-item:has([data-chat-time-seek-offset]),
 .settings-item:has([data-chat-donation-tools]),
@@ -1673,6 +1675,8 @@ html.settings-tab-view .settings-item-desc {
 .settings-item [data-affinity-order],
 .settings-item [data-cf-section-order],
 .settings-item [data-settings-tab-order],
+.settings-item [data-sidebar-top-menu-order],
+.settings-item [data-sidebar-multiview-position],
 .settings-item [data-update-notice-duration] {
   width: 100%;
 }
@@ -3281,6 +3285,19 @@ body > .clr-picker .clr-preview {
 .cf-fav-order-btns button:disabled {
   opacity: 0.3;
   cursor: default;
+}
+/* 사이드바 맨 위 메뉴 순서: 항목이 7개뿐이라 스크롤 없이 모두 보인다 */
+.cf-fav-order-list[data-sidebar-top-menu-order] {
+  max-height: none;
+}
+/* 사이드바 맨 위 메뉴 순서: 숨긴 항목은 흐리게(순서는 그대로 바꿀 수 있다) */
+.cf-fav-order-item.is-hidden .cf-fav-order-name {
+  opacity: 0.45;
+}
+.cf-fav-order-tag {
+  flex: none;
+  font-size: 0.6875rem;
+  color: var(--popup-fg-weak, #888);
 }
 .cf-fav-order-empty {
   font-size: 0.75rem;

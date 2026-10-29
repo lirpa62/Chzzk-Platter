@@ -64,6 +64,27 @@
   const STYLE_ID = "cheese-sidebar-hide-style";
   const MV_ONLY_CLASS = "cheese-sb-services-mv-only";
   const FEATURE_KEY = "cheeseFeatureHidden";
+  // 맨 위 메뉴 순서·멀티뷰 위치 — content.js 의 sidebarTopMenuOrderRules 와 같은 규칙을 먼저 넣어 기본 순서로
+  // 잠깐 그려졌다가 바뀌는 깜빡임을 막는다.
+  const MV_POSITION_KEY = "cheeseSidebarMultiviewPosition";
+  const TOP_MENU_ORDER_KEY = "cheeseSidebarTopMenuOrder";
+  const TOP_MENU_IDS = ["lives", "clips", "category", "schedule", "following", "cheezefarm", "multiview"];
+  function topMenuOrderRules(value, multiviewInTop) {
+    const saved = Array.isArray(value)
+      ? value.filter((id, index) => TOP_MENU_IDS.includes(id) && value.indexOf(id) === index)
+      : [];
+    const order = saved.concat(TOP_MENU_IDS.filter((id) => !saved.includes(id)));
+    const ids = order.filter((id) => id !== "multiview" || multiviewInTop);
+    const base = TOP_MENU_IDS.filter((id) => id !== "multiview" || multiviewInTop);
+    if (ids.join() === base.join()) return [];
+    const list = 'aside#sidebar ul:has(> li > a[href="/lives"])';
+    const rules = [list + "{display:flex!important;flex-direction:column!important}", list + ">li{order:100}"];
+    ids.forEach((id, index) => {
+      const item = id === "multiview" ? "li#cheese-sidebar-multiview" : 'li:has(> a[href="/' + id + '"])';
+      rules.push(list + ">" + item + "{order:" + index + "!important}");
+    });
+    return rules;
+  }
   // content.js featureFlags 기본값과 의미 일치(true=숨김). 조기 단계라 '명시적으로 숨김
   // (true)'인 것만 처리하고, 기본 표시 항목은 건드리지 않는다.
   const MENU_HREFS = {
@@ -76,9 +97,9 @@
     "/partner": "sbPartner",
   };
 
-  function buildRules(f) {
+  function buildRules(f, data) {
     const rules = [];
-    if (!f || typeof f !== "object") return rules;
+    if (!f || typeof f !== "object") f = {};
     // 0) 라벨 기반 섹션 숨김 마커(cheese-sb-hide)의 display:none 규칙. 이 규칙은 content.js
     //    가 늦게 주입하므로, 조기 옵저버가 붙인 클래스가 바로 먹도록 여기서 함께 넣는다.
     rules.push(`aside#sidebar .cheese-sb-hide{display:none!important}`);
@@ -107,6 +128,7 @@
         sel.push(`aside#sidebar nav[class*="_section_"]:has(a[href="${href}"])`);
       });
     if (sel.length) rules.push(`${sel.join(",")}{display:none!important}`);
+    rules.push(...topMenuOrderRules(data[TOP_MENU_ORDER_KEY], data[MV_POSITION_KEY] === "top" && f.sbMultiview !== true));
     // 3) 전용 팔로잉 목록 ON 이면 원본 팔로우 목록(ul)/더보기를 즉시 숨김.
     //    (content.js 의 html.cheese-cf-on 규칙과 동일 효과를, 클래스 없이 nav 범위로.)
     if (f.sbFollowCustom === true) {
@@ -224,17 +246,18 @@
   window.addEventListener("pagehide", stopLabelObserver, { once: true });
 
   try {
-    chrome.storage.local.get([FEATURE_KEY], (data) => {
+    chrome.storage.local.get([FEATURE_KEY, MV_POSITION_KEY, TOP_MENU_ORDER_KEY], (data) => {
       if (chrome.runtime && chrome.runtime.lastError) return;
       const f = data && data[FEATURE_KEY];
-      const rules = buildRules(f);
+      const rules = buildRules(f, data || {});
       if (rules.length) inject(rules.join("\n"));
       // 라벨 기반 숨김 대상 키워드 수집 후 옵저버 시작.
       if (f && typeof f === "object") {
         labelFlags = LABEL_RULES.filter(([, flag]) => f[flag] === true).map(
           ([kw]) => kw,
         );
-        keepMultiviewInServices = f.sbMultiview !== true;
+        // 멀티뷰를 맨 위 메뉴로 옮겼으면 서비스 바로가기는 통째로 숨긴다(content.js applySidebarSections 와 같음).
+        keepMultiviewInServices = f.sbMultiview !== true && data[MV_POSITION_KEY] !== "top";
         if (labelFlags.length) startLabelObserver();
       }
     });

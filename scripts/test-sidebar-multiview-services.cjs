@@ -29,10 +29,10 @@ check(/data-feature="sbServices"[\s\S]{0,200}?data-new-feature="sidebar-multivie
 check(/if \(featureFlags\.sidebar \|\| featureFlags\.sbMultiview\) \{/.test(content) &&
   !/featureFlags\.sidebar \|\| featureFlags\.sbServices\) \{\s*existing\?\.remove\(\)/.test(content),
   "멀티뷰 바로가기는 사이드바 전체 숨김·멀티뷰 숨김일 때만 뺀다(서비스 바로가기 숨김과 무관)");
-check(/const multiviewOnly = featureFlags\.sbServices && !featureFlags\.sbMultiview;\s*nav\.classList\.toggle\(SIDEBAR_SERVICES_MV_ONLY_CLASS, multiviewOnly\);\s*hidden = featureFlags\.sbServices && !multiviewOnly;/.test(content),
+check(/const multiviewOnly =\s*featureFlags\.sbServices &&\s*!featureFlags\.sbMultiview &&\s*sidebarMultiviewPosition === "services";\s*nav\.classList\.toggle\(SIDEBAR_SERVICES_MV_ONLY_CLASS, multiviewOnly\);\s*hidden = featureFlags\.sbServices && !multiviewOnly;/.test(content),
   "서비스 바로가기 숨김이면 멀티뷰가 보일 때 mv-only, 멀티뷰도 숨기면 섹션째 숨긴다");
 check(/kw === "서비스바로가기" && keepMultiviewInServices \? MV_ONLY_CLASS : HIDE_CLASS/.test(early) &&
-  /keepMultiviewInServices = f\.sbMultiview !== true;/.test(early),
+  /keepMultiviewInServices = f\.sbMultiview !== true && data\[MV_POSITION_KEY\] !== "top";/.test(early),
   "조기 숨김도 같은 기준(멀티뷰가 보이면 mv-only)");
 
 // content.js 의 규칙 문자열을 꺼내 실제로 그려 본다.

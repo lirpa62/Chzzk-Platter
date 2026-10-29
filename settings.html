@@ -5174,10 +5174,84 @@
                   >
                 </label>
                 <label class="settings-switch"
-                  ><input type="checkbox" data-feature="sbMultiview" /><i
+                  ><input
+                    type="checkbox"
+                    data-feature="sbMultiview"
+                    data-settings-lock-when-checked
+                  /><i
                     aria-hidden="true"
                   ></i
                 ></label>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="sidebar-multiview-position"
+              >
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="멀티뷰 위치 바로가기 맨 위 메뉴"
+                    >└ 멀티뷰 위치</span
+                  >
+                  <span class="settings-item-desc"
+                    >맨 위 메뉴에 두면 아래 '맨 위 메뉴 순서'에서 자리를
+                    정합니다</span
+                  >
+                </div>
+                <div
+                  class="settings-segmented settings-segmented-2"
+                  data-sidebar-multiview-position
+                  role="radiogroup"
+                  aria-label="멀티뷰 바로가기 위치"
+                >
+                  <button
+                    type="button"
+                    data-sidebar-multiview-position-value="services"
+                    role="radio"
+                    aria-checked="true"
+                  >
+                    서비스 바로가기
+                  </button>
+                  <button
+                    type="button"
+                    data-sidebar-multiview-position-value="top"
+                    role="radio"
+                    aria-checked="false"
+                  >
+                    맨 위 메뉴
+                  </button>
+                </div>
+              </li>
+              <li
+                class="settings-item settings-item-stacked"
+                data-new-feature="sidebar-top-menu-order"
+              >
+                <div>
+                  <span
+                    class="settings-item-name"
+                    data-settings-search-aliases="사이드바 메뉴 순서 전체 방송 인기 클립 카테고리 편성표 팔로잉 치즈팜 멀티뷰 배치"
+                    >맨 위 메뉴 순서</span
+                  >
+                  <span
+                    class="settings-item-desc"
+                    data-settings-summary="사이드바 맨 위 메뉴의 표시 순서를 정합니다."
+                    >사이드바 맨 위 메뉴(전체 방송·인기 클립·카테고리·편성표·팔로잉·치즈팜, 멀티뷰를 맨 위
+                    메뉴에 두면 함께)를 드래그하거나 화살표로 옮겨 표시 순서를
+                    정합니다. 숨긴 항목은 흐리게 보입니다.</span
+                  >
+                </div>
+                <ul
+                  class="cf-fav-order-list"
+                  data-sidebar-top-menu-order
+                  aria-label="사이드바 맨 위 메뉴 순서"
+                ></ul>
+                <button
+                  type="button"
+                  class="settings-order-reset"
+                  data-sidebar-top-menu-order-reset
+                >
+                  기본 순서로
+                </button>
               </li>
             </ul>
             <p class="settings-group-desc">

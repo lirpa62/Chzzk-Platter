@@ -81,6 +81,7 @@
     ["[data-chat-recap-player-button-hidden]", "#chatRecapClickAction"],
     ["#chatRecapClickAction", "[data-chat-recap-click-delay]"],
     ["[data-category-video-filter]", "[data-category-video-candidate-picker]"],
+    ['[data-feature="sbMultiview"]', "[data-sidebar-multiview-position]"],
     ['[data-feature="loungeNews"]', '[data-feature="loungeNewsDot"], #loungeRefresh'],
     ['[data-feature="inboxCommunityNews"]', '[data-feature="inboxCommunityNewsDot"], [data-inbox-community-new-tab], #inboxCommunityRefresh'],
     ['[data-feature="inboxLogPower"]', '[data-feature="inboxLogPowerDot"]'],
@@ -231,7 +232,8 @@
   function parentToggleOff(row, parents) {
     for (let parent = parents.get(row); parent; parent = parents.get(parent)) {
       const input = parent.querySelector('input[type="checkbox"]');
-      if (input && !input.checked) return true;
+      // 숨김 스위치(켜면 숨김)는 반대로 — 켜져 있을 때 하위 옵션을 잠근다.
+      if (input && (input.hasAttribute("data-settings-lock-when-checked") ? input.checked : !input.checked)) return true;
     }
     return false;
   }

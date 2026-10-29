@@ -2645,6 +2645,39 @@
   const SIDEBAR_HIDE_ITEM_CLASS = "cheese-sb-hide";
   // '서비스 바로가기' 를 숨겨도 그 안의 멀티뷰 바로가기는 남긴다(치지직 항목·제목만 숨김).
   const SIDEBAR_SERVICES_MV_ONLY_CLASS = "cheese-sb-services-mv-only";
+  // 사이드바 멀티뷰 바로가기 위치: "services"(서비스 바로가기 안, 기본) 또는 "top"(맨 위 메뉴 — 전체 방송이 든 목록).
+  const SIDEBAR_MULTIVIEW_POSITION_KEY = "cheeseSidebarMultiviewPosition";
+  // 맨 위 메뉴 순서(경로 이름, 멀티뷰는 "multiview"). sidebarEarlyHide.js·settings.js 와 같은 목록이다.
+  const SIDEBAR_TOP_MENU_ORDER_KEY = "cheeseSidebarTopMenuOrder";
+  const SIDEBAR_TOP_MENU_IDS = ["lives", "clips", "category", "schedule", "following", "cheezefarm", "multiview"];
+  const normalizeSidebarMultiviewPosition = (value) => (value === "top" ? "top" : "services");
+  // 모르는 값·중복은 빼고, 빠진 항목은 기본 순서대로 뒤에 붙인다.
+  const normalizeSidebarTopMenuOrder = (value) => {
+    const list = Array.isArray(value)
+      ? value.filter((id, index) => SIDEBAR_TOP_MENU_IDS.includes(id) && value.indexOf(id) === index)
+      : [];
+    return [...list, ...SIDEBAR_TOP_MENU_IDS.filter((id) => !list.includes(id))];
+  };
+  let sidebarMultiviewPosition = "services";
+  let sidebarTopMenuOrder = [...SIDEBAR_TOP_MENU_IDS];
+  // 맨 위 메뉴 순서 CSS. ⚠ 치지직 항목(li)은 옮기지 않는다 — React 가 그리는 목록이라 DOM 을 옮기면 다시 그릴 때
+  //   어긋난다. 목록(ul, 원래 display:block)을 세로 flex 로 바꾸고 href 마다 order 만 준다(2026-10-30 실측: 펼침·접힘
+  //   모두 같은 ul 에 li 6개 — 전체 방송·인기 클립·카테고리·편성표·팔로잉·치즈팜). 모르는 새 항목은 원래 순서대로 맨 뒤.
+  //   기본 순서면 규칙을 넣지 않는다(치지직 화면 그대로).
+  function sidebarTopMenuOrderRules(order, multiviewInTop) {
+    const ids = order.filter((id) => id !== "multiview" || multiviewInTop);
+    const base = SIDEBAR_TOP_MENU_IDS.filter((id) => id !== "multiview" || multiviewInTop);
+    if (ids.join() === base.join()) return [];
+    const list = 'aside#sidebar ul:has(> li > a[href="/lives"])';
+    return [
+      `${list} { display: flex !important; flex-direction: column !important; }`,
+      `${list} > li { order: 100; }`,
+      ...ids.map(
+        (id, index) =>
+          `${list} > ${id === "multiview" ? "li#cheese-sidebar-multiview" : `li:has(> a[href="/${id}"])`} { order: ${index} !important; }`,
+      ),
+    ];
+  }
   // 재생바 댓글 타임스탬프 마커 표시 on/off(전역, chrome.storage 저장). 디폴트 ON.
   const COMMENT_MARKERS_ENABLED_KEY = "cheeseCommentMarkersEnabled";
   // 댓글 타임스탬프 기능 전체 on/off(버튼 우클릭 메뉴로 토글, 전역 저장). 디폴트 ON.
@@ -25101,6 +25134,13 @@ aside#sidebar button[aria-controls="navigation"] [class*="_label_"] {
       if (hiddenSel.length) {
         rules.push(`${hiddenSel.join(",\n")} { display: none !important; }`);
       }
+      // 맨 위 메뉴 순서(설정 > 사이드바 > 맨 위 메뉴 순서)
+      rules.push(
+        ...sidebarTopMenuOrderRules(
+          sidebarTopMenuOrder,
+          sidebarMultiviewPosition === "top" && !featureFlags.sbMultiview,
+        ),
+      );
     }
     // 헤더 '스튜디오' 버튼 숨김 — 텍스트형/아이콘형 둘 다 href가
     // studio.chzzk.naver.com을 가리키므로 href 기반 CSS로 숨긴다(깜빡임 없음).
@@ -25764,7 +25804,11 @@ html.cheese-sidebar-resizing div#layout-body {
       else if (label.includes("파트너")) hidden = featureFlags.sbPartner;
       else if (label.includes("서비스바로가기")) {
         // 서비스 바로가기를 숨겨도 멀티뷰 바로가기는 따로 남긴다(멀티뷰도 숨겼으면 섹션째 숨김).
-        const multiviewOnly = featureFlags.sbServices && !featureFlags.sbMultiview;
+        // 맨 위 메뉴로 옮겼으면 서비스 바로가기는 평소처럼 통째로 숨긴다.
+        const multiviewOnly =
+          featureFlags.sbServices &&
+          !featureFlags.sbMultiview &&
+          sidebarMultiviewPosition === "services";
         nav.classList.toggle(SIDEBAR_SERVICES_MV_ONLY_CLASS, multiviewOnly);
         hidden = featureFlags.sbServices && !multiviewOnly;
       }
@@ -26505,9 +26549,10 @@ html.cheese-sidebar-resizing div#layout-body {
   }
 
   // ── 사이드바 멀티뷰 진입 버튼 ────────────────────────────────────────────
-  // '서비스 바로가기' nav 안에 우리 항목을 하나 얹는다(서비스 바로가기를 숨겨도 이 항목은 남는다). 치지직 원본 항목의 클래스를
+  // '서비스 바로가기' nav 안(기본) 또는 맨 위 메뉴(전체 방송·인기 클립…) 끝에 우리 항목을 하나 얹는다
+  // (서비스 바로가기를 숨겨도 이 항목은 남는다). 맨 위 메뉴 안의 자리는 순서 CSS(sidebarTopMenuOrderRules)가 정한다. 그 목록의 원본 항목 클래스를
   // harvest 해 같은 모양을 쓰고, 사이드바가 재렌더되면 옵저버가 이 함수를 다시 불러
-  // 멱등하게 복구한다(요소가 살아 있으면 아무 것도 하지 않는다).
+  // 멱등하게 복구한다(제자리에 살아 있으면 아무 것도 하지 않는다).
   const SIDEBAR_MULTIVIEW_ID = "cheese-sidebar-multiview";
   // lucide panels-top-left
   const MULTIVIEW_ICON_SVG =
@@ -26534,27 +26579,33 @@ html.cheese-sidebar-resizing div#layout-body {
       existing?.remove();
       return;
     }
-    const nav = findSidebarServicesNav();
-    if (!nav) {
+    const place = findSidebarMultiviewPlace();
+    if (!place) {
       existing?.remove();
       return;
     }
-    if (existing && existing.parentElement?.closest("nav") === nav) return;
+    const { list } = place;
+    if (existing?.parentElement === list) return;
     existing?.remove();
 
     // 원본 항목(li > a)의 클래스를 harvest 해 같은 모양을 쓴다. 클래스 해시가 바뀌어도
-    // 부분 일치로 잡히므로 버전 변화에 견딘다.
-    const list = nav.querySelector('ul[class*="_list_"]');
-    if (!list) return;
-    const sampleLi = list.querySelector("li");
-    const sampleLink = sampleLi?.querySelector("a");
+    // 부분 일치로 잡히므로 버전 변화에 견딘다. 맨 위 메뉴는 지금 보는 화면 항목에 선택 표시
+    // 클래스가 붙으므로 그런 낱말(active·selected·current)이 든 클래스는 뺀다.
+    const sampleLi = Array.from(list.children).find(
+      (item) => item.tagName === "LI" && item.id !== SIDEBAR_MULTIVIEW_ID && item.querySelector(":scope > a"),
+    );
+    const sampleLink = sampleLi?.querySelector(":scope > a");
     if (!sampleLi || !sampleLink) return;
+    const plainClasses = (el) =>
+      Array.from(el.classList)
+        .filter((name) => !/active|selected|current/i.test(name))
+        .join(" ");
 
     const li = document.createElement("li");
     li.id = SIDEBAR_MULTIVIEW_ID;
-    li.className = sampleLi.className;
+    li.className = plainClasses(sampleLi);
     const link = document.createElement("a");
-    link.className = sampleLink.className;
+    link.className = plainClasses(sampleLink);
     link.href = chrome.runtime.getURL("multiview.html");
     link.target = "_blank";
     link.rel = "noopener";
@@ -26571,28 +26622,101 @@ html.cheese-sidebar-resizing div#layout-body {
       link.addEventListener("auxclick", openFromIncognito);
     }
 
-    // 원본 아이콘 자리를 찾아 같은 래퍼에 우리 아이콘을 넣는다. 못 찾으면 svg 만 둔다.
-    const sampleIcon = sampleLink.querySelector('[class*="_icon_"]');
-    if (sampleIcon) {
-      const icon = document.createElement("span");
-      icon.className = sampleIcon.className;
-      icon.innerHTML = MULTIVIEW_ICON_SVG;
-      link.appendChild(icon);
+    // 아이콘·글자 자리는 클래스 이름이 아니라 구조로 찾는다 — 맨 위 메뉴는 _icon_/_text_ 같은 이름을 쓰지 않아
+    // (2026-10-30 실측) 예전 방식으로는 아무 클래스도 못 옮겨, 아이콘이 원본(24px)보다 작고 글자가 왼쪽으로 붙었다.
+    //  - 아이콘: 링크의 자식 중 svg 를 품은 것(또는 svg 자체). 감싼 요소의 태그·클래스와 svg 의 속성(크기·클래스)을
+    //    그대로 쓰고 그림만 바꾼다. 원본 svg 가 클래스로 색을 정하면 우리 그림(currentColor)도 같은 색을 받는다.
+    //  - 글자: 아이콘이 아닌 자식 중 글자가 있는 것.
+    const sampleSvg = sampleLink.querySelector("svg");
+    const sampleIcon = sampleSvg
+      ? Array.from(sampleLink.children).find((child) => child === sampleSvg || child.contains(sampleSvg))
+      : null;
+    const sampleText = Array.from(sampleLink.children).find(
+      (child) => child !== sampleIcon && child.textContent.trim(),
+    );
+    const ourSvg = (() => {
+      const holder = document.createElement("div");
+      holder.innerHTML = MULTIVIEW_ICON_SVG;
+      return holder.firstElementChild;
+    })();
+    if (sampleSvg) {
+      for (const attr of ["width", "height", "class", "style"]) {
+        const value = sampleSvg.getAttribute(attr);
+        if (value != null) ourSvg.setAttribute(attr, attr === "class" ? plainClasses(sampleSvg) : value);
+      }
+    }
+    if (sampleIcon && sampleIcon !== sampleSvg) {
+      // 감싼 요소를 겹겹이 그대로 만들고(태그·클래스) 가장 안쪽에 우리 svg 를 둔다.
+      let outer = null;
+      let inner = null;
+      for (let node = sampleSvg.parentElement; node && node !== sampleLink; node = node.parentElement) {
+        const copy = document.createElement(node.tagName.toLowerCase());
+        copy.className = plainClasses(node);
+        if (inner) copy.appendChild(outer);
+        else inner = copy;
+        outer = copy;
+      }
+      inner.appendChild(ourSvg);
+      link.appendChild(outer);
+    } else if (sampleIcon) {
+      link.appendChild(ourSvg);
     } else {
       const icon = document.createElement("span");
-      icon.innerHTML = MULTIVIEW_ICON_SVG;
+      icon.appendChild(ourSvg);
       link.appendChild(icon);
     }
-    // 텍스트 자리도 원본 클래스를 따른다(접힌 사이드바에서는 CSS 가 알아서 숨긴다).
-    const sampleText = sampleLink.querySelector('[class*="_text_"]');
-    const text = document.createElement("span");
-    if (sampleText) text.className = sampleText.className;
+    // 글자 자리도 원본 태그·클래스를 따른다(접힌 사이드바에서는 CSS 가 알아서 바꾼다).
+    const text = document.createElement(sampleText ? sampleText.tagName.toLowerCase() : "span");
+    if (sampleText) text.className = plainClasses(sampleText);
     text.textContent = "멀티뷰";
     link.appendChild(text);
 
     li.appendChild(link);
     list.appendChild(li);
   }
+
+  // 멀티뷰 바로가기를 넣을 목록(서비스 바로가기 또는 맨 위 메뉴).
+  function findSidebarMultiviewPlace() {
+    if (sidebarMultiviewPosition === "services") {
+      const list = findSidebarServicesNav()?.querySelector('ul[class*="_list_"]');
+      return list ? { list } : null;
+    }
+    const list = document.getElementById("sidebar")?.querySelector('li > a[href="/lives"]')?.closest("ul");
+    return list ? { list } : null;
+  }
+
+  function loadSidebarMultiviewPosition() {
+    const apply = (data) => {
+      sidebarMultiviewPosition = normalizeSidebarMultiviewPosition(data[SIDEBAR_MULTIVIEW_POSITION_KEY]);
+      sidebarTopMenuOrder = normalizeSidebarTopMenuOrder(data[SIDEBAR_TOP_MENU_ORDER_KEY]);
+      // ⚠ 기능 설정을 읽기 전에 숨김 CSS 를 다시 쓰면 기본값(전부 표시)으로 덮여, 조기 숨김이 풀렸다가 다시 숨는다.
+      //   그 전이면 기능 설정을 읽을 때(applyFeatureFlags) 함께 반영된다.
+      if (!featureFlagsLoaded) return;
+      applySidebarHidden();
+      applySidebarSections();
+      ensureSidebarMultiview();
+    };
+    const current = () => ({
+      [SIDEBAR_MULTIVIEW_POSITION_KEY]: sidebarMultiviewPosition,
+      [SIDEBAR_TOP_MENU_ORDER_KEY]: sidebarTopMenuOrder,
+    });
+    try {
+      chrome.storage.local.get([SIDEBAR_MULTIVIEW_POSITION_KEY, SIDEBAR_TOP_MENU_ORDER_KEY], (data) => {
+        if (chrome.runtime.lastError) return;
+        apply(data || {});
+      });
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== "local") return;
+        if (!changes[SIDEBAR_MULTIVIEW_POSITION_KEY] && !changes[SIDEBAR_TOP_MENU_ORDER_KEY]) return;
+        const next = current();
+        for (const key of [SIDEBAR_MULTIVIEW_POSITION_KEY, SIDEBAR_TOP_MENU_ORDER_KEY]) {
+          if (changes[key]) next[key] = changes[key].newValue;
+        }
+        apply(next);
+      });
+    } catch {}
+  }
+  loadSidebarMultiviewPosition();
 
   function findSidebarFollowNav() {
     const sidebar = document.getElementById("sidebar");
