@@ -35,6 +35,12 @@ const sliceFn = (name) => {
   assert.equal(page("/category/GAME/OVERWATCH/lives"), true);
   assert.equal(page("/category/GAME/OVERWATCH/videos"), true);
   assert.equal(page("/"), false);
+  // 통합검색: 라이브·동영상 탭만(통합 탭은 섹션이 섞이고 작은 가로형 카드, 클립 탭은 세로로 긴 클립 카드)
+  assert.equal(page("/search", "?query=%EC%B9%B4%EB%A6%B0&tab=video"), true);
+  assert.equal(page("/search", "?query=a&tab=live"), true);
+  assert.equal(page("/search", "?query=a&tab=all"), false);
+  assert.equal(page("/search", "?query=a&tab=clip"), false);
+  assert.equal(page("/search", "?query=a"), false);
 }
 
 const card = (id, cls = "") => `<li class="_item_x ${cls}"><a href="/live/${id.repeat(32)}">방송</a></li>`;
@@ -46,6 +52,7 @@ const FIXTURE = `<style>
 <ul class="_list_y"><li class="_item_x"><a href="/other">다른 목록</a></li></ul>
 <ul class="_list_x" id="sentinelList">${Array.from({ length: 30 }, (_, i) => `<li class="_item_x">${i === 20 ? '<div style="position: absolute; left: 0px;"></div>' : ""}<a href="/video/${i + 1}">영상</a></li>`).join("")}</ul>
 <section><ul class="_list_x" id="followList">${Array.from({ length: 30 }, (_, i) => `<li class="_item_x"><a href="/video/${i + 1}">영상</a></li>`).join("")}</ul><div id="followSentinel"></div></section>
+<ul class="_list_x" id="searchList">${Array.from({ length: 18 }, (_, i) => `<li class="_item_x">${i === 12 ? '<div class="_sentinel_anvim_107"></div>' : ""}<a href="/video/${i + 1}">검색 영상</a></li>`).join("")}</ul>
 <ul class="_list_x" id="videosList">${Array.from({ length: 30 }, (_, i) => `<li class="_item_x"><a href="/video/${i + 1}">영상</a>${i === 29 ? '<div id="videosSentinel"></div>' : ""}</li>`).join("")}</ul></div>`;
 
 (async () => {
@@ -110,7 +117,7 @@ const FIXTURE = `<style>
     const lead = await ev(`(async () => {
       const IS_TOP_FRAME = true;
       let cardsPerRow = 7;
-      ${["isLivePaginationSentinel", "isBlankSentinelCandidate", "cardsPerRowSentinelCandidates", "clearSentinelLead",
+      ${["isLivePaginationSentinel", "isNamedPaginationSentinel", "isBlankSentinelCandidate", "cardsPerRowSentinelCandidates", "clearSentinelLead",
         "markCardsPerRowLists", "leadCardsPerRowSentinels"].map(sliceFn).join("\n")}
       const CARDS_PER_ROW_LEAD_SCREENS = 2;
       const CARDS_PER_ROW_TAIL = 12;
@@ -121,10 +128,11 @@ const FIXTURE = `<style>
       const lives = document.querySelector('#sentinelList div[style*="absolute"]');
       const follow = document.getElementById('followSentinel');
       const videos = document.getElementById('videosSentinel');
-      const tops = () => [lives, follow, videos].map((el) => el.getBoundingClientRect().top);
+      const search = document.querySelector('#searchList ._sentinel_anvim_107');
+      const tops = () => [lives, follow, videos, search].map((el) => el.getBoundingClientRect().top);
       const before = tops();
       leadCardsPerRowSentinels();
-      const zero = [lives, follow, videos].map((el) => el.style.getPropertyValue('--cheese-sentinel-lead'));
+      const zero = [lives, follow, videos, search].map((el) => el.style.getPropertyValue('--cheese-sentinel-lead'));
       await frames();
       const moved = tops().map((t, i) => Math.round(before[i] - t));
       // 목록이 늘면(같은 요소가 남는 팔로잉 모양) 제자리로 돌렸다가 다시 올린다.
@@ -146,9 +154,9 @@ const FIXTURE = `<style>
       window.scrollTo(0, 0); document.body.style.paddingTop = '';
       return { moved, screens: Math.round(innerHeight * 2), zero, reset, again, clamped, cleared };
     })()`);
-    assert.deepEqual(lead.zero, ["0px", "0px", "0px"], "처음엔 제자리로 표시 " + JSON.stringify(lead));
-    assert.deepEqual(lead.moved, [lead.screens, lead.screens, lead.screens],
-      "세 모양(/lives·팔로잉 동영상·/videos) 모두 화면 두 개 앞으로 " + JSON.stringify(lead));
+    assert.deepEqual(lead.zero, ["0px", "0px", "0px", "0px"], "처음엔 제자리로 표시 " + JSON.stringify(lead));
+    assert.deepEqual(lead.moved, [lead.screens, lead.screens, lead.screens, lead.screens],
+      "네 모양(/lives·팔로잉 동영상·/videos·통합검색 _sentinel_) 모두 화면 두 개 앞으로 " + JSON.stringify(lead));
     assert.ok(lead.reset === "0px" && lead.again === `${lead.screens}px`, "목록이 늘면 제자리로 돌렸다가 다시 올린다 " + JSON.stringify(lead));
     assert.ok(lead.clamped >= 0 && lead.clamped <= 2, "지금 화면 위보다는 올리지 않는다 " + JSON.stringify(lead));
     assert.equal(lead.cleared, 0, "3개 이하로 바꾸면 모두 걷는다");

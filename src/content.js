@@ -32570,6 +32570,11 @@ html.cheese-sidebar-resizing div#layout-body {
     const pathname = location.pathname.replace(/\/+$/, "") || "/";
     if (pathname === "/lives" || pathname === "/videos") return true;
     if (/^\/category\/[^/]+\/[^/]+\/(?:lives|videos)$/i.test(pathname)) return true;
+    // 통합검색 라이브·동영상 탭(2026-10-30 실측: /lives 와 같은 flex-wrap 목록, 카드 3개). 통합 탭은 섹션이 섞이고
+    // 작은 가로형 카드라, 클립 탭은 세로로 긴 클립 카드라 빼 둔다.
+    if (pathname === "/search") {
+      return /^(?:video|live)$/i.test(new URLSearchParams(location.search).get("tab") || "");
+    }
     if (pathname !== "/following") return false;
     const tab = new URLSearchParams(location.search).get("tab")?.toUpperCase() || "";
     return Boolean(tab) && tab !== "ALL";
@@ -32592,6 +32597,7 @@ html.cheese-sidebar-resizing div#layout-body {
   //   /lives            끝에서 10번째 카드의 첫 자식 빈 absolute div
   //   /following 동영상 목록 ul 바로 뒤 높이 0 빈 div(같은 요소가 계속 남는다)
   //   /videos           마지막 카드 안의 빈 div
+  //   /search 라이브·동영상 탭  끝에서 6번째 카드 안의 빈 div._sentinel_(2026-10-30 실측)
   // 한 줄 개수를 늘리면 한 묶음(30개)이 몇 줄 안 돼, 바닥에 닿은 뒤에야 부르고 막혔다가 풀리기를
   // 되풀이했다(실측: 바닥 닿음 직후 요청 시작, 응답 약 0.1초, 붙은 뒤 남은 거리 화면 하나 남짓).
   // ⚠ 감지 지점을 '화면 두 개' 앞으로 올린다(보이는 위치만, transform). 지금 화면 위보다는 올리지
@@ -32601,6 +32607,11 @@ html.cheese-sidebar-resizing div#layout-body {
   //   않는다. 제자리로 가면 화면 밖(아래)이 되고, 다시 올렸을 때 화면 안이면 곧바로 다음 묶음을
   //   불러 늘 두 화면쯤 앞을 채운다.
   const CARDS_PER_ROW_LEAD_SCREENS = 2;
+  // 통합검색 라이브·동영상 탭: 끝에서 6번째 카드 안의 빈 div._sentinel_(2026-10-30 실측)
+  function isNamedPaginationSentinel(element) {
+    return element.tagName === "DIV" && /(?:^|\s)_sentinel_/.test(element.getAttribute("class") || "") &&
+      !element.firstElementChild;
+  }
   function isBlankSentinelCandidate(el) {
     return el?.tagName === "DIV" && !el.className && !el.firstElementChild &&
       !(el.textContent || "").trim() &&
@@ -32610,7 +32621,7 @@ html.cheese-sidebar-resizing div#layout-body {
     const out = [];
     for (const card of list.children) {
       if (card.tagName !== "LI") continue;
-      const sentinel = [...card.children].find(isLivePaginationSentinel);
+      const sentinel = [...card.children].find((el) => isLivePaginationSentinel(el) || isNamedPaginationSentinel(el));
       if (sentinel) out.push(sentinel);
     }
     const last = list.lastElementChild;
