@@ -96,7 +96,7 @@ check(/customFollowGroupModalNameHtml\(item, "cheese-cf-group-modal-picked-name"
     const v = r.result.value;
     for (const [key, label] of [["row", "채널 목록"], ["picked", "고른 채널 목록"]]) {
       const m = v[key];
-      check(m.mark && m.kind === "partner" && /icon_official_mark/.test(m.bg) && m.w === 13,
+      check(m.mark && m.kind === "partner" && /icon_partner_mark/.test(m.bg) && m.w === 13,
         `${label}: 파트너 채널 이름 뒤에 13px 인증 마크 ${JSON.stringify(m)}`);
       check(m.inside && m.ellipsis, `${label}: 이름이 길어도 이름만 말줄임, 마크는 줄 안에 남는다`);
     }

@@ -380,7 +380,7 @@
           state.meta[id] = {
             name: String(content.channelName || ""),
             image: String(content.channelImageUrl || ""),
-            verified: content.verifiedMark === true,
+            verified: CheeseVerifiedMark.hasMark(content),
             ...(CheeseVerifiedMark.typeOf(content) ? { verifiedMarkType: CheeseVerifiedMark.typeOf(content) } : {}),
             at: Date.now(),
           };

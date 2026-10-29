@@ -16,7 +16,10 @@ const settingsHtml = (fs.readFileSync(path.join(root, "settings.html"), "utf8"))
 assert.equal(badgeChat.classifyBadgeRole(["https://ssl.pstatic.net/static/nng/glive/icon/streamer.png"]), "streamer");
 assert.equal(badgeChat.classifyBadgeRole(["https://ssl.pstatic.net/static/nng/glive/icon/manager.png"]), "manager");
 assert.equal(badgeChat.classifyBadgeRole(["https://ssl.pstatic.net/static/nng/glive/icon/owner.png"]), "operator");
-assert.equal(badgeChat.classifyBadgeRole(["인증 마크"]), "partner");
+// 2026-11 개편: 숨김 글자 '인증 마크'는 파트너·챌린저·공식이 같다 → 클래스 is_partner·파트너 그림으로만 파트너
+assert.equal(badgeChat.classifyBadgeRole(["_mark_ab1 _is_partner_cd2", "인증 마크"]), "partner");
+assert.equal(badgeChat.classifyBadgeRole(["인증 마크"]), "");
+assert.equal(badgeChat.classifyBadgeRole(["_mark_ab1 _is_challenger_cd2", "인증 마크"]), "");
 class ScaleControlNode {
   constructor() {
     this.children = [];

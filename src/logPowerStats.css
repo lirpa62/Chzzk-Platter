@@ -454,7 +454,7 @@ body {
   height: 14px;
   margin-left: 4px;
   vertical-align: -2px;
-  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png")
+  background: url("https://ssl.pstatic.net/static/nng/glive/image/icon_partner_mark.png")
     50% / cover no-repeat;
 }
 
@@ -3283,8 +3283,14 @@ button[aria-busy="true"] {
   display: inline-block;
 }
 
-/* 인증 마크 종류(src/verifiedMark.js 의 kind → data-cheese-mark). 챌린저 마크(2026-11 도입)는 같은 자리에
-   아이콘만 바꾼다. 지금은 kind 가 파트너만 돌려주므로 쓰이지 않는다. */
+/* 인증 마크 종류(src/verifiedMark.js 의 kind → data-cheese-mark). 같은 자리에 아이콘만 바꾼다(2026-11 개편:
+   파트너 초록·챌린저 금색·공식 파랑). 치지직 마크를 복제한 자리도 이 규칙이 종류를 맞춘다. */
+:not(img)[data-cheese-mark="partner"] {
+  background-image: url("https://ssl.pstatic.net/static/nng/glive/image/icon_partner_mark.png") !important;
+}
 :not(img)[data-cheese-mark="challenger"] {
   background-image: url("https://ssl.pstatic.net/static/nng/glive/image/icon_challenger_mark.png") !important;
+}
+:not(img)[data-cheese-mark="official"] {
+  background-image: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png") !important;
 }

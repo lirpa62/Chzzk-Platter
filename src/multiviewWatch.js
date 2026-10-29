@@ -445,7 +445,7 @@
     streamer: ["방장", "https://ssl.pstatic.net/static/nng/glive/icon/streamer.png"],
     manager: ["매니저", "https://ssl.pstatic.net/static/nng/glive/icon/manager.png"],
     operator: ["치지직 운영자", "https://ssl.pstatic.net/static/nng/glive/icon/owner.png"],
-    partner: ["파트너", "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png"],
+    partner: ["파트너", "https://ssl.pstatic.net/static/nng/glive/image/icon_partner_mark.png"],
   });
   const BADGE_CHAT_ROLE_BADGE_URLS = new Set(
     Object.values(BADGE_CHAT_ROLE_BADGES).map(([, url]) => url),

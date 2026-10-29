@@ -1,9 +1,10 @@
-// 채널 인증 마크(파트너·챌린저) 판단을 src/verifiedMark.js 한곳에 모은다.
+// 채널 인증 마크(파트너·챌린저·공식) 판단을 src/verifiedMark.js 한곳에 모은다.
 //
-// 2026-11-01 부터 파트너 마크 외에 챌린저 마크가 생기며 응답에 verifiedMarkType 이 붙었다. 값은 아직 모르므로
-// TYPE_KINDS 는 비워 두고 지금처럼 verifiedMark 만 본다(동작 그대로). 데이터를 만드는 곳은 verifiedMarkType 을
-// 함께 옮기고(있을 때만 — 저장 모양 그대로), 그리는 곳은 kind() 를 data-cheese-mark 로 단다.
-// 실측 후 TYPE_KINDS 만 채우면 따라가는지, 타입 값을 넣은 복사본으로 미리 확인한다.
+// 2026-11 개편(실측): 응답 verifiedMarkType 이 "PARTNER" | "CHALLENGER" | "OFFICIAL" 이고 치지직 화면은 이 값으로만
+// 마크를 그린다(화면 스크립트의 Oee·kee 표). 아이콘도 바뀌어 초록 파트너 마크는 icon_partner_mark.png, 예전 파트너 주소
+// icon_official_mark.png 는 파란 '공식' 마크가 됐다. 타입이 없는 예전 저장값(verifiedMark:true 만)은 파트너로 본다.
+// 데이터를 만드는 곳은 verifiedMarkType 을 함께 옮기고(있을 때만 — 저장 모양 그대로), 그리는 곳은 kind() 를
+// data-cheese-mark 로 단다.
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -27,13 +28,18 @@ const load = (source) => {
   return ctx.CheeseVerifiedMark;
 };
 
-// ── 판단 함수: 지금은 동작 그대로 ──
+// ── 판단 함수 ──
 const VM = load(helperSource);
+check(VM.kind({ verifiedMark: true, verifiedMarkType: "PARTNER" }) === "partner" && VM.kind({ verifiedMark: true, verifiedMarkType: "CHALLENGER" }) === "challenger" &&
+  VM.kind({ verifiedMarkType: "OFFICIAL" }) === "official" && VM.kind({ verifiedMarkType: "challenger" }) === "challenger",
+  "verifiedMarkType 으로 종류(치지직 화면과 같은 표, verifiedMark 가 없어도 타입만으로)");
 check(VM.kind({ verifiedMark: true }) === "partner" && VM.kind({ verifiedMark: true, verifiedMarkType: null }) === "partner" &&
-  VM.kind({ verifiedMark: false }) === "" && VM.kind(null, undefined) === "",
-  "verifiedMark:true 는 파트너, 아니면 마크 없음(도입 전 실측: 파트너 = true + null)");
-check(VM.kind({ verifiedMark: true, verifiedMarkType: "CHALLENGER" }) === "partner" && VM.kind({ verifiedMark: false, verifiedMarkType: "CHALLENGER" }) === "",
-  "타입 값은 아직 해석하지 않는다(실측 전) — 화면은 지금과 같다");
+  VM.kind({ verifiedMark: true, verifiedMarkType: "UNKNOWN" }) === "partner" &&
+  VM.kind({ verifiedMark: false }) === "" && VM.kind({ verifiedMarkType: "UNKNOWN" }) === "" && VM.kind(null, undefined) === "",
+  "타입이 없는 예전 저장값(verifiedMark:true)은 파트너, 마크가 없으면 없음");
+check(VM.hasMark({ verifiedMarkType: "CHALLENGER" }) && !VM.hasMark({ verifiedMarkType: "X" }) &&
+  JSON.stringify(VM.fields({ verifiedMarkType: "OFFICIAL" })) === '{"verifiedMark":true,"verifiedMarkType":"OFFICIAL"}',
+  "아는 타입이면 마크가 있는 것으로(저장값 verifiedMark 도 true)");
 check(JSON.stringify(VM.fields({ verifiedMark: true })) === '{"verifiedMark":true}' &&
   JSON.stringify(VM.fields({ verifiedMark: "yes" }, null)) === '{"verifiedMark":false}' &&
   JSON.stringify(VM.fields(null, { verifiedMark: true, verifiedMarkType: "X" })) === '{"verifiedMark":true,"verifiedMarkType":"X"}',
@@ -41,16 +47,18 @@ check(JSON.stringify(VM.fields({ verifiedMark: true })) === '{"verifiedMark":tru
 check(VM.typeOf({ verifiedMarkType: "" }, { verifiedMarkType: "A" }, { verifiedMarkType: "B" }) === "A" && VM.typeOf({ verifiedMarkType: 3 }) === null &&
   VM.typeOf({ verifiedMarkType: "x".repeat(99) }).length === 40,
   "typeOf: 처음 나오는 문자열, 길이 제한");
-check(VM.icon("partner").endsWith("icon_official_mark.png") && VM.icon("challenger").endsWith("icon_challenger_mark.png") && VM.icon("") === "" &&
-  VM.label("partner") === "파트너" && VM.label("challenger") === "챌린저",
-  "아이콘·이름");
+check(VM.icon("partner").endsWith("/icon_partner_mark.png") && VM.icon("challenger").endsWith("/icon_challenger_mark.png") &&
+  VM.icon("official").endsWith("/icon_official_mark.png") && VM.icon("") === "" &&
+  VM.label("partner") === "파트너" && VM.label("challenger") === "챌린저" && VM.label("official") === "공식",
+  "아이콘·이름(파트너 초록 = icon_partner_mark, 공식 파랑 = icon_official_mark)");
 
 // 배경은 같은 모양의 함수를 따로 둔다
 {
   const at = background.indexOf("function verifiedMarkFields(");
   const ctx = vm.createContext({});
   vm.runInContext(background.slice(at, background.indexOf("\n}\n", at) + 3) + "\nthis.f = verifiedMarkFields;", ctx);
-  const cases = [[{ verifiedMark: true }], [null, { verifiedMark: true, verifiedMarkType: "T" }], [{ verifiedMark: 1 }], [{ verifiedMarkType: "" }]];
+  const cases = [[{ verifiedMark: true }], [null, { verifiedMark: true, verifiedMarkType: "T" }], [{ verifiedMark: 1 }], [{ verifiedMarkType: "" }],
+    [{ verifiedMarkType: "CHALLENGER" }], [{ verifiedMark: false, verifiedMarkType: "PARTNER" }]];
   check(cases.every((args) => JSON.stringify(ctx.f(...args)) === JSON.stringify(VM.fields(...args))), "배경 verifiedMarkFields 는 공용 fields 와 같은 결과");
 }
 
@@ -79,19 +87,22 @@ for (const page of fs.readdirSync(root).filter((f) => f.endsWith(".html"))) {
   check(scripts.indexOf("src/verifiedMark.js") >= 0 && scripts.indexOf("src/verifiedMark.js") < firstUser, `${page}: 쓰는 스크립트보다 먼저 싣는다`);
 }
 
-// ── CSS: 마크를 배경으로 그리는 스타일시트마다 챌린저 덮어쓰기 ──
+// ── CSS: 마크를 배경으로 그리는 스타일시트마다 종류별 덮어쓰기, 기본 배경은 새 파트너 마크 ──
+const ruleFor = (kind, file) => new RegExp(`:not\\(img\\)\\[data-cheese-mark="${kind}"\\]\\s*\\{\\s*background-image: url\\("https://ssl\\.pstatic\\.net/static/nng/glive/image/${file}\\.png"\\) !important;`);
 for (const css of fs.readdirSync(path.join(root, "src")).filter((f) => f.endsWith(".css"))) {
   const text = read(`src/${css}`);
-  if (!/icon_official_mark|icon_official\.|\.lps-mark\b/.test(text)) continue;
-  check(/:not\(img\)\[data-cheese-mark="challenger"\]\s*\{\s*background-image: url\("https:\/\/ssl\.pstatic\.net\/static\/nng\/glive\/image\/icon_challenger_mark\.png"\) !important;/.test(text),
-    `${css}: data-cheese-mark="challenger" 면 챌린저 아이콘`);
+  if (!/icon_partner_mark|icon_official|\.lps-mark\b/.test(text)) continue;
+  check(ruleFor("partner", "icon_partner_mark").test(text) && ruleFor("challenger", "icon_challenger_mark").test(text) && ruleFor("official", "icon_official_mark").test(text),
+    `${css}: data-cheese-mark 파트너·챌린저·공식 아이콘`);
+  const outside = text.replace(/:not\(img\)\[data-cheese-mark="official"\][^}]*\}/, "");
+  check(!/icon_official_mark|icon_official\.0fac5d40/.test(outside), `${css}: 기본 마크 배경에 예전 주소(이제 파란 공식 마크·404)를 쓰지 않는다`);
 }
+const jsOld = ["src/multiviewVodChat.js", "src/multiviewWatch.js", "src/multiviewBadgeChat.js", "src/content.js", "src/popup.js"]
+  .filter((file) => /["'`]https:\/\/ssl\.pstatic\.net\/static\/nng\/glive\/image\/icon_official_mark\.png/.test(read(file)));
+check(jsOld.length === 0, `스크립트에 예전 파트너 주소가 남지 않았다 ${JSON.stringify(jsOld)}`);
 
-// ── 실측 후 TYPE_KINDS 만 채우면 따라간다(복사본으로 미리 확인) ──
-const patched = load(helperSource.replace("const TYPE_KINDS = Object.freeze({});", 'const TYPE_KINDS = Object.freeze({ CHALLENGER: "challenger", PARTNER: "partner" });'));
-check(patched.kind({ verifiedMark: true, verifiedMarkType: "challenger" }) === "challenger" && patched.kind({ verifiedMark: true, verifiedMarkType: "PARTNER" }) === "partner" &&
-  patched.kind({ verifiedMark: true, verifiedMarkType: "UNKNOWN" }) === "partner",
-  "타입 표를 채우면 그 종류, 모르는 값은 예전처럼 파트너");
+// ── 그리는 곳이 종류를 따라간다 ──
+const patched = VM;
 {
   const fn = (name) => {
     const at = content.indexOf(`\n  function ${name}(`);
@@ -113,6 +124,16 @@ check(patched.kind({ verifiedMark: true, verifiedMarkType: "challenger" }) === "
   }, {});
   check(msg.badges.some((b) => /icon_challenger_mark/.test(b.url) && b.label === "챌린저") && !(msg.roles || []).includes("partner"),
     `다시보기 채팅: 챌린저는 챌린저 아이콘, 파트너 역할(모아보기)에는 넣지 않는다 ${JSON.stringify(msg.badges)}`);
+}
+
+{
+  // 배지 모아보기 역할: 숨김 글자 '인증 마크'·예전 주소(이제 공식 마크)로는 파트너라고 보지 않는다
+  const badge = require(path.join(root, "src/multiviewBadgeChat.js"));
+  const role = badge.classifyBadgeRole;
+  check(role(["_mark_ab1 _is_partner_cd2", "인증 마크"]) === "partner" && role(["https://ssl.pstatic.net/static/nng/glive/image/icon_partner_mark.png"]) === "partner" &&
+    role(["_mark_ab1 _is_challenger_cd2", "인증 마크"]) === "" && role(["_is_official_x", "인증 마크"]) === "" &&
+    role(["https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png"]) === "",
+    "배지 모아보기: 파트너는 is_partner·새 파트너 그림으로만(챌린저·공식은 파트너 역할 아님)");
 }
 
 // ── 실제 content.css: 챌린저면 배경만 바뀐다 ──
@@ -150,15 +171,23 @@ check(patched.kind({ verifiedMark: true, verifiedMarkType: "challenger" }) === "
     const r = await call("Runtime.evaluate", {
       expression: `(() => {
         const st = document.createElement('style'); st.textContent = ${JSON.stringify(read("src/content.css"))}; document.head.append(st);
-        document.body.innerHTML = '<i class="cheese-video-vault-official" id="p" data-cheese-mark="partner"></i><i class="cheese-video-vault-official" id="c" data-cheese-mark="challenger"></i>';
+        document.body.innerHTML = '<i class="cheese-video-vault-official" id="p" data-cheese-mark="partner"></i><i class="cheese-video-vault-official" id="c" data-cheese-mark="challenger"></i>' +
+          '<i class="cheese-video-vault-official" id="o" data-cheese-mark="official"></i><i class="cheese-video-vault-official" id="n"></i>';
         const bg = (id) => getComputedStyle(document.getElementById(id));
-        return { p: bg('p').backgroundImage, c: bg('c').backgroundImage, pw: bg('p').width, cw: bg('c').width };
+        ${(() => { const at = content.indexOf("\n  function readDomVerifiedMark("); return content.slice(at, content.indexOf("\n  }\n", at) + 4); })()}
+        const card = (cls) => { const a = document.createElement('a'); a.innerHTML = '<span>이름</span>' + (cls === null ? '' : '<i class="' + cls + '"><span class="blind">인증 마크</span></i>'); return a; };
+        const dom = [card('_mark_1 _is_challenger_2'), card('_mark_1 _is_official_2'), card('_mark_1 _is_partner_2'), card('_mark_1'), card(null)].map(readDomVerifiedMark);
+        return { dom, p: bg('p').backgroundImage, c: bg('c').backgroundImage, o: bg('o').backgroundImage, n: bg('n').backgroundImage, pw: bg('p').width, cw: bg('c').width };
       })()`,
       returnByValue: true,
     }, sessionId);
     const v = r.result.value;
-    check(/icon_official_mark/.test(v.p) && /icon_challenger_mark/.test(v.c) && v.pw === v.cw,
+    check(/icon_partner_mark/.test(v.p) && /icon_partner_mark/.test(v.n) && /icon_challenger_mark/.test(v.c) && /icon_official_mark/.test(v.o) && v.pw === v.cw,
       `content.css: 같은 자리·크기에 아이콘만 바뀐다 ${JSON.stringify(v)}`);
+    check(JSON.stringify(v.dom) === JSON.stringify([
+      { verifiedMark: true, verifiedMarkType: "CHALLENGER" }, { verifiedMark: true, verifiedMarkType: "OFFICIAL" },
+      { verifiedMark: true, verifiedMarkType: "PARTNER" }, { verifiedMark: true }, { verifiedMark: false }]),
+      `치지직 카드에서 읽은 마크: 숨김 글자는 같아 클래스(is_challenger 등)로 종류를 가른다 ${JSON.stringify(v.dom)}`);
   } finally {
     browser.kill();
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}

@@ -1259,14 +1259,15 @@
   }
 
   // ── 닉네임 숨김 ───────────────────────────────────────────────────────────
-  // 예외(숨기지 않음): 방장·매니저 등 역할 보유자, 파트너(verifiedMark).
+  // 예외(숨기지 않음): 방장·매니저 등 역할 보유자, 인증 마크(파트너·챌린저·공식) 채널.
   // ⚠ userRoleCode 문자열은 치지직이 바꿀 수 있어 '값 목록'으로 판정하지 않는다.
   // common_user 가 아니면 전부 역할자로 본다(모르는 역할이 생겨도 안전한 쪽으로).
   function isChatRoleExempt(row, chatMessage) {
     let profile = chatMessage?.profile;
     if (typeof profile === "string") profile = parseJsonSafe(profile);
     if (profile && typeof profile === "object") {
-      if (profile.verifiedMark === true) return true; // 파트너
+      // 인증 마크: 2026-11 부터 verifiedMarkType(PARTNER·CHALLENGER·OFFICIAL)로 온다
+      if (profile.verifiedMark === true || /^(?:PARTNER|CHALLENGER|OFFICIAL)$/.test(String(profile.verifiedMarkType || ""))) return true;
       const role = String(profile.userRoleCode || "").toLowerCase();
       if (role) {
         // ⚠ 여기서 바로 반환한다. 아래 DOM 폴백까지 내려가면 '일반 시청자'(대다수)

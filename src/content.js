@@ -30417,6 +30417,22 @@ html.cheese-sidebar-resizing div#layout-body {
       : `${String(minutes).padStart(2, "0")}:${String(remains).padStart(2, "0")}`;
   }
 
+  // 치지직 카드의 인증 마크(<i> 안 숨김 글자 '인증 마크')에서 종류를 읽는다. 숨김 글자는 세 종류가 같아
+  // 클래스(is_partner·is_challenger·is_official)로 가른다. 마크가 없으면 { verifiedMark: false }.
+  function readDomVerifiedMark(root) {
+    const mark = [...(root?.querySelectorAll("i") || [])].find((icon) =>
+      [...icon.querySelectorAll(".blind")].some((node) => node.textContent.trim() === "인증 마크"),
+    );
+    if (!mark) {
+      // 예전 구조: 숨김 글자만 따로 있는 경우
+      const blind = [...(root?.querySelectorAll(".blind") || [])].some((node) => node.textContent.trim() === "인증 마크");
+      return { verifiedMark: blind };
+    }
+    const cls = String(mark.getAttribute("class") || "");
+    const type = /is_challenger/i.test(cls) ? "CHALLENGER" : /is_official/i.test(cls) ? "OFFICIAL" : /is_partner/i.test(cls) ? "PARTNER" : "";
+    return type ? { verifiedMark: true, verifiedMarkType: type } : { verifiedMark: true };
+  }
+
   function getCategoryVideoVerifiedMarkTemplate() {
     return Array.from(document.querySelectorAll("i")).find((icon) =>
       Array.from(icon.querySelectorAll(".blind")).some(
@@ -55330,14 +55346,7 @@ html.cheese-sidebar-resizing div#layout-body {
           /^\/([0-9a-f]{32})(?:[/?#]|$)/i,
         )?.[1] || nlogChannelId,
       channelImageUrl: profileImage?.currentSrc || profileImage?.src || "",
-      verifiedMark: Boolean(
-        channelLink
-          ?.querySelector(".blind")
-          ?.textContent?.includes("인증 마크") ||
-        [...(channelLink?.querySelectorAll(".blind") || [])].some(
-          (node) => node.textContent.trim() === "인증 마크",
-        ),
-      ),
+      ...readDomVerifiedMark(channelLink),
       duration,
       durationSeconds,
       readCount: parseClipVaultMetric(readCountMatch?.[1]),
@@ -55989,9 +55998,7 @@ html.cheese-sidebar-resizing div#layout-body {
       channelId,
       channelName,
       channelImageUrl: profileImage?.currentSrc || profileImage?.src || "",
-      verifiedMark: [...(channelLink?.querySelectorAll(".blind") || [])].some(
-        (node) => node.textContent.trim() === "인증 마크",
-      ),
+      ...readDomVerifiedMark(channelLink),
       ...(adult ? { adult: true, adultKnown: true } : {}),
       metaKnown: false,
       at: Date.now(),

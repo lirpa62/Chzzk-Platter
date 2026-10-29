@@ -1303,7 +1303,7 @@
     if (cached !== undefined) return Promise.resolve(cached);
     const job = SOURCES.getJson(`${SOURCES.API}/service/v1/channels/${id}`)
       .then((content) => {
-        const info = content ? { image: String(content.channelImageUrl || ""), verified: content.verifiedMark === true, verifiedMarkType: CheeseVerifiedMark.typeOf(content), name: String(content.channelName || "") } : null;
+        const info = content ? { image: String(content.channelImageUrl || ""), verified: CheeseVerifiedMark.hasMark(content), verifiedMarkType: CheeseVerifiedMark.typeOf(content), name: String(content.channelName || "") } : null;
         channelInfo.set(id, info);
         return info;
       })

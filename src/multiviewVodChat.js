@@ -23,7 +23,7 @@
     streamer: "https://ssl.pstatic.net/static/nng/glive/icon/streamer.png",
     manager: "https://ssl.pstatic.net/static/nng/glive/icon/manager.png",
     operator: "https://ssl.pstatic.net/static/nng/glive/icon/owner.png",
-    partner: "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png",
+    partner: "https://ssl.pstatic.net/static/nng/glive/image/icon_partner_mark.png",
   });
   const ACHIEVEMENT_BADGE_URLS = globalThis.CheeseAchievementBadgeMap || {};
 

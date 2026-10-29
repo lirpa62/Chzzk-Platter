@@ -25,7 +25,9 @@
     )
       return "operator";
     if (
-      /파트너|인증 마크|icon_official_mark|verified_mark|(?:^|[^a-z])partner(?:$|[^a-z])/.test(
+      // ⚠ 숨김 글자 '인증 마크'와 icon_official_mark(이제 파란 '공식' 마크)는 파트너·챌린저·공식이 같거나 다른
+      //   종류라 쓰지 않는다. 클래스 is_partner·새 파트너 그림 주소로만 본다(2026-11 개편).
+      /파트너|icon_partner_mark|(?:^|[^a-z])partner(?:$|[^a-z])/.test(
         text,
       )
     )
@@ -177,7 +179,7 @@
   // 모아보기 줄에 그릴 배지(원본 배지 모아 챗과 같은 배치).
   // - 닉네임 뒤: 파트너 마크가 맨 앞, 그다음 업적 등 나머지 마크.
   // - 파트너는 채팅창에 마크 이미지가 없어도(치지직이 그리지 않을 때가 있다) 역할로 판정되면
-  //   붙인다(원본: roleInfo.isPartner → icon_official_mark). 앞쪽에 잡힌 마크는 뒤로 옮긴다.
+  //   붙인다(원본: roleInfo.isPartner → 파트너 마크). 앞쪽에 잡힌 마크는 뒤로 옮긴다.
   function splitDisplayBadges(message) {
     const partnerUrl = ROLE_BADGES.partner[1];
     const partnerCanonical = canonicalBadgeUrl(partnerUrl);
@@ -316,7 +318,7 @@
     ],
     partner: [
       "파트너",
-      "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png",
+      "https://ssl.pstatic.net/static/nng/glive/image/icon_partner_mark.png",
     ],
   });
   // 알림 버튼 강조색 우선순위(원본과 같다): 방장 > 운영자 > 매니저 > 파트너.

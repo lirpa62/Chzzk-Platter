@@ -1,6 +1,6 @@
 const SERVICE_API_BASE = "https://api.chzzk.naver.com/service/v1";
 
-// 채널 인증 마크: verifiedMark 와 함께 verifiedMarkType(2026-11 챌린저 마크 도입)을 그대로 옮긴다.
+// 채널 인증 마크: verifiedMark 와 함께 verifiedMarkType(2026-11 개편: PARTNER·CHALLENGER·OFFICIAL)을 그대로 옮긴다.
 // 판단은 화면 쪽 src/verifiedMark.js(CheeseVerifiedMark.kind)가 한다. 배경은 그 파일을 불러오지 않으므로 같은 모양으로 둔다.
 function verifiedMarkFields(...sources) {
   let type = null;
@@ -11,7 +11,9 @@ function verifiedMarkFields(...sources) {
       break;
     }
   }
-  const verifiedMark = sources.some((source) => source?.verifiedMark === true);
+  // 치지직은 타입만 보고 마크를 그린다 → 아는 타입이면 마크가 있는 것으로.
+  const verifiedMark = sources.some((source) => source?.verifiedMark === true ||
+    /^(?:PARTNER|CHALLENGER|OFFICIAL)$/i.test(String(source?.verifiedMarkType || "")));
   // 타입은 있을 때만 붙인다(저장 기록이 줄마다 null 로 늘지 않게, 지금 저장 모양 그대로).
   return type ? { verifiedMark, verifiedMarkType: type } : { verifiedMark };
 }

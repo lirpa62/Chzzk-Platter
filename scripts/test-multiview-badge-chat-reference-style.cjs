@@ -15,7 +15,7 @@ function check(condition, label) {
   checks.push(label);
 }
 
-const PARTNER = "https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png";
+const PARTNER = "https://ssl.pstatic.net/static/nng/glive/image/icon_partner_mark.png"; // 2026-11 개편(초록 파트너)
 const sub = { src: "https://nng-phinf.pstatic.net/sub.png", alt: "구독", position: "before" };
 const achievement = { src: "https://nng-phinf.pstatic.net/cup.png", alt: "", position: "after" };
 
