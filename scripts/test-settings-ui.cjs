@@ -233,6 +233,17 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       const reset=[...document.querySelectorAll('.settings-tabs .settings-tab')].map(el=>el.dataset.tab);
       check(reset[reset.indexOf('customfollow')+1]==='multiview','reset did not restore default multiview position');
     `);
+    await test('multiview tab outline ends with a shortcut that opens multiview',`
+      // 왼쪽 메뉴 멀티뷰 탭 아래 목차 맨 끝에 '멀티뷰 열기' 바로가기(머리의 멀티뷰 버튼을 대신 누른다)
+      const tab=document.querySelector('[data-tab="multiview"]');
+      const outline=tab.nextElementSibling;
+      check(outline?.classList.contains('settings-tab-outline'),'multiview tab has no outline');
+      const action=outline.lastElementChild;
+      check(action.classList.contains('is-action')&&action.dataset.settingsActionLink==='#openMultiviewButton'&&action.textContent==='멀티뷰 열기','multiview shortcut missing or unnamed: '+action.outerHTML);
+      let clicked=0;const head=document.getElementById('openMultiviewButton');const count=()=>clicked++;head.addEventListener('click',count);
+      action.click();head.removeEventListener('click',count);
+      check(clicked===1,'shortcut did not press the multiview button');
+    `);
     await test('new badges survive a previously consumed update flag',`
       const tab=document.querySelector('[data-tab="multiview"]');
       const title=document.querySelector('[data-new-feature="multiview-player-controls"]');

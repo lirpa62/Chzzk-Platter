@@ -501,6 +501,8 @@
   // 목차 맨 아래에 두는 '바로 실행' 항목. 그룹으로 이동하는 게 아니라 버튼을
   // 대신 눌러 준다(채팅 리캡·통나무파워 내역처럼 별도 화면을 여는 것).
   const TAB_ACTIONS = [
+    // 멀티뷰는 머리의 '멀티뷰 열기'(아이콘) 버튼을 대신 누른다(시크릿 창 처리도 그 버튼이 한다).
+    ["multiview", "#openMultiviewButton"],
     ["chat", "#openChatRecap"],
     ["logpower", "#openLogStats"],
     ["player", "#openWatchTime"],
@@ -561,7 +563,8 @@
         link.type = "button";
         link.className = "settings-tab-outline-item is-action";
         link.dataset.settingsActionLink = selector;
-        link.textContent = plainName(source);
+        // 아이콘만 있는 버튼은 글자가 없으니 aria-label 로 이름을 쓴다
+        link.textContent = plainName(source) || source.getAttribute("aria-label") || "";
         list.append(link);
       }
       if (!list.children.length) continue;
