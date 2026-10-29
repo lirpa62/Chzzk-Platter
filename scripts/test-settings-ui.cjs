@@ -358,11 +358,13 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       let clicked=0;infoButton.addEventListener('click',()=>clicked++);
       for(let i=0;i<5;i++){search('클립');search('');}
       check(document.querySelector('[data-settings-info="chat-word-filter"]')===infoButton && infoButton.querySelector('svg')===infoSvg,'button or SVG replaced');
-      window.childInfo=document.querySelector('[data-settings-info="clip-click"]');
+      // 하위 옵션 줄의 (i) 버튼(설명을 접어 만든 것)도 검색 뒤 그대로 남아야 한다.
+      window.childInfo=document.querySelector('.settings-item-child [data-settings-info]');
+      window.childInfoKey=childInfo&&childInfo.dataset.settingsInfo;
       check(childInfo,'child info button missing');
       for(let i=0;i<3;i++){search('클립');search('');}
-      check(document.querySelector('[data-settings-info="clip-click"]')===childInfo,'child button replaced');
-      check(document.querySelector('.settings-item-desc code'),'code markup erased');
+      check(document.querySelector('[data-settings-info="'+childInfoKey+'"]')===childInfo,'child button replaced');
+      check(document.querySelector('[data-settings-info-panel="chat-word-filter"] code'),'code markup erased');
       infoButton.click();check(clicked===1&&infoButton.getAttribute('aria-expanded')==='true','listener lost');
       const dynamic=document.querySelector('[data-screenshot-direct-save-desc]');
       dynamic.textContent='업데이트된 저장 설명';search('업데이트된');search('');check(dynamic.textContent==='업데이트된 저장 설명','dynamic text reverted');

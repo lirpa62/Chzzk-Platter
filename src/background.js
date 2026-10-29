@@ -294,6 +294,29 @@ async function clearLegacyChatHistory() {
   } catch {}
 }
 
+const REMOVED_SEARCH_RERANK_KEYS = [
+  "cheeseSearchRerank",
+  "cheeseSearchRerankPoolMax",
+  "cheeseSearchRerankMoreStep",
+  "cheeseSearchRerankWeights",
+  "cheeseSearchRerankDefaultSort",
+  "cheeseSearchLiveRerank",
+  "cheeseSearchLiveRerankDefaultSort",
+  "cheeseSearchLiveRerankWeights",
+  "cheeseSearchClips",
+  "cheeseSearchClipDirectPlay",
+  "cheeseSearchClipWeights",
+  "cheeseSearchClipSourcePreset",
+  "cheeseSearchClipSourceWeights",
+  "cheeseSearchClipSourceCustomWeights",
+  "cheeseSearchClipMatchMode",
+  "cheeseSearchClipDateFilter",
+  "cheeseSearchClipDefaultSort",
+  "cheeseSearchClipCandidateLimit",
+  "cheeseSearchClipCategoryLimit",
+  "cheeseSearchClipMoreStep",
+];
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   // 설치 직후에는 항상, 업데이트 때는 사용자 설정에 따라 안내를 띄운다. 이미 열려 있던
   // 치지직 탭에는 새 콘텐츠 스크립트가 주입되지 않아 새로고침해야 최신 코드가 동작한다.
@@ -302,6 +325,12 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // v3까지는 치지직의 React 채팅 목록에 복제 행을 직접 넣었다. 새 구현은
   // storage.session의 방송별 버퍼만 쓰므로 업데이트 때 남은 로컬 복제본을 정리한다.
   await clearLegacyChatHistory();
+
+  // 1.64.0: 치지직 검색이 탭·정렬·필터와 클립 검색을 직접 지원하게 되어 통합검색 재정렬(라이브·동영상·클립)
+  // 기능을 지웠다. 그 설정값만 남지 않게 정리한다(멀티뷰·재생목록 다시보기 검색도 이제 서버 정렬을 쓴다).
+  try {
+    await chrome.storage.local.remove(REMOVED_SEARCH_RERANK_KEYS);
+  } catch {}
 
   // 신규 설치에서는 현재 기능을 모두 기준점으로 삼아 NEW를 표시하지 않는다. 업데이트는
   // 설정 페이지가 data-new-feature로 선언한 기능 중 아직 확인하지 않은 항목만 표시한다.

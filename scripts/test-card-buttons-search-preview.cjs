@@ -33,16 +33,14 @@ check(/if \(!isVideoVaultCardPage\(\)\) return \[\];/.test(sliceFn("videoVaultCa
   /!isVideoVaultCardPage\(\)\) \{\s*clearVideoVaultCardDecorations/.test(sliceFn("ensureVideoVaultCardButtons")) &&
   /if \(isVideoVaultCardPage\(\)\) \{\s*for \(const link of videoVaultCardLinks\(\)\)/.test(sliceFn("ensurePlaylistCardButtons")),
   "보관함 버튼·재생목록 버튼 모두 같은 판정을 쓴다");
-check(/ensureClipVaultCardButtons\(\);\s*ensurePlaylistCardButtons\(\);/.test(sliceFn("renderIntegratedSearchClips")),
-  "통합검색 클립 목록을 그리면 바로 별표·재생목록 버튼을 단다");
 check(/markCardButtonsPlacement\(link\);/.test(sliceFn("ensureVideoVaultCardButtons")) &&
   /markCardButtonsPlacement\(link\);/.test(sliceFn("ensurePlaylistCardButtons")),
   "보관함·재생목록 버튼 모두 통합검색 동영상 카드에 왼쪽 아래 표시를 남긴다");
 check(!/isIntegratedSearchCardPage|isVideoVaultCardPage/.test(sliceFn("findVideoVaultHost")),
   "보관함 패널(목록 위 버튼)은 통합검색에 두지 않는다");
 check(/location\.pathname === "\/search"/.test(sliceFn("isClipCardListPage")) &&
-  sliceFn("clipVaultCardLinks").includes(`'.cheese-search-integrated-clips-list a.cheese-search-clip-cover-link[href*="/clips/"]'`),
-  "클립 별표·재생목록 버튼도 통합검색 클립 카드(표지 링크)에 단다");
+  !sliceFn("clipVaultCardLinks").includes("cheese-search-integrated-clips-list"),
+  "클립 별표·재생목록 버튼은 치지직 검색 클립 카드에 단다(지운 통합검색 클립 보강 목록은 찾지 않는다)");
 
 const zOf = (selector) => {
   const at = css.indexOf(selector + " {");
@@ -116,6 +114,31 @@ for (const sel of [".cheese-video-vault-archive", ".cheese-clip-vault-star", ".c
     })()`);
     check(!place.hitBadge && place.vault[0] === 8 && place.plRightOfVault && place.top > 100,
       `통합검색 동영상 카드는 왼쪽 아래(배지와 겹치지 않음, 재생목록은 보관함 오른쪽) ${JSON.stringify(place)}`);
+
+    // 치지직 새 검색 화면(2026-10-29 실측 구조): 클립 카드는 section#search-panel-… > ul > li > a._link_,
+    // 동영상 카드는 통합 탭이 작은 가로형(_horizontal_), 동영상 탭이 큰 세로형(_vertical_).
+    const real = await ev(`(() => {
+      const CLIP_VAULT_PANEL_ID = "cheese-clip-vault-panel";
+      const isIntegratedSearchCardPage = () => true;
+      const CARD_BUTTONS_PLACE_ATTR = "data-cheese-card-buttons";
+      // about:blank 은 origin 이 없어 주소 해석 함수 대신 같은 뜻의 간단한 것을 쓴다(선택자·자리 판단을 본다).
+      const clipUidFromHref = (href) => (String(href || "").match(/^\\/clips\\/([^/?#]+)/) || [])[1] || "";
+      const videoNoFromHref = (href) => (String(href || "").match(/^\\/video\\/(\\d+)/) || [])[1] || "";
+      ${["clipVaultCardLinks", "markCardButtonsPlacement"].map(sliceFn).join("\n")}
+      document.body.innerHTML =
+        '<section id="search-panel-recommend"><section><ul class="_list_1sxyy_1"><li><a class="_link_1sxyy_18" href="/clips/n8cgu2JFZp"><div class="_container_2rytm_6 _is_vertical_2rytm_25"><strong class="_title_2rytm_104">클립</strong></div></a></li></ul>' +
+        '<ul class="_list_anvim_53"><li class="_item_anvim_72"><div class="_container_195e3_2 _horizontal_195e3_14 _is_search_195e3_230"><a class="_thumbnail_195e3_10" href="/video/15840761" id="small"></a></div></li></ul></section></section>' +
+        '<section id="search-panel-clip"><section><ul class="_list_1sxyy_1"><li><a class="_link_1sxyy_18" href="/clips/AbC_12-xyz"></a></li></ul></section></section>' +
+        '<section id="search-panel-video"><section><ul class="_list_anvim_53 _is_dense_anvim_69"><li class="_item_anvim_72"><div class="_container_195e3_2 _vertical_195e3_20 _is_search_195e3_230"><a class="_thumbnail_195e3_10" href="/video/14268083" id="big"></a></div></li></ul></section></section>';
+      const clips = clipVaultCardLinks().map((a) => a.getAttribute("href"));
+      markCardButtonsPlacement(document.getElementById("small"));
+      markCardButtonsPlacement(document.getElementById("big"));
+      return { clips, small: document.getElementById("small").getAttribute(CARD_BUTTONS_PLACE_ATTR), big: document.getElementById("big").getAttribute(CARD_BUTTONS_PLACE_ATTR) };
+    })()`);
+    check(JSON.stringify(real.clips) === JSON.stringify(["/clips/n8cgu2JFZp", "/clips/AbC_12-xyz"]),
+      `치지직 검색 통합·클립 탭의 클립 카드에 별표·재생목록 버튼을 단다 ${JSON.stringify(real.clips)}`);
+    check(real.small === "bottom-left" && real.big === null,
+      `검색 동영상 카드: 통합 탭의 작은 가로형은 왼쪽 아래, 동영상 탭의 큰 카드는 원래 자리(오른쪽 위) ${JSON.stringify(real)}`);
   } finally {
     browser.kill();
     try { rmSync(dir, { recursive: true, force: true }); } catch {}
