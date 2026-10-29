@@ -4290,7 +4290,7 @@
         const last = i === settingsTabOrder.length - 1;
         return (
           `<li class="cf-fav-order-item" draggable="true" data-id="${escapeHtml(tab)}">` +
-          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⠿</span>` +
           `<span class="cf-fav-order-name">${escapeHtml(tabLabel(tab))}</span>` +
           `<span class="cf-fav-order-btns">` +
           `<button type="button" class="cf-fav-order-up" data-dir="up" aria-label="위로" title="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
@@ -6588,7 +6588,7 @@
         const last = i === display.length - 1;
         return (
           `<li class="cf-fav-order-item" draggable="true" data-id="${key}">` +
-          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⠿</span>` +
           `<span class="cf-fav-order-name">${CF_SECTION_LABELS[key]}</span>` +
           `<span class="cf-fav-order-btns">` +
           `<button type="button" class="cf-fav-order-up" data-dir="up" aria-label="위로" title="위로"${i === 0 ? " disabled" : ""}>↑</button>` +
@@ -6899,7 +6899,7 @@
           : '<span class="cf-fav-order-noimg"></span>';
         return (
           `<li class="cf-fav-order-item" draggable="true" data-id="${cfEsc(m.id)}">` +
-          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⠿</span>` +
           img +
           `<span class="cf-fav-order-name">${cfEsc(m.name || m.id)}</span>` +
           `<span class="cf-fav-order-btns">` +
@@ -9718,7 +9718,7 @@
         const weight = affinityOrder.length - i;
         return (
           `<li class="cf-fav-order-item" data-id="${escapeHtml(key)}">` +
-          `<span class="cf-fav-order-handle" aria-hidden="true">⋮⋮</span>` +
+          `<span class="cf-fav-order-handle" aria-hidden="true">⠿</span>` +
           `<span class="cf-fav-order-name">${escapeHtml(label[key] || key)}</span>` +
           `<small class="cf-fav-order-weight">×${weight}</small>` +
           `<span class="cf-fav-order-btns">` +

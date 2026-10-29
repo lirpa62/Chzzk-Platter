@@ -3232,10 +3232,11 @@ body > .clr-picker .clr-preview {
 .cf-fav-order-dragging {
   opacity: 0.4;
 }
+/* 손잡이는 플레이어 '버튼 순서·위치'(.settings-order-grip)와 같은 모양(⠿) */
 .cf-fav-order-handle {
-  color: var(--popup-fg-weak, #888);
-  font-size: 0.75rem;
-  letter-spacing: -2px;
+  color: var(--popup-muted);
+  font-size: 0.8125rem;
+  line-height: 1;
   flex: none;
   user-select: none;
 }
@@ -3263,6 +3264,11 @@ body > .clr-picker .clr-preview {
   flex: none;
 }
 .cf-fav-order-btns button {
+  /* ⚠ 기본 좌우 패딩(6px)이 남으면 내용 칸이 8px 뿐이라 화살표 글자(Pretendard 12px 폭)가 오른쪽으로 2px 밀린다. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   width: 22px;
   height: 22px;
   border: 1px solid var(--popup-border, #3a3a3a);
