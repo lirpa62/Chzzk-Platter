@@ -44,6 +44,9 @@
   // 중복 실행되지 않도록 판별한다. 플레이어/채팅 iframe용 기능은 기존대로 각 프레임에서
   // 동작하되, 전용 팔로잉 목록의 네트워크 갱신만 이 값을 게이트로 사용한다.
   const IS_TOP_FRAME = window.top === window;
+  // 치지직 스튜디오(studio.chzzk.naver.com)도 같은 header#header 구조라, 치지직 헤더용 버튼(바로가기·팔로우 목록·
+  // 재생목록·라운지 소식·수신함 점)과 헤더 자동 숨김이 스튜디오 헤더에도 붙었다 → 스튜디오에서는 헤더를 건드리지 않는다.
+  const IS_CHZZK_STUDIO = location.hostname === "studio.chzzk.naver.com";
   const INBOX_COMMUNITY_IMAGE_MESSAGE_SOURCE = "cheese-inbox-community-image";
   const INBOX_COMMUNITY_STATE_MESSAGE_SOURCE = "cheese-inbox-community-state";
   const INBOX_COMMUNITY_LIGHTBOX_ID = "cheese-inbox-community-lightbox";
@@ -25699,7 +25702,7 @@ html.cheese-sidebar-resizing div#layout-body {
 
   // 기능 on/off에 따라 리스너를 켜고 끈다. SPA로 header가 재생성될 수 있어 멱등 재호출.
   function applyHeaderAutoHide() {
-    const on = featureFlags.headerAutoHide;
+    const on = featureFlags.headerAutoHide && !IS_CHZZK_STUDIO;
     if (on === headerAutoHideOn) {
       // 상태 동일하지만 header가 교체됐을 수 있으니 켜진 상태면 헤더 리스너 보정 +
       // 배너 오프셋 갱신. init()이 SPA 전환/DOM 변화마다 호출되므로, 배너 있는 메인 →
@@ -28123,6 +28126,7 @@ html.cheese-sidebar-resizing div#layout-body {
   }
 
   function findHeaderInboxButton(header = document.getElementById("header")) {
+    if (IS_CHZZK_STUDIO) return null; // 재생목록·라운지 소식·수신함 점은 이 버튼을 기준으로 붙는다
     if (!header) return null;
     // ⚠ 프로필 팝오버도 header 안에 있다. 그 안에는 .blind="New"(내 프라임 콘텐츠)
     //   와 svg mask(내 통나무 파워)를 가진 버튼이 있어 아래 폴백에 걸린다. 그러면
@@ -28470,7 +28474,7 @@ html.cheese-sidebar-resizing div#layout-body {
 
   function ensureHeaderFollowNav() {
     const header = document.getElementById("header");
-    if (!header) return;
+    if (!header || IS_CHZZK_STUDIO) return;
 
     const shouldShow =
       featureFlags.sidebar &&
@@ -28944,7 +28948,7 @@ html.cheese-sidebar-resizing div#layout-body {
   // 있어 init/옵저버에서 멱등 재호출.
   function ensureHeaderNav() {
     const header = document.getElementById("header");
-    if (!header) return;
+    if (!header || IS_CHZZK_STUDIO) return;
 
     const shouldShow = HEADER_NAV_ITEMS.some(isHeaderNavItemVisible);
     let container = header.querySelector(`#${HEADER_NAV_CONTAINER_ID}`);
