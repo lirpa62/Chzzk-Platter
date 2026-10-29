@@ -4,6 +4,11 @@
 (() => {
   "use strict";
 
+  // 차트는 캔버스에 그려 CSS 글꼴을 따르지 않는다 → 페이지와 같은 Pretendard 로.
+  if (globalThis.Chart?.defaults?.font) {
+    globalThis.Chart.defaults.font.family = 'Pretendard, system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", sans-serif';
+  }
+
   const STORE_PREFIX = "chatRecap:";
   const CATALOG_PREFIX = "chatRecapCatalog:";
   const VOD_CHAT_STATS_PREFIX = "chatRecapVodChatStatsV1:";

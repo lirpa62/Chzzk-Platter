@@ -4,7 +4,7 @@ body {
   margin: 0;
   background: var(--popup-bg);
   color: var(--popup-text);
-  font-family: inherit;
+  /* 글꼴은 popup.css 의 Pretendard 를 그대로 쓴다(여기서 inherit 로 덮으면 html 의 기본 글꼴이 됐다). */
   /* ⚠ 브라우저 창 크기는 스크립트로 막을 수 없다(사용자가 직접 줄이는 것).
      대신 이 폭 아래로는 레이아웃을 더 좁히지 않고 가로 스크롤로 넘긴다 —
      차트·표가 짓눌려 못 읽게 되는 것보다 낫다. */
