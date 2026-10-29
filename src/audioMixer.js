@@ -10718,8 +10718,11 @@
   document.addEventListener(
     "wheel",
     (e) => {
-      const btn = e.target.closest?.(`.${BUTTON_CLASS}`);
-      if (!btn) return;
+      // 게인 슬라이더 막대 위 휠은 '믹서 휠 동작' 설정과 상관없이 항상 게인(버튼 휠과 같은 단계).
+      // 막대는 믹서를 켰을 때만 보이므로 꺼진 상태 안내는 뜨지 않는다.
+      const gainBar = e.target.closest?.(`.${CONTROL_CLASS} [data-master-gain]`);
+      const btn = gainBar ? null : e.target.closest?.(`.${BUTTON_CLASS}`);
+      if (!gainBar && !btn) return;
       e.preventDefault();
       e.stopPropagation();
       // 네이티브 휠 볼륨도 document capture에 등록된다. stopPropagation만으로는 같은
@@ -10727,7 +10730,7 @@
       e.stopImmediatePropagation();
       dismissGestureHint();
       const direction = e.deltaY < 0 ? 1 : -1; // 위로 = 올림
-      if (mixerWheelAction === "gain") nudgeGain(direction);
+      if (gainBar || mixerWheelAction === "gain") nudgeGain(direction);
       else cyclePreset(-direction); // 프리셋은 위로 = 이전 항목(기존 동작)
     },
     { capture: true, passive: false },
