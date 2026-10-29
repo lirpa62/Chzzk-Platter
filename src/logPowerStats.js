@@ -2913,6 +2913,15 @@
     try {
       localStorage.setItem(THEME_KEY, next);
     } catch {}
+    configureColorPicker(); // 색상 선택기도 테마에 맞춘다
+    paintThemeButton();
+  }
+
+  // ── 채널 색상 선택기(Coloris) ──
+  // ⚠ 예전에는 아래 준비(선택기 설정·색을 고르면 저장하고 다시 그리기)가 toggleTheme 안에 있어, 테마 버튼을
+  //   한 번 누르기 전에는 직접 고른 색이 저장·반영되지 않았다(누를 때마다 리스너도 하나씩 늘었다).
+  //   페이지를 열 때 한 번 준비하고, 테마를 바꿀 때는 선택기 밝기만 맞춘다.
+  function configureColorPicker() {
     try {
       window.Coloris?.({
         el: "[data-color-for]",
@@ -2926,7 +2935,13 @@
         closeLabel: "색상 선택 완료",
       });
     } catch {}
+  }
 
+  let colorPickerReady = false;
+  function setupColorPicker() {
+    configureColorPicker();
+    if (colorPickerReady) return;
+    colorPickerReady = true;
     // 색을 고르면 저장하고 즉시 다시 그린다.
     document.addEventListener("change", (e) => {
       const input = e.target.closest?.("[data-color-for]");
@@ -2941,8 +2956,6 @@
       renderBarChart();
       renderLineChart();
     });
-
-    paintThemeButton();
   }
 
   // ── 차트 ───────────────────────────────────────────────────────────────────
@@ -4667,6 +4680,7 @@
   });
 
   paintThemeButton();
+  setupColorPicker();
   renderPicker("from");
   renderPicker("to");
   // 묶음 토글 상태 복원(체크박스에도 반영한 뒤 그린다).
