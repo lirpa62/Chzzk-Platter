@@ -5830,7 +5830,8 @@
   const mixerGlobalGainDefaultRoot = document.querySelector(
     "[data-mixer-global-gain-default]",
   );
-  const mixerGlobalGainDefaultEnabled = mixerGlobalGainDefaultRoot?.querySelector(
+  // 스위치는 이름 줄 오른쪽에 있다(게인 조절 줄과 따로).
+  const mixerGlobalGainDefaultEnabled = document.querySelector(
     "[data-mixer-global-gain-default-enabled]",
   );
   const mixerGlobalGainDefaultRange = mixerGlobalGainDefaultRoot?.querySelector(

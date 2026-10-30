@@ -2147,14 +2147,14 @@
                 class="settings-item"
                 data-new-feature="audio-mixer-share-across-channels"
               >
-                <div>
+                <label>
                   <span class="settings-item-name">채널 간 믹서 설정 공유</span>
                   <span class="settings-item-desc"
                     >새 채널을 열 때 마지막으로 조절한 EQ·게인·컴프레서 설정을
                     적용합니다. 이미 저장된 채널별 설정이 있으면 그 설정을
                     우선합니다.</span
                   >
-                </div>
+                </label>
                 <label class="settings-switch">
                   <input type="checkbox" data-mixer-share-across-channels />
                   <i aria-hidden="true"></i>
@@ -2164,19 +2164,17 @@
                 class="settings-item settings-item-stacked"
                 data-new-feature="audio-mixer-global-gain-default"
               >
-                <div>
-                  <span class="settings-item-name"
-                    >오디오 믹서 전역 게인 기본값</span
-                  >
-                  <span class="settings-item-desc"
-                    >채널과 상관없이 지정한 게인을 기본값으로 적용합니다. 설정한
-                    게인 슬라이더 범위와 조절 간격을 따릅니다.</span
-                  >
-                </div>
-                <div
-                  class="settings-global-gain-controls"
-                  data-mixer-global-gain-default
-                >
+                <!-- 이름·설명과 스위치를 한 줄에(다른 옵션처럼 스위치는 오른쪽), 게인 조절은 그 아래 줄 -->
+                <div class="settings-item-head">
+                  <label>
+                    <span class="settings-item-name"
+                      >오디오 믹서 전역 게인 기본값</span
+                    >
+                    <span class="settings-item-desc"
+                      >채널과 상관없이 지정한 게인을 기본값으로 적용합니다.
+                      설정한 게인 슬라이더 범위와 조절 간격을 따릅니다.</span
+                    >
+                  </label>
                   <label class="settings-switch">
                     <input
                       type="checkbox"
@@ -2184,6 +2182,11 @@
                     />
                     <i aria-hidden="true"></i>
                   </label>
+                </div>
+                <div
+                  class="settings-global-gain-controls"
+                  data-mixer-global-gain-default
+                >
                   <div class="settings-osd-row">
                     <input
                       type="range"

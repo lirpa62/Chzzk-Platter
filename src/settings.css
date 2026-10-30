@@ -494,6 +494,22 @@ html.settings-tab-view .settings-resizer {
   min-width: 0;
 }
 
+/* 아래에 조절 줄이 붙는 옵션의 윗줄: 이름·설명 + 오른쪽 스위치(다른 옵션과 같은 배치). */
+.settings-item.settings-item-stacked > .settings-item-head {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.settings-item-head > label:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .settings-item-name {
   font-size: 0.8125rem;
   font-weight: 700;
@@ -2450,9 +2466,15 @@ body > .clr-picker .clr-preview {
 
 .settings-global-gain-controls .settings-osd-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 84px auto;
+  /* 좁은 창에서 슬라이더가 줄어 '기본값' 버튼이 패널 밖으로 나가지 않게 */
+  grid-template-columns: minmax(0, 1fr) 84px auto;
   width: 100%;
   gap: 5px;
+}
+
+/* 좁은 창에서 '기본값' 글자가 세로로 꺾이지 않게 */
+.settings-global-gain-controls .settings-order-reset {
+  white-space: nowrap;
 }
 
 .settings-embed-clip-default-gain {
