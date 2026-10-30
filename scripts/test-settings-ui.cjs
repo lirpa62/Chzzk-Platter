@@ -164,6 +164,10 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseFollowingGroupFilterSelected:'custom:group-1',
         cheesePlaylistPanelRect:{left:30,top:40,width:420,height:360},
         cheeseChzzkPlaylistPanelCollapsed:true,
+        cheeseVideoSearchOptions:{sort:'DATE_DESC',playTime:'ALL',period:'WEEK'},
+        cheeseSyncAdaptive:false,
+        cheeseSidebarMultiviewPosition:'top',
+        cheeseSidebarTopMenuOrder:['multiview','lives','clips','category','schedule','following','cheezefarm'],
         cheesePlaylists:{v:1,lists:[{id:'playlist01',name:'테스트 목록',items:[{
           id:'item0001',type:'video',videoNo:'123456',start:12,title:'테스트 영상',
           thumb:'https://example.com/tracker.png',channelId:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -494,6 +498,9 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       // 맨 위 메뉴 순서: 멀티뷰는 맨 위 메뉴에 둘 때만 목록에, 숨긴 항목은 흐리게, 화살표로 옮겨 저장
       const topOrder=document.querySelector('[data-sidebar-top-menu-order]');
       const topIds=()=>[...topOrder.querySelectorAll('.cf-fav-order-item')].map(li=>li.dataset.id).join();
+      // 백업 시험이 넣어 둔 값(맨 위 메뉴·사용자 순서)에서 기본으로 돌려 놓고 시작한다.
+      document.querySelector('[data-sidebar-multiview-position-value="services"]').click();
+      document.querySelector('[data-sidebar-top-menu-order-reset]').click();
       check(topIds()==='lives,clips,category,schedule,following,cheezefarm','top menu order should list native items only '+topIds());
       document.querySelector('[data-sidebar-multiview-position-value="top"]').click();
       check(saved.cheeseSidebarMultiviewPosition==='top'&&topIds().endsWith(',multiview'),'top position should add multiview to the order list '+topIds());
@@ -620,6 +627,10 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
           exported.settings.cheesePlaylistPanelRect?.width===420&&
           exported.settings.cheeseChzzkPlaylistPanelCollapsed===true,
           'playlist panel or following filter state missing from export');
+        // 사이드바 두 키는 앞 시험(맨 위 메뉴 순서)이 값을 바꾸므로 들어 있는지만 본다.
+        check(exported.settings.cheeseVideoSearchOptions?.sort==='DATE_DESC'&&exported.settings.cheeseSyncAdaptive===false&&
+          Object.hasOwn(exported.settings,'cheeseSidebarMultiviewPosition')&&Array.isArray(exported.settings.cheeseSidebarTopMenuOrder),
+          '1.64.0 settings missing from export');
         check(exported.settings.cheeseFeatureHidden?.chatHideInputPlaceholder===true,'placeholder option missing from backup');
         check(exported.settings.cheeseFeatureHidden?.vodLocalChat===true,'local replay chat option missing from backup');
         check(exported.settings.cheeseMultiviewQuickPosition?.width===640,'multiview panel geometry missing from export');
@@ -658,6 +669,10 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseFollowingGroupFilterSelected:'fav',
         cheesePlaylistPanelRect:{left:50,top:60,width:500,height:null},
         cheeseChzzkPlaylistPanelCollapsed:false,
+        cheeseVideoSearchOptions:{sort:'PLAY_COUNT_DESC',playTime:'OVER_3_HOURS',period:'ALL'},
+        cheeseSyncAdaptive:true,
+        cheeseSidebarMultiviewPosition:'services',
+        cheeseSidebarTopMenuOrder:['clips','lives','category','schedule','following','cheezefarm','multiview'],
         cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false,
         cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62},
         cheeseMultiviewLiveCatchUpLimit:4},appearance:{multiviewChatSize:{w:720,h:180,topH:210}}};
@@ -713,6 +728,9 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseFollowingGroupFilterSelected==='fav'&&
         saved.cheesePlaylistPanelRect?.width===500&&saved.cheeseChzzkPlaylistPanelCollapsed===false,
         'playlist panel or following filter state was not imported');
+      check(saved.cheeseVideoSearchOptions?.sort==='PLAY_COUNT_DESC'&&saved.cheeseSyncAdaptive===true&&
+        saved.cheeseSidebarMultiviewPosition==='services'&&saved.cheeseSidebarTopMenuOrder?.[0]==='clips',
+        '1.64.0 settings were not imported');
       check(localStorage.getItem('cheeseWatchTimeChartType')===null,
         'removed watch-time chart preference was imported');
       check(saved.cheeseLiveTagFiltersDisabled?.[0]==='game'&&saved.cheeseFollowingLiveAutoExpand===false,

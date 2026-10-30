@@ -212,6 +212,8 @@
     "cheeseMultiviewSyncDiagnosticsUi",
     "cheeseMultiviewLiveCatchUp",
     "cheeseMultiviewLiveCatchUpLimit",
+    // 다시보기 검색(멀티뷰·재생목록) 정렬·영상 길이·기간. 예전엔 cheeseSearchRerankDefaultSort 로 백업됐다.
+    "cheeseVideoSearchOptions",
     "cheeseMultiviewChatSize",
     "cheeseMultiviewQuickState",
     "cheeseMultiviewQuickPosition",
