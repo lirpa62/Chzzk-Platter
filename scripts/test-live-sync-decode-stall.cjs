@@ -32,7 +32,7 @@ const ranges = (list) => ({ length: list.length, start: (i) => list[i][0], end: 
 
 function makeCtx(cfg = { enable: 3, target: 2 }) {
   const ctx = {
-    SYNC_ADAPT_STEP_S: 0.5, SYNC_ADAPT_MAX_S: 2, SYNC_ADAPT_WATCH_MS: 10000, SYNC_JUMP_LATENCY_S: 12,
+    SYNC_ADAPT_STEP_S: 0.5, SYNC_ADAPT_MAX_S: 2, SYNC_ADAPT_WATCH_MS: 10000, SYNC_MENU_QUIET_MS: 8000, SYNC_ADAPT_DECAY_MS: 300000, SYNC_JUMP_LATENCY_S: 12,
     SYNC_STARVED_AHEAD_S: 1, SYNC_SKIP_KEEP_S: 1, SYNC_SKIP_MIN_S: 0.3,
     syncCfg: cfg, currentPageKey: "", autoSyncEnabled: false, BRIDGE_ORIGIN: "x", ourSeekUntil: 0,
     window: { postMessage: () => {} }, Date, updateSyncButtonState: () => {},

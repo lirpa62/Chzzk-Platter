@@ -782,6 +782,9 @@
   const SYNC_COOLDOWN_CUSTOM_KEY = "cheeseSyncCooldownCustom";
   let syncCooldownEnabled = true; // 기본 ON
   let syncCooldownCustom = null; // {base, max}(초) 또는 null
+  // 버퍼링이 나면 그 방송의 따라잡기 기준을 0.5초씩 늦추기(기본 ON).
+  const SYNC_ADAPTIVE_KEY = "cheeseSyncAdaptive";
+  let syncAdaptive = true;
   // 오디오 믹서 '항상 켜기'(전역). MAIN world(audioMixer)에 함께 전달.
   const MIXER_ALWAYS_ON_KEY = "cheeseMixerAlwaysOn";
   const MIXER_DEFAULT_ON_KEY = "cheeseMixerDefaultOn";
@@ -54680,6 +54683,7 @@ html.cheese-sidebar-resizing div#layout-body {
         syncMode: syncModeValue, // "rate"=배속 | "jump"=즉시 점프
         syncCooldownEnabled, // 자동 따라잡기 쿨다운 on/off
         syncCooldownCustom, // {base,max}(초) 또는 null
+        syncAdaptive, // 버퍼링 시 기준 자동 늦추기 on/off
         mixerAlwaysOn, // 오디오 믹서 항상 켜기(전역)
         mixerDefaultOn, // 오디오 믹서 기본 켜짐(전역)
         // 체크된 시작 옵션은 첫 목표만 적용한다. 그 뒤부터 전역 자동 고정 설정을
@@ -54787,6 +54791,7 @@ html.cheese-sidebar-resizing div#layout-body {
     SYNC_MODE_KEY,
     SYNC_COOLDOWN_ENABLED_KEY,
     SYNC_COOLDOWN_CUSTOM_KEY,
+    SYNC_ADAPTIVE_KEY,
     MIXER_ALWAYS_ON_KEY,
     MIXER_DEFAULT_ON_KEY,
     MAX_QUALITY_KEY,
@@ -55090,6 +55095,7 @@ html.cheese-sidebar-resizing div#layout-body {
       syncRateValue = normalizeSyncRate(data?.[SYNC_RATE_KEY]);
       syncModeValue = normalizeSyncMode(data?.[SYNC_MODE_KEY]);
       syncCooldownEnabled = data?.[SYNC_COOLDOWN_ENABLED_KEY] !== false; // 기본 ON
+      syncAdaptive = data?.[SYNC_ADAPTIVE_KEY] !== false; // 기본 ON
       syncCooldownCustom = normalizeSyncCooldownCustom(
         data?.[SYNC_COOLDOWN_CUSTOM_KEY],
       );
@@ -55188,6 +55194,9 @@ html.cheese-sidebar-resizing div#layout-body {
       if (changes[SYNC_COOLDOWN_ENABLED_KEY]) {
         syncCooldownEnabled =
           changes[SYNC_COOLDOWN_ENABLED_KEY].newValue !== false;
+      }
+      if (changes[SYNC_ADAPTIVE_KEY]) {
+        syncAdaptive = changes[SYNC_ADAPTIVE_KEY].newValue !== false;
       }
       if (changes[SYNC_COOLDOWN_CUSTOM_KEY]) {
         syncCooldownCustom = normalizeSyncCooldownCustom(
@@ -56152,6 +56161,7 @@ html.cheese-sidebar-resizing div#layout-body {
         changes[SYNC_RATE_KEY] ||
         changes[SYNC_COOLDOWN_ENABLED_KEY] ||
         changes[SYNC_COOLDOWN_CUSTOM_KEY] ||
+        changes[SYNC_ADAPTIVE_KEY] ||
         changes[MIXER_ALWAYS_ON_KEY] ||
         changes[MIXER_DEFAULT_ON_KEY] ||
         changes[MAX_QUALITY_KEY] ||

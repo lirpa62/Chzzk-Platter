@@ -34,9 +34,9 @@ check(toggle > 0 && toggle < sensitivity && toggle < channelList && channelList 
   const titles = [...section.matchAll(/class="settings-group-title"[^>]*>\s*([^<]+?)\s*</g)].map((m) => m[1]);
   check(tabs[tabs.indexOf("player") + 1] === "catchup" &&
     (html.match(/data-panel="catchup"/g) || []).length === 1 &&
-    JSON.stringify(titles) === JSON.stringify(["실시간 따라잡기", "실시간 따라잡기 민감도", "따라잡기 방식", "따라잡기 배속", "자동 따라잡기 쿨다운"]) &&
+    JSON.stringify(titles) === JSON.stringify(["실시간 따라잡기", "실시간 따라잡기 민감도", "따라잡기 방식", "따라잡기 배속", "자동 따라잡기 쿨다운", "버퍼링 시 기준 늦추기"]) &&
     !/data-panel="player"[\s\S]{0,200}aria-label="실시간 따라잡기"/.test(html),
-    `플레이어 탭 바로 아래 '실시간 따라잡기' 탭에 따라잡기·민감도·방식·배속·쿨다운이 모여 있다 ${JSON.stringify(titles)}`);
+    `플레이어 탭 바로 아래 '실시간 따라잡기' 탭에 따라잡기·민감도·방식·배속·쿨다운·기준 늦추기가 모여 있다 ${JSON.stringify(titles)}`);
 }
 check(/\["\[data-live-auto-sync\]", "cheeseAudioMixer\.autoSync", false\]/.test(settings) &&
   /SETTINGS_STORAGE_KEYS[\s\S]*?"cheeseAudioMixer\.autoSync"/.test(settings),

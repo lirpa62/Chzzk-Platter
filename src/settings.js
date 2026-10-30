@@ -350,6 +350,7 @@
     "cheeseSyncRate",
     "cheeseSyncMode",
     "cheeseSyncCooldownEnabled",
+    "cheeseSyncAdaptive",
     "cheeseSyncCooldownCustom",
     "cheeseVideoFilterAlwaysOn",
     "cheeseVideoFilterDefaultOn",
@@ -14079,6 +14080,37 @@
       );
     });
   }
+
+  // ── 버퍼링 시 기준 늦추기(사용/끔, 기본 사용) ───────────────────────────────
+  const SYNC_ADAPTIVE_KEY = "cheeseSyncAdaptive";
+  const syncAdaptiveButtons = Array.from(
+    document.querySelectorAll("[data-sync-adaptive]"),
+  );
+  function reflectSyncAdaptive(enabled) {
+    const on = enabled !== false;
+    syncAdaptiveButtons.forEach((btn) => {
+      const active = (btn.dataset.syncAdaptive === "on") === on;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-checked", String(active));
+    });
+  }
+  (async () => {
+    let enabled = true;
+    try {
+      const d = await cachedStorageGet(SYNC_ADAPTIVE_KEY);
+      enabled = d?.[SYNC_ADAPTIVE_KEY] !== false;
+    } catch {}
+    reflectSyncAdaptive(enabled);
+  })();
+  syncAdaptiveButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const on = btn.dataset.syncAdaptive === "on";
+      reflectSyncAdaptive(on);
+      try {
+        cachedStorageSet({ [SYNC_ADAPTIVE_KEY]: on });
+      } catch {}
+    });
+  });
 
   // ── 팔로우 채널 자동 갱신(0=끔/30/60초 프리셋 + 커스텀 3~600초) ────────────
   const FOLLOW_REFRESH_KEY = "cheeseFollowRefreshSec";

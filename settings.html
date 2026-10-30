@@ -2944,6 +2944,42 @@
               따라잡습니다 (대신 배속 구간이 잦아질 수 있음). 기본 5~120초, 최대
               5~600초.
             </p>
+
+            <h2
+              class="settings-group-title"
+              style="margin-top: 14px"
+              data-new-feature="sync-adaptive"
+              data-settings-search-aliases="버퍼링 늦추기 기준 자동 조절 지연 늘리기"
+            >
+              버퍼링 시 기준 늦추기
+            </h2>
+            <div
+              class="settings-segmented settings-segmented-2"
+              id="syncAdaptive"
+              role="radiogroup"
+            >
+              <button
+                type="button"
+                data-sync-adaptive="on"
+                role="radio"
+                aria-checked="true"
+              >
+                사용
+              </button>
+              <button
+                type="button"
+                data-sync-adaptive="off"
+                role="radio"
+                aria-checked="false"
+              >
+                끔
+              </button>
+            </div>
+            <p class="settings-group-desc">
+              따라잡은 직후 버퍼링이 나면 그 방송은 따라잡는 기준을 0.5초씩(최대
+              2초) 늦춥니다. 5분 동안 버퍼링이 없으면 0.5초씩 원래 기준으로
+              되돌립니다. '끔'으로 하면 항상 설정한 기준대로 따라잡습니다.
+            </p>
           </section>
 
           <section

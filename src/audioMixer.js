@@ -468,6 +468,7 @@
         e.data.syncCooldownEnabled,
         e.data.syncCooldownCustom,
         e.data.syncMode,
+        e.data.syncAdaptive,
       );
     // EQ 대역 배치(전역). 바뀌면 값 보관함을 갈아 끼우고 패널을 다시 그린다.
     if (typeof e.data.eqBandMode === "string") {
@@ -654,6 +655,12 @@
   // 디코딩이 못 따라감' 으로 본다(실측: Windows 1080p60 1.5배속에서 버퍼 4초가 남았는데 멈추고, 플레이어가
   // 뒤로 옮겨 지연이 되돌아갔다). 그때는 기준을 늦추지 않고 이 방송은 '버퍼 안 건너뛰기' 로 따라잡는다.
   const SYNC_STARVED_AHEAD_S = 1;
+  // 늦춘 기준을 되돌리는 간격: 이 시간 동안 버퍼가 바닥나지 않으면 0.5초씩 원래 기준으로(예전엔 방송을 바꿀 때까지 유지).
+  const SYNC_ADAPT_DECAY_MS = 5 * 60 * 1000;
+  // 사용자가 위치를 옮기려고 조작한 뒤 이 시간 안의 seek 만 '사용자 되감기'로 본다.
+  const SYNC_SEEK_GESTURE_WINDOW_MS = 2500;
+  // 화질·설정 메뉴를 누른 뒤 이 시간 안의 버퍼링은 따라잡기 탓으로 보지 않는다(화질을 바꾸면 스트림을 다시 받는다).
+  const SYNC_MENU_QUIET_MS = 8000;
   const SYNC_SKIP_KEEP_S = 1; // 건너뛴 뒤에도 남겨 둘 앞쪽 버퍼(초)
   const SYNC_SKIP_MIN_S = 0.3; // 이보다 적게 건너뛸 수 있으면 건너뛰지 않는다
   const PANEL_RIGHT_PX = 16;
@@ -8389,6 +8396,10 @@
   let syncFreshLiveEntry = false;
   let freshEntryDeadline = 0; // 이 시각까지만 최초-진입 강제 시도(무한 대기 방지)
   let syncAdaptBoost = 0; // 이 방송에서 늦춘 초(0~SYNC_ADAPT_MAX_S)
+  let syncAdaptOn = true; // 설정 '버퍼링 시 기준 자동 늦추기'(기본 켬)
+  let syncAdaptCalmSince = 0; // 마지막으로 늦춘(또는 되돌린) 시각 — 되돌림 간격 기준
+  let lastSeekGestureAt = 0; // 재생바·되감기 바·되감기 버튼·방향키 등 위치를 옮기려는 조작 시각
+  let lastPlayerMenuAt = 0; // 화질·설정 메뉴를 누른 시각
   let syncAdaptWatch = null; // { video, until } — 목표 도달 직후 버퍼링 감시
   // 채널별 자동 따라잡기: { [channelId]: true(항상 켜기) | false(항상 끄기) }. 없으면 전체 설정.
   let autoSyncChannels = {};
@@ -8404,16 +8415,66 @@
   function resetSyncAdapt() {
     syncAdaptBoost = 0;
     syncAdaptWatch = null;
+    syncAdaptCalmSince = 0;
   }
   function raiseSyncAdapt() {
     syncAdaptWatch = null;
-    if (syncAdaptBoost >= SYNC_ADAPT_MAX_S) return;
+    if (!syncAdaptOn || syncAdaptBoost >= SYNC_ADAPT_MAX_S) return;
     syncAdaptBoost = Math.min(SYNC_ADAPT_MAX_S, syncAdaptBoost + SYNC_ADAPT_STEP_S);
+    syncAdaptCalmSince = Date.now();
+  }
+  // 늦춘 뒤 한동안(SYNC_ADAPT_DECAY_MS) 버퍼가 바닥나지 않았으면 0.5초씩 원래 기준으로 되돌린다.
+  function decaySyncAdapt() {
+    if (!syncAdaptBoost || !syncAdaptCalmSince) return;
+    if (Date.now() - syncAdaptCalmSince < SYNC_ADAPT_DECAY_MS) return;
+    syncAdaptBoost = Math.max(0, syncAdaptBoost - SYNC_ADAPT_STEP_S);
+    syncAdaptCalmSince = syncAdaptBoost ? Date.now() : 0;
+  }
+  // 위치를 옮기려는 조작·화질/설정 메뉴 조작을 기록한다(되감기 판정·기준 늦추기에 쓴다).
+  //  - 플레이어 안을 누름(재생바·되감기 바·되감기/앞으로 버튼 등). 화질·설정 메뉴, 음량·게인, 우리 메뉴는 빼고 메뉴는 따로 센다.
+  //  - 방향키·Home/End(입력칸 밖)
+  function onSyncGesturePointer(event) {
+    const el = event.target instanceof Element ? event.target : null;
+    if (!el?.closest(".pzp-pc")) return;
+    if (el.closest('[class*="setting"], [class*="quality"], .cheese-quality-button, #cheese-quality-menu')) {
+      lastPlayerMenuAt = Date.now();
+      return;
+    }
+    if (el.closest('.pzp-pc__volume-control, .pzp-pc-volume-control, [data-master-gain], .cheese-sync-menu')) return;
+    lastSeekGestureAt = Date.now();
+    seekPointerHeld = true;
+  }
+  // 재생바·되감기 바를 오래 끌면 seek 는 손을 뗄 때 일어난다 → 플레이어에서 시작한 누름을 떼는 순간도 조작으로 센다.
+  let seekPointerHeld = false;
+  function onSyncGesturePointerUp() {
+    if (!seekPointerHeld) return;
+    seekPointerHeld = false;
+    lastSeekGestureAt = Date.now();
+  }
+  function onSyncGestureKey(event) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const el = event.target instanceof Element ? event.target : null;
+    if (el?.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]')) return;
+    lastSeekGestureAt = Date.now();
+  }
+  let syncGestureBound = false;
+  function bindSyncGestures() {
+    if (syncGestureBound) return;
+    syncGestureBound = true;
+    document.addEventListener("pointerdown", onSyncGesturePointer, true);
+    document.addEventListener("pointerup", onSyncGesturePointerUp, true);
+    document.addEventListener("pointercancel", onSyncGesturePointerUp, true);
+    document.addEventListener("keydown", onSyncGestureKey, true);
   }
   function onSyncWaiting(event) {
     const watch = syncAdaptWatch;
     if (!watch || event.currentTarget !== watch.video) return;
     if (Date.now() > watch.until) {
+      syncAdaptWatch = null;
+      return;
+    }
+    // 화질·설정 메뉴를 막 누른 뒤의 버퍼링은 스트림을 다시 받는 것이지 목표가 바짝이라서가 아니다.
+    if (Date.now() - lastPlayerMenuAt < SYNC_MENU_QUIET_MS) {
       syncAdaptWatch = null;
       return;
     }
@@ -9369,6 +9430,14 @@
     const shortRewind = Date.now() < rewindButtonSeekUntil;
     rewindButtonSeekUntil = 0; // 1회성 소비
     if (Date.now() < ourSeekUntil) return; // 우리가 일으킨 seek → 무시
+    // ⚠ 사용자가 위치를 옮기려고 조작한 직후의 seek 만 본다. 화질을 바꾸면 플레이어가 스트림을 다시 받으며
+    //   seek 가 생기고 그 사이 지연이 늘거나 잴 수 없어(NaN) '되감기'로 잡혀, 자동 따라잡기가 60초 동안
+    //   쉬었다(시작 지연을 넘었는데도 작동하지 않음).
+    const byUser = shortRewind || Date.now() - lastSeekGestureAt < SYNC_SEEK_GESTURE_WINDOW_MS;
+    if (!byUser) {
+      preSeekLatency = NaN;
+      return;
+    }
     const after = getLiveLatencySeconds();
     // 과거로(뒤로) seek = 지연이 의미있게 늘어남. 앞으로/라이브 복귀(지연 감소)는 무시.
     // 측정 불가(NaN)일 땐 보수적으로 차단해 의도치 않은 끌어당김을 막는다.
@@ -9389,6 +9458,7 @@
 
   // video는 채널 이동/재생성될 수 있으므로 매 체크마다 현재 video에 리스너를 보장한다.
   function ensureSeekListener() {
+    bindSyncGestures();
     const video = findVideo();
     if (video === syncSeekVideo) return;
     if (syncSeekVideo) {
@@ -9666,6 +9736,7 @@
       btn.classList.remove("is-stop");
       return;
     }
+    decaySyncAdapt();
     const lat = getLiveLatencySeconds();
     const overThreshold = Number.isFinite(lat) && lat >= syncCfg.enable;
     // 백오프 리셋 판단용: 임계 이상이면 '불안정' 시각을 갱신. 일정 시간 임계 아래로
@@ -9778,7 +9849,11 @@
   // 따라잡기 배속 + 쿨다운 튜닝 적용. content.js 브리지에서 호출.
   //  rate: 1.2/1.5/2/3 (그 외 무시). cooldownEnabled: 쿨다운 사용 여부.
   //  cooldownCustom: {base,max}(초) 또는 null(기본 15~120초).
-  function applySyncTuning(rate, cooldownEnabled, cooldownCustom, mode) {
+  function applySyncTuning(rate, cooldownEnabled, cooldownCustom, mode, adaptive) {
+    // 버퍼링 시 기준 자동 늦추기(기본 켬). 끄면 지금 늦춘 값도 바로 되돌린다.
+    const adaptOn = adaptive !== false;
+    if (!adaptOn && syncAdaptOn) resetSyncAdapt();
+    syncAdaptOn = adaptOn;
     const r = Number(rate);
     if ([1.2, 1.5, 2, 3].includes(r)) SYNC_RATE = r;
     if (mode === "rate" || mode === "jump") SYNC_MODE = mode;
@@ -10803,7 +10878,7 @@
           .join("")
       : "";
     const adaptNote = syncAdaptBoost
-      ? `<br>버퍼링이 있어 이 방송은 ${syncAdaptBoost}초 늦춰 ${syncEnableS()}초 → ${syncTargetS()}초로 따라잡습니다.`
+      ? `<br>버퍼링이 있어 이 방송은 ${syncAdaptBoost}초 늦춰 ${syncEnableS()}초 → ${syncTargetS()}초로 따라잡습니다. 5분 동안 버퍼링이 없으면 0.5초씩 되돌립니다.`
       : "";
     const skipNote = syncSkipMode
       ? "<br>배속 중 끊겨 이 방송은 받아 둔 구간 안에서 건너뛰어 따라잡습니다."
