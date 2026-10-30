@@ -548,6 +548,21 @@ async function bootInBrowser() {
     })()`);
     check(later.foreign === "not all" && later.own === "", "나중에 붙는 치지직 스타일도 끄고 우리 것은 둔다");
     check(later.again === false, "같은 문서에 두 번 세우지 않는다");
+    // 시청 스크립트가 나중에 붙이는 스타일(기간 '직접 선택' 달력)은 우리 것으로 표시해 꺼지지 않아야 한다.
+    // 표시가 없으면 달력이 스타일 없이 페이지 아래에 맨 글자로 붙었다.
+    await evaluate(read("src/searchDateRange.js"));
+    const calendar = await evaluate(`(async()=>{
+      const anchor=document.createElement('button');anchor.textContent='기간';
+      anchor.style.cssText='position:fixed;top:40px;right:40px';document.body.appendChild(anchor);
+      const el=CheeseSearchDateRange.open(anchor,{});
+      await new Promise(r=>setTimeout(r,0));
+      const style=document.getElementById('cheese-search-date-range-style')||[...document.querySelectorAll('style')].find(s=>s.textContent.includes('.cheese-date-range{'));
+      const result={media:style?.media,position:getComputedStyle(el).position,width:el.getBoundingClientRect().width};
+      CheeseSearchDateRange.close();anchor.remove();
+      return result;
+    })()`);
+    check(calendar.media === "" && calendar.position === "fixed" && calendar.width === 300,
+      "치지직 페이지 위 시청 화면에서도 달력 스타일이 꺼지지 않는다 " + JSON.stringify(calendar));
   } finally {
     browser.kill("SIGTERM");
     await new Promise((resolve) => browser.once("close", resolve));

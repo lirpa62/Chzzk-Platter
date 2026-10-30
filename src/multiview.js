@@ -593,7 +593,7 @@
       return;
     }
     if (pager?.loading && !pager.rows.length) {
-      popover.innerHTML = '<div class="mv-video-channel-empty" aria-busy="true">채널을 찾는 중…</div>';
+      popover.innerHTML = `<div aria-busy="true">${CHANNEL_SKELETON_ROW.repeat(3)}</div>`;
       return;
     }
     if (pager?.error && !pager.rows.length) {
@@ -606,7 +606,7 @@
     }
     popover.innerHTML = pager.rows.map(videoChannelCard).join("") +
       (pager.error ? '<button type="button" class="mv-video-channel-more" data-mv-paged-retry="videos">다음 채널 다시 불러오기</button>' :
-        pager.loading ? '<div class="mv-video-channel-empty">더 불러오는 중…</div>' : "");
+        pager.loading ? CHANNEL_SKELETON_ROW.repeat(2) : "");
   }
 
   async function renderList() {
@@ -623,7 +623,7 @@
       const query = keyword.trim();
       const popover = $("mvVideoChannelPopover");
       popover.hidden = !query;
-      popover.innerHTML = query ? '<div class="mv-video-channel-empty" aria-busy="true">채널을 찾는 중…</div>' : "";
+      popover.innerHTML = query ? `<div aria-busy="true">${CHANNEL_SKELETON_ROW.repeat(3)}</div>` : "";
       $("mvVideoChannelSearchInput").setAttribute("aria-expanded", String(Boolean(query)));
     }
     $("mvSort").disabled = true;
@@ -653,6 +653,9 @@
 
   // 불러오는 동안 보여 줄 빈 카드. 실제 카드와 같은 모양이라 다 불러왔을 때
   // 자리가 밀리지 않는다.
+  // 채널 찾기 창이 받는 동안 보이는 줄(글 대신 스켈레톤)
+  const CHANNEL_SKELETON_ROW = '<div class="mv-channel-skeleton-row" aria-hidden="true"><span class="mv-sk-avatar"></span><span class="mv-sk-line"></span></div>';
+
   function skeletonCards(count = 8, source = "") {
     const customFollowing = source === "custom";
     const one = customFollowing
@@ -735,11 +738,22 @@
     const section = $("mvChannelList")?.querySelector(".mv-section");
     if (!section) return;
     section.querySelector(".mv-live-more")?.remove();
+    section.querySelectorAll(".mv-paged-skeleton").forEach((card) => card.remove());
+    section.querySelector(".mv-cards")?.removeAttribute("aria-busy");
     if (!loading && !failed) return;
+    // 다음 묶음을 받는 동안은 목록 끝에 스켈레톤 카드(글 대신), 실패하면 다시 불러오기 버튼
+    if (loading && !failed) {
+      const cards = section.querySelector(".mv-cards");
+      if (cards) {
+        cards.insertAdjacentHTML("beforeend", skeletonCards(source === "videos" ? 3 : 4, source).replace(/class="mv-card is-skeleton/g, 'class="mv-card is-skeleton mv-paged-skeleton'));
+        cards.setAttribute("aria-busy", "true");
+        return;
+      }
+    }
     const status = document.createElement(failed ? "button" : "div");
     if (failed) status.type = "button";
     status.className = "mv-live-more";
-    status.textContent = failed ? "다음 목록 다시 불러오기" : source === "videos" ? "다시보기를 불러오는 중..." : "다음 방송을 불러오는 중...";
+    status.textContent = failed ? "다음 목록 다시 불러오기" : "";
     if (failed) status.dataset.mvPagedRetry = source;
     section.appendChild(status);
   }
@@ -779,18 +793,12 @@
     requestAnimationFrame(maybeLoadMorePaged);
   }
 
-  function onSetupVideoRerankChange({ pager, poolChanged, updatePager }) {
-    if (poolChanged) {
-      state.videoRerankPager = null;
-      state.videoRerankKeyword = "";
-      if (state.source === "videos" && state.videoSource === "platter-search") void renderList();
-      return;
-    }
-    if (updatePager === false) return;
-    if (state.source === "videos" && state.videoSource === "platter-search" &&
-      pager && pager === state.videoRerankPager) {
-      insertSortedPageRows("videos", pager.rows);
-    }
+  // 정렬·길이를 바꾸면 서버에 처음부터 다시 묻는다(검색 결과는 서버가 정렬한다).
+  function onSetupVideoRerankChange({ reload }) {
+    if (!reload) return;
+    state.videoRerankPager = null;
+    state.videoRerankKeyword = "";
+    if (state.source === "videos" && state.videoSource === "platter-search") void renderList();
   }
 
   async function loadMoreLive() {

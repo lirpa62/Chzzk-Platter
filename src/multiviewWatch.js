@@ -4091,7 +4091,9 @@
       if (
         quickPanel &&
         !quickPanel.hidden &&
-        !target.closest?.("#mvQuick, #mvBack, .mv-sort-options")
+        // 기간 '직접 선택' 달력(.cheese-date-range)은 body 에 붙지만 패널에서 연 것이다 — 날짜를 누르면 패널이
+        // 닫혀 달력만 시청 화면 위에 남았다.
+        !target.closest?.("#mvQuick, #mvBack, .mv-sort-options, .cheese-date-range")
       )
         closeQuick();
     },
@@ -7935,7 +7937,7 @@
     }
     if (quickCandidates === null) {
       popover.setAttribute("aria-busy", "true");
-      popover.innerHTML = '<div class="mv-video-channel-empty">채널을 찾는 중…</div>'.repeat(3);
+      popover.innerHTML = '<div class="mv-channel-skeleton-row" aria-hidden="true"><span class="mv-sk-avatar"></span><span class="mv-sk-line"></span></div>'.repeat(3);
       return;
     }
     popover.removeAttribute("aria-busy");
@@ -7949,7 +7951,7 @@
     }
     popover.innerHTML = quickCandidates.map(quickVideoChannelCard).join("") +
       (pager?.error ? '<button type="button" class="mv-video-channel-more" data-mv-quick-retry="1">다음 채널 다시 불러오기</button>' :
-        pager?.loading ? '<div class="mv-video-channel-empty">더 불러오는 중…</div>' : "");
+        pager?.loading ? '<div class="mv-channel-skeleton-row" aria-hidden="true"><span class="mv-sk-avatar"></span><span class="mv-sk-line"></span></div>'.repeat(2) : "");
   }
 
   function syncQuickPagedRetry() {
@@ -8214,19 +8216,12 @@
     requestAnimationFrame(maybeLoadMoreQuickCandidates);
   }
 
-  function onQuickVideoRerankChange({ pager, poolChanged, updatePager }) {
-    if (poolChanged) {
-      quickVideoRerankPager = null;
-      quickVideoRerankPagerKeyword = "";
-      if (quickSource === "videos" && quickVideoSource === "platter-search") void loadQuickCandidates();
-      return;
-    }
-    if (updatePager === false) return;
-    if (quickSource === "videos" && quickVideoSource === "platter-search" &&
-      pager && pager === quickVideoRerankPager) {
-      quickCandidates = pager.rows;
-      renderQuickCandidates();
-    }
+  // 정렬·길이를 바꾸면 서버에 처음부터 다시 묻는다(검색 결과는 서버가 정렬한다).
+  function onQuickVideoRerankChange({ reload }) {
+    if (!reload) return;
+    quickVideoRerankPager = null;
+    quickVideoRerankPagerKeyword = "";
+    if (quickSource === "videos" && quickVideoSource === "platter-search") void loadQuickCandidates();
   }
 
   // 이미지 주소는 API 가 준 문자열이다. http(s) 가 아니면 쓰지 않는다.

@@ -229,7 +229,9 @@ const checks = [];
         }
         return {data:channels.map((c,index)=>({channel:{...c,openLive:true,verifiedMark:index===0}}))};
       }
-      if(p.endsWith('/search/videos'))return {data:[{
+      if(p.endsWith('/search/videos')){
+        window.__videoSearch=(window.__videoSearch||[]).concat(parsed.search);
+        const rows=[{
         video:{videoNo:'901',videoTitle:'검색어 재정렬 업로드',videoType:'UPLOAD',readCount:500,
           livePv:12345,publishDateAt:Date.now()-3*60*60*1000,duration:466},
         channel:{...channels[2],verifiedMark:true},
@@ -237,7 +239,10 @@ const checks = [];
         video:{videoNo:'902',videoTitle:'검색어 인기 업로드',videoType:'UPLOAD',readCount:1800,
           livePv:67890,publishDateAt:Date.now()-4*60*60*1000,duration:930},
         channel:{...channels[1],verifiedMark:true},
-      }]};
+      }];
+        // 정렬은 서버가 한다: 재생수순이면 902 가 먼저
+        return {data:parsed.searchParams.get('sort')==='PLAY_COUNT_DESC'?rows.reverse():rows};
+      }
       // 카테고리·태그 라이브(다음 묶음은 concurrentUserCount·liveId 짝)와 카테고리 찾기.
       if(p==='/service/v2/categories/GAME/talk_game/lives'){
         (window.__categoryCalls=window.__categoryCalls||[]).push(parsed.search);
@@ -1043,9 +1048,10 @@ const checks = [];
      check(document.getElementById('mvVideoRerankSearchInput').value==='',
        '채널 검색어가 치즈 플래터 재정렬 검색칸으로 복사된다');
      const rerankControls=document.querySelector('[data-mv-video-rerank-controls="setup"]');
-     check(rerankControls.querySelector('.cheese-search-control.cheese-search-sort-trigger')&&
-       rerankControls.querySelector('.cheese-search-options'),
-       '재정렬 정렬/설정 컨트롤이 통합 검색 스타일로 표시되지 않는다');
+     check(rerankControls.querySelector('[data-video-search-trigger="sort"].cheese-search-sort-trigger')&&
+       rerankControls.querySelector('[data-video-search-trigger="time"]')&&
+       !rerankControls.querySelector('.cheese-search-options'),
+       '다시보기 검색 정렬·길이 고르기가 표시되지 않는다(예전 재정렬 설정은 없어야 한다)');
      check(getComputedStyle(rerankControls).justifyContent==='flex-end',
        '재정렬 정렬/설정 컨트롤이 오른쪽 끝에 정렬되지 않는다');
      const rerankInput=document.getElementById('mvVideoRerankSearchInput');rerankInput.value='검색어';rerankInput.dispatchEvent(new Event('input',{bubbles:true}));await wait(350);
@@ -1066,32 +1072,31 @@ const checks = [];
      check(Number(getComputedStyle(document.getElementById('mvVideoRerankSearch')).zIndex)>
        Number(getComputedStyle(rerankCard.querySelector('.mv-card-badge-row')).zIndex),
        '재정렬 컨트롤 영역이 썸네일 배지보다 위 레이어에 있지 않는다');
-     const sortTrigger=rerankControls.querySelector('[data-video-rerank-sort-trigger]');
+     check(window.__videoSearch.at(-1).includes('sort=RELEVANCE_DESC')&&window.__videoSearch.at(-1).includes('playTime=ALL'),
+       '다시보기 검색이 기본 정렬·길이(관련순·전체)로 v2 API 를 부르지 않는다');
+     const sortTrigger=rerankControls.querySelector('[data-video-search-trigger="sort"]');
      sortTrigger.click();
-     check(!rerankControls.querySelector('.cheese-search-sort-menu').hidden,
-       '재정렬 정렬 메뉴가 열리지 않는다');
-     rerankControls.querySelector('[data-video-rerank-sort="read"]').click();
-     check(sortTrigger.textContent.trim()==='인기순','재정렬 결과 정렬 선택이 반영되지 않는다');
+     check(!rerankControls.querySelector('[data-video-search-picker="sort"] .cheese-search-sort-menu').hidden,
+       '정렬 메뉴가 열리지 않는다');
+     rerankControls.querySelector('[data-video-search-sort="PLAY_COUNT_DESC"]').click();await wait(200);
+     check(sortTrigger.textContent.trim()==='재생수순'&&sortTrigger.classList.contains('is-filtered'),'정렬 선택이 반영되지 않는다');
+     check(window.__videoSearch.at(-1).includes('sort=PLAY_COUNT_DESC'),'정렬을 바꾸면 서버에 다시 묻지 않는다');
      check(list.querySelector('.mv-cards [data-mv-pick="video:902"]')===list.querySelector('.mv-cards').firstElementChild,
-       '정렬 변경 직후 채널 목록 카드 순서가 갱신되지 않는다');
-     const sortMenu=rerankControls.querySelector('.cheese-search-sort-menu');
+       '정렬 변경 뒤 서버가 준 순서로 카드가 다시 그려지지 않는다');
+     check(window.localStore.cheeseVideoSearchOptions?.sort==='PLAY_COUNT_DESC','고른 정렬을 기억하지 않는다');
+     const sortMenu=rerankControls.querySelector('[data-video-search-picker="sort"] .cheese-search-sort-menu');
      const pickedProbe=document.createElement('span');pickedProbe.className='mv-card-picked';
      rerankCard.querySelector('.mv-card-thumb').appendChild(pickedProbe);
      check(Number(getComputedStyle(sortMenu).zIndex)>
        Number(getComputedStyle(pickedProbe).zIndex),
        '정렬 팝오버가 선택됨 배지보다 위에 표시되지 않는다');
      pickedProbe.remove();
-     rerankControls.querySelector('[data-video-rerank-options-trigger]').click();
-     check(!rerankControls.querySelector('.cheese-search-options-popover').hidden&&
-       rerankControls.querySelector('[data-video-rerank-pool]').value==='200',
-       '재정렬 설정 팝오버가 기존 저장값으로 열리지 않는다');
-     check(Number(getComputedStyle(rerankControls.querySelector('.cheese-search-options-popover')).zIndex)>
-       Number(getComputedStyle(rerankCard.querySelector('.mv-card-live-pv')).zIndex),
-       '재정렬 설정 팝오버가 썸네일 지표보다 위에 표시되지 않는다');
-     const relWeight=rerankControls.querySelector('[data-video-rerank-weight="rel"]');
-     relWeight.value='44';relWeight.dispatchEvent(new Event('change',{bubbles:true}));await wait(50);
-     check(window.localStore.cheeseSearchRerankWeights.rel===44,
-       '재정렬 가중치가 기존 설정 저장소에 저장되지 않는다');
+     const timeTrigger=rerankControls.querySelector('[data-video-search-trigger="time"]');
+     timeTrigger.click();
+     rerankControls.querySelector('[data-video-search-time="OVER_3_HOURS"]').click();await wait(200);
+     check(timeTrigger.textContent.trim()==='3시간 이상'&&window.__videoSearch.at(-1).includes('playTime=OVER_3_HOURS'),
+       '영상 길이를 고르면 그 길이로 다시 묻지 않는다');
+     window.localStore.cheeseVideoSearchOptions={sort:'RELEVANCE_DESC',playTime:'ALL'};
      check(document.querySelector('[data-mv-video-source="popular"]').dataset.tooltip==='모든 방송에서 인기 정렬',
        '인기 정렬 툴팁 설명이 없다');
      document.querySelector('[data-mv-source="following"]').click();await wait(150);`,
@@ -1648,13 +1653,17 @@ const checks = [];
           }]}};
           return {ok:true,content:{data:[]}};
         }
-        if(parsed.pathname.endsWith('/service/v1/search/videos'))return {ok:true,content:{data:[{
-          video:{videoNo:'901',videoTitle:'검색어 재정렬 업로드',videoType:'UPLOAD',readCount:500},
-          channel:{...quickChannels[2],verifiedMark:true},
-        },{
-          video:{videoNo:'902',videoTitle:'검색어 인기 업로드',videoType:'UPLOAD',readCount:1800},
-          channel:{...quickChannels[1],verifiedMark:true},
-        }]}};
+        if(parsed.pathname.endsWith('/service/v2/search/videos')){
+          window.__quickVideoSearch=(window.__quickVideoSearch||[]).concat(parsed.search);
+          const rows=[{
+            video:{videoNo:'901',videoTitle:'검색어 재정렬 업로드',videoType:'UPLOAD',readCount:500},
+            channel:{...quickChannels[2],verifiedMark:true},
+          },{
+            video:{videoNo:'902',videoTitle:'검색어 인기 업로드',videoType:'UPLOAD',readCount:1800},
+            channel:{...quickChannels[1],verifiedMark:true},
+          }];
+          return {ok:true,content:{data:parsed.searchParams.get('sort')==='PLAY_COUNT_DESC'?rows.reverse():rows}};
+        }
         if(parsed.pathname==='/service/v2/categories/GAME/talk_game/lives'){
           (window.__quickCategoryCalls=window.__quickCategoryCalls||[]).push(parsed.search);
           return {ok:true,content:{data:[0,1].map(i=>({liveId:900+i,liveTitle:'퀵 카테고리 방송 '+i,concurrentUserCount:90-i,
@@ -1784,6 +1793,7 @@ const checks = [];
   await evaluate(readFileSync("src/multiviewDiagnostics.js", "utf8"));
   // multiviewWatch.html 과 같은 순서로 싣는다. 빠지면 시청 페이지가 시작하자마자 멈춰
   // 뒤의 검사가 모두 실행되지 않는다(다시보기 로컬 채팅·배지 모아보기·업적 배지 표).
+  await evaluate(readFileSync("src/searchDateRange.js", "utf8"));
   await evaluate(readFileSync("src/achievementBadgeMap.js", "utf8"));
   await evaluate(readFileSync("src/replayLocalChat.js", "utf8"));
   await evaluate(readFileSync("src/multiviewVodChat.js", "utf8"));
@@ -2157,9 +2167,10 @@ const checks = [];
      check(document.getElementById('mvQuickVideoRerankSearchInput').value==='',
        '채널 검색어가 Quick 재정렬 검색칸으로 복사된다');
      const quickRerankControls=document.querySelector('[data-mv-video-rerank-controls="quick"]');
-     check(quickRerankControls.querySelector('.cheese-search-control.cheese-search-sort-trigger')&&
-       quickRerankControls.querySelector('.cheese-search-options'),
-       'Quick 재정렬 정렬/설정 컨트롤이 표시되지 않는다');
+     check(quickRerankControls.querySelector('[data-video-search-trigger="sort"].cheese-search-sort-trigger')&&
+       quickRerankControls.querySelector('[data-video-search-trigger="time"]')&&
+       !quickRerankControls.querySelector('.cheese-search-options'),
+       'Quick 다시보기 검색 정렬·길이 고르기가 표시되지 않는다');
      check(getComputedStyle(quickRerankControls).justifyContent==='flex-end',
        'Quick 재정렬 컨트롤이 오른쪽 끝에 정렬되지 않는다');
      const rerank=document.getElementById('mvQuickVideoRerankSearchInput');rerank.value='검색어';rerank.dispatchEvent(new Event('input',{bubbles:true}));await wait(350);
@@ -2173,10 +2184,10 @@ const checks = [];
        'Quick 재정렬 컨트롤 영역이 썸네일 배지보다 위 레이어에 있지 않다');
      check(!reranked.classList.contains('mv-custom-tooltip'),
        'Quick 후보 카드에 커스텀 툴팁이 남아 있다');
-     const quickSortTrigger=quickRerankControls.querySelector('[data-video-rerank-sort-trigger]');
+     const quickSortTrigger=quickRerankControls.querySelector('[data-video-search-trigger="sort"]');
      quickSortTrigger.click();
-     quickRerankControls.querySelector('[data-video-rerank-sort="read"]').click();
-     check(quickSortTrigger.textContent.trim()==='인기순'&&
+     quickRerankControls.querySelector('[data-video-search-sort="PLAY_COUNT_DESC"]').click();await wait(250);
+     check(quickSortTrigger.textContent.trim()==='재생수순'&&window.__quickVideoSearch.at(-1).includes('sort=PLAY_COUNT_DESC')&&
        quick.querySelector('#mvQuickAdd [data-mv-quick-add="video:902"]')===
          quick.querySelector('#mvQuickAdd').firstElementChild,
        'Quick에서 정렬 변경 직후 후보 카드 순서가 갱신되지 않는다');
@@ -3126,6 +3137,30 @@ const checks = [];
      check(resync.length===1,'준비 후 상태 재전송이 없다('+resync.length+'회)');
      const isMain=cell.classList.contains('is-main');
      check(resync[0].data.muted===!isMain,'재전송한 음소거 상태가 현재와 다르다');`,
+  );
+
+  // 기간 '직접 선택' 달력: 채널 관리 패널 안에서만 보이고, 달력을 눌러도 패널이 닫히지 않는다.
+  // ⚠ 칸 덮개 시험(프레임 준비 신호 20초 안)보다 뒤에 둔다 — 다시보기 검색으로 바꾸면 결과를 불러오느라 시간이 걸린다.
+  await test(
+    "직접 선택 달력은 채널 관리 패널 안에 열리고 눌러도 패널이 닫히지 않는다",
+    `const quick=document.getElementById('mvQuick');
+     if(quick.hidden){document.getElementById('mvBack').click();await wait(150);}
+     quick.querySelector('[data-mv-quick-source="videos"]').click();await wait(100);
+     quick.querySelector('[data-mv-quick-video-source="platter-search"]').click();await wait(150);
+      const trig=quick.querySelector('[data-video-search-trigger="period"]');
+      trig.click();await wait(0);
+      trig.closest('[data-video-search-picker]').querySelector('[data-video-search-period="CUSTOM"]').click();await wait(20);
+      const cal=document.querySelector('.cheese-date-range');
+      check(cal,'채널 관리 패널에서 직접 선택 달력이 열리지 않았다');
+      const c=cal.getBoundingClientRect(),q=quick.getBoundingClientRect();
+      check(c.top>=q.top-1&&c.bottom<=q.bottom+1&&c.left>=q.left-1&&c.right<=q.right+1,
+        '직접 선택 달력이 채널 관리 패널 밖으로 나간다: '+JSON.stringify([c.top,c.bottom,q.top,q.bottom]));
+      cal.querySelector('button:not(:disabled)').click();await wait(0);
+      check(!quick.hidden,'달력을 누르면 채널 관리 패널이 닫힌다');
+      document.querySelector('.cheese-date-range [data-dr-close]').click();await wait(0);
+      check(!document.querySelector('.cheese-date-range')&&!quick.hidden,'달력 닫기 버튼으로 달력만 닫히지 않는다');
+      quick.querySelector('[data-mv-quick-video-source="following"]').click();await wait(20);
+      document.getElementById('mvQuickClose').click();`,
   );
 
   await test(

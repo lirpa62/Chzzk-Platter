@@ -450,7 +450,10 @@
       // ⚠ aria-hidden 을 두면 마우스로 누를 때 포커스가 숨긴 링크에 가서 경고가 난다. Tab 순서에서만 빼고 이름을 준다.
       `<a class="pl-thumb${item.adult ? " is-adult" : ""}" href="${esc(url)}" target="_blank" rel="noopener" tabindex="-1" aria-label="${esc(`${itemTitle(item)} 썸네일`)}">${thumb}${kindBadgeHtml(item.type === "clip")}${duration}</a>` +
       `<div class="pl-item-body">` +
-      `<a class="pl-item-title" href="${esc(url)}" target="_blank" rel="noopener" title="${esc(item.title)}">${esc(itemTitle(item))}</a>` +
+      // 정보를 받는 중이면 글 대신 스켈레톤 줄(이름은 화면 읽기용으로 남긴다)
+      (itemTitle(item) === "정보를 불러오는 중…"
+        ? `<a class="pl-item-title is-loading" href="${esc(url)}" target="_blank" rel="noopener" aria-busy="true"><span class="pl-sr-only">정보를 불러오는 중</span><span class="pl-sk-line" aria-hidden="true"></span></a>`
+        : `<a class="pl-item-title" href="${esc(url)}" target="_blank" rel="noopener" title="${esc(item.title)}">${esc(itemTitle(item))}</a>`) +
       `<div class="pl-item-sub"><span class="pl-sr-only">${item.type === "clip" ? "클립" : "다시보기"}</span>` +
       (item.channelName ? `<span class="pl-item-channel"><span class="pl-item-channel-name">${esc(item.channelName)}</span>${verifiedHtml(item)}</span>` : "") +
       start +
@@ -782,7 +785,8 @@
     const meta = urlMeta.get(S.itemKey(item));
     const info = meta && typeof meta === "object" ? meta : {};
     const clip = item.type === "clip";
-    const title = info.title || (meta === "loading" || meta === undefined ? "불러오는 중…" : "정보를 찾지 못했습니다. 주소를 확인해 주세요.");
+    const loading = !info.title && (meta === "loading" || meta === undefined);
+    const title = info.title || (loading ? "" : "정보를 찾지 못했습니다. 주소를 확인해 주세요.");
     const thumb = info.thumb ? `<img src="${esc(info.thumb)}" alt="" referrerpolicy="no-referrer">` : "";
     const start = clip ? "" :
       `<span class="pl-url-start"><label class="pl-start">시작 <input type="text" inputmode="numeric" data-url-start data-clock-max="${info.duration > 0 ? info.duration - 1 : ""}" value="${item.start ? esc(S.formatClock(item.start)) : ""}" ` +
@@ -791,7 +795,10 @@
       `<li class="pl-url-card${clip ? " is-clip" : ""}${meta === null ? " is-missing" : ""}" data-line="${row.line}">` +
       `<span class="pl-card-thumb${info.adult ? " is-adult" : ""}"${clip ? ` data-uid="${esc(item.clipUID)}"` : ""}>${thumb}${kindBadgeHtml(clip)}` +
       (info.duration ? `<span class="pl-card-duration">${esc(S.formatClock(info.duration))}</span>` : "") + `</span>` +
-      `<span class="pl-url-body"><span class="pl-card-title">${esc(title)}</span>` +
+      `<span class="pl-url-body">` +
+      (loading
+        ? `<span class="pl-card-title" aria-busy="true"><span class="pl-sr-only">불러오는 중</span><span class="pl-sk-line" aria-hidden="true"></span><span class="pl-sk-line is-short" aria-hidden="true"></span></span>`
+        : `<span class="pl-card-title">${esc(title)}</span>`) +
       (info.channelName
         ? `<span class="pl-card-name-row">${profileHtml(info.channelImageUrl)}<span class="pl-card-name">${esc(info.channelName)}</span>` +
           verifiedHtml(info) + `</span>`
@@ -1147,6 +1154,12 @@
     clipItems: [],
     clipCursor: null,
     clipNext: "", // 인기 클립 이어 받기 값(응답이 준다)
+    clipSearchQuery: "",
+    clipSearchSort: "RELEVANCE_DESC",
+    clipSearchPeriod: "ALL",
+    clipSearchStart: "", // 직접 고른 기간(KST "YYYY-MM-DD")
+    clipSearchEnd: "",
+    clipSearchNext: null, // 클립 검색 다음 offset(치지직은 1,000개까지)
     clipPeriod: "WITHIN_1_DAY",
     clipRank: "RECOMMEND",
     clipToken: 0,
@@ -1169,6 +1182,7 @@
   function clipHasMore() {
     if (add.clipSource === "channel") return Boolean(add.clipChannel && add.clipCursor);
     if (add.clipSource === "popular") return Boolean(add.clipNext);
+    if (add.clipSource === "search") return add.clipSearchNext != null;
     return false;
   }
   function maybeLoadMoreClips() {
@@ -1215,12 +1229,27 @@
     return Number.isFinite(at) ? at : 0;
   }
 
+  const PLAY_SVG = '<svg width="10" height="11" viewBox="0 0 9 10" fill="none" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.23 1.29C2.7.95 2 1.33 2 1.97v6.07c0 .63.7 1.01 1.23.67l4.72-3.03a.8.8 0 0 0 0-1.36L3.23 1.29Z" stroke="currentColor"/></svg>';
   function resultsHtml(items) {
     const list = currentList();
     return items.map((item, index) => {
       const inList = S.listContains(list, S.itemKey(item));
       const thumb = item.thumb ? `<img src="${esc(item.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : "";
       const label = `${item.title || "제목 없음"} — ${inList ? "담김, 누르면 뺍니다" : "누르면 담습니다"}`;
+      if (item.overlay) {
+        const views = Number(item.views) > 0 ? Number(item.views).toLocaleString() : "";
+        return (
+          `<li><button type="button" class="pl-card is-clip is-overlay${inList ? " is-on" : ""}" data-result="${index}" ` +
+          `aria-pressed="${inList}" aria-label="${esc(label)}">` +
+          `<span class="pl-card-thumb${item.adult ? " is-adult" : ""}" data-uid="${esc(item.clipUID)}">${thumb}` +
+          (inList ? `<span class="pl-card-picked">${CHECK_SVG}<span>담김</span></span>` : "") +
+          `<span class="pl-card-overlay">` +
+          `<span class="pl-card-title" title="${esc(item.title)}">${esc(item.title || "제목 없음")}</span>` +
+          (item.channelName ? `<span class="pl-card-overlay-name">${esc(item.channelName)}</span>` : "") +
+          (views ? `<span class="pl-card-overlay-views">${PLAY_SVG}<span class="pl-sr-only">재생 수</span>${esc(views)}</span>` : "") +
+          `</span></span></button></li>`
+        );
+      }
       return (
         `<li><button type="button" class="pl-card${item.type === "clip" ? " is-clip" : ""}${inList ? " is-on" : ""}" data-result="${index}" ` +
         `aria-pressed="${inList}" aria-label="${esc(label)}">` +
@@ -1360,12 +1389,34 @@
     });
   }
 
+  // ── 스켈레톤 ── 불러오는 동안 글 대신 카드·줄 자리를 보인다. 처음이면 목록을 채우고, 이어 받을 때는 끝에 붙인다
+  // (다 받으면 다시 그려 사라진다). 화면 읽기용으로는 목록에 aria-busy.
+  const SKELETON_CARD =
+    `<li class="pl-skeleton-item" aria-hidden="true"><div class="pl-card is-skeleton"><span class="pl-card-thumb"></span>` +
+    `<span class="pl-card-body"><span class="pl-sk-avatar"></span><span class="pl-card-text"><span class="pl-sk-line"></span>` +
+    `<span class="pl-sk-line is-short"></span></span></span></div></li>`;
+  function showResultSkeleton(list, { clip = false, first = true } = {}) {
+    list.querySelectorAll(".pl-skeleton-item").forEach((item) => item.remove());
+    const html = (clip ? SKELETON_CARD.replace("pl-card is-skeleton", "pl-card is-skeleton is-clip") : SKELETON_CARD).repeat(first ? 6 : 3);
+    if (first) list.innerHTML = html;
+    else list.insertAdjacentHTML("beforeend", html);
+    list.setAttribute("aria-busy", "true");
+  }
+  function skeletonRowsHtml(count, tag = "li") {
+    return `<${tag} class="pl-skeleton-row" aria-hidden="true"><span class="pl-sk-avatar"></span><span class="pl-sk-line"></span></${tag}>`.repeat(count);
+  }
+
   function renderResults() {
     // 이미 받아 둔 채널 정보(다른 탭에서 받은 것 포함)는 그릴 때마다 채운다.
     add.videoItems = add.videoItems.map(withChannelInfo);
     add.clipItems = add.clipItems.map(withChannelInfo);
     $("plVideoResults").innerHTML = resultsHtml(add.videoItems);
     $("plClipResults").innerHTML = resultsHtml(add.clipItems);
+    $("plVideoResults").removeAttribute("aria-busy");
+    $("plClipResults").removeAttribute("aria-busy");
+    // 다른 쪽을 다시 그리는 동안에도 받는 중인 목록은 스켈레톤을 유지한다
+    if (add.videoBusy) showResultSkeleton($("plVideoResults"), { first: !add.videoItems.length });
+    if (add.clipBusy) showResultSkeleton($("plClipResults"), { clip: true, first: !add.clipItems.length });
     $("plClipResults").querySelectorAll(".pl-card-thumb[data-uid]").forEach((thumb) => {
       if (clipOrientation.has(thumb.dataset.uid)) applyClipOrientation(thumb, clipOrientation.get(thumb.dataset.uid));
     });
@@ -1418,9 +1469,10 @@
     }
     const status = $("plVideoStatus");
     status.classList.remove("is-error");
-    status.textContent = "불러오는 중…";
+    status.textContent = "";
     add.videoBusy = true;
     add.videoHasMore = false;
+    showResultSkeleton($("plVideoResults"), { first: !add.videoItems.length });
     let snap;
     try {
       snap = first ? await add.videoPager.loadFirst(true) : await add.videoPager.loadNext();
@@ -1428,7 +1480,7 @@
       if (token === add.videoToken) add.videoBusy = false;
     }
     if (token !== add.videoToken) return;
-    // 검색 결과는 재정렬 pager 가 고른 정렬(추천·인기·최신…)대로 온다.
+    // 검색 결과는 고른 정렬·길이로 서버가 준 순서 그대로다.
     add.videoItems = add.videoPager.rows.map(videoItemFromRow).filter((item) => item.videoNo);
     renderResults();
     if (snap.error) {
@@ -1504,6 +1556,35 @@
     };
   }
 
+  // 클립 검색(치지직 검색 화면의 클립 탭과 같은 API). 정렬 3가지, 기간은 프리셋(지금부터 거슬러) 또는 달력에서
+  // 직접 고른 날짜(src/searchDateRange.js)를 KST 로 넘긴다.
+  // ⚠ 결과에 채널 ID·프로필·인증 마크·날짜가 없다(채널 이름만). 담으면 배경 정보로 채널을 채운다.
+  const DATE_RANGE = globalThis.CheeseSearchDateRange;
+  const CLIP_SEARCH_PERIODS = ["ALL", "DAY", "WEEK", "MONTH", "HALF_YEAR", "CUSTOM"];
+  const CLIP_SEARCH_MAX_OFFSET = 1000;
+  async function fetchSearchClips(offset) {
+    const url = new URL(`${SOURCES.API}/service/v1/search/clips`);
+    url.searchParams.set("keyword", add.clipSearchQuery);
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("size", String(CLIP_PAGE_SIZE));
+    url.searchParams.set("sort", add.clipSearchSort);
+    const range = DATE_RANGE?.apiRange(add.clipSearchPeriod, add.clipSearchStart, add.clipSearchEnd);
+    if (range) {
+      url.searchParams.set("startDate", range.startDate);
+      url.searchParams.set("endDate", range.endDate);
+    }
+    const content = await SOURCES.getJson(url.toString());
+    const rows = (Array.isArray(content?.data) ? content.data : [])
+      .filter((row) => !row?.blindType && row?.privateUserBlock !== true);
+    const next = Number(content?.page?.next?.offset);
+    return {
+      // 채널 프로필·마크를 모르므로 치지직 클립 카드처럼 썸네일 위에 제목·채널·재생수를 겹쳐 보인다
+      items: rows.map((row) => ({ ...clipItemFromRow(row), overlay: true })).filter((item) => item.clipUID),
+      next: Number.isSafeInteger(next) && next > offset && next < CLIP_SEARCH_MAX_OFFSET && (content?.data || []).length ? next : null,
+      total: Number(content?.total) || 0,
+    };
+  }
+
   async function loadClips(first) {
     if (!SOURCES) return;
     add.clipLoaded = true;
@@ -1517,9 +1598,41 @@
       renderResults();
       $("plClipResults").scrollTop = 0;
     }
-    if (add.clipSource === "popular") {
-      status.textContent = "불러오는 중…";
+    if (add.clipSource === "search") {
+      if (first) add.clipSearchNext = null;
+      if (!add.clipSearchQuery) {
+        status.textContent = "검색어를 넣고 검색하면 클립을 찾습니다.";
+        return;
+      }
+      status.textContent = "";
       add.clipBusy = true;
+      showResultSkeleton($("plClipResults"), { clip: true, first: !add.clipItems.length });
+      try {
+        const page = await fetchSearchClips(first ? 0 : add.clipSearchNext || 0).finally(() => {
+          if (token === add.clipToken) add.clipBusy = false;
+        });
+        if (token !== add.clipToken) return;
+        const seen = new Set(add.clipItems.map((item) => item.clipUID));
+        add.clipItems = [...add.clipItems, ...page.items.filter((item) => !seen.has(item.clipUID))];
+        add.clipSearchNext = page.next;
+        renderResults();
+        // 전체가 더 많으면 '/ 약 N개'(치지직은 1,000개까지만 준다)
+        const total = Math.min(page.total, CLIP_SEARCH_MAX_OFFSET);
+        status.textContent = add.clipItems.length
+          ? `${add.clipItems.length}개${total > add.clipItems.length ? ` / 약 ${total.toLocaleString()}개` : ""}`
+          : "검색 결과가 없습니다.";
+        maybeLoadMoreClips();
+      } catch (error) {
+        if (token !== add.clipToken) return;
+        status.textContent = loadErrorText(error);
+        status.classList.add("is-error");
+      }
+      return;
+    }
+    if (add.clipSource === "popular") {
+      status.textContent = "";
+      add.clipBusy = true;
+      showResultSkeleton($("plClipResults"), { clip: true, first: !add.clipItems.length });
       try {
         const page = await fetchPopularClips(first ? "" : add.clipNext).finally(() => {
           if (token === add.clipToken) add.clipBusy = false;
@@ -1550,8 +1663,9 @@
       status.textContent = "채널을 찾아 고르면 그 채널의 클립이 나옵니다.";
       return;
     }
-    status.textContent = "불러오는 중…";
+    status.textContent = "";
     add.clipBusy = true;
+    showResultSkeleton($("plClipResults"), { clip: true, first: !add.clipItems.length });
     try {
       const page = await fetchChannelClips(add.clipChannel, first ? null : add.clipCursor).finally(() => {
         if (token === add.clipToken) add.clipBusy = false;
@@ -1577,11 +1691,15 @@
     const box = $("plClipChannels");
     const status = $("plClipStatus");
     status.classList.remove("is-error");
-    status.textContent = "채널 찾는 중…";
+    status.textContent = "";
+    box.hidden = false;
+    box.innerHTML = skeletonRowsHtml(4);
+    box.setAttribute("aria-busy", "true");
     try {
       const page = await SOURCES.searchChannelsPage(keyword, 0);
       if (token !== clipChannelSearchToken) return;
       add.channelRows = page.rows;
+      box.removeAttribute("aria-busy");
       box.innerHTML = page.rows.map((row, index) =>
         `<li><button type="button" data-channel="${index}">` +
         // 프로필이 없으면 기본 프로필(다시보기 채널 찾기와 같다)
@@ -1591,6 +1709,9 @@
       status.textContent = page.rows.length ? "클립을 볼 채널을 고르세요." : "채널을 찾지 못했습니다.";
     } catch (error) {
       if (token !== clipChannelSearchToken) return;
+      box.removeAttribute("aria-busy");
+      box.innerHTML = "";
+      box.hidden = true;
       status.textContent = loadErrorText(error);
       status.classList.add("is-error");
     }
@@ -1656,23 +1777,23 @@
     void loadVideos(true);
   });
 
-  // 지금 보는 범위(검색어 / 채널)를 보이고 지울 수 있게. 검색어일 때만 치즈 플래터 재정렬(정렬·설정)을 붙인다.
+  // 지금 보는 범위(검색어 / 채널)를 보이고 지울 수 있게. 검색어일 때만 정렬·길이 고르기를 붙인다
+  // (치지직 검색과 같은 값, 바꾸면 처음부터 다시 받는다).
   const rerankControls = SOURCES && globalThis.CheeseMultiviewVideoSearchControls
-    ? globalThis.CheeseMultiviewVideoSearchControls.attach($("plVideoRerank"), "setup", ({ pager, poolChanged, updatePager }) => {
-      if (poolChanged) {
-        if (add.videoQuery && !add.videoChannel) void loadVideos(true);
-        return;
-      }
-      if (updatePager === false || !pager || pager !== add.videoPager) return;
-      add.videoItems = pager.rows.map(videoItemFromRow).filter((item) => item.videoNo);
-      renderResults();
+    ? globalThis.CheeseMultiviewVideoSearchControls.attach($("plVideoRerank"), "setup", ({ reload }) => {
+      if (reload && add.videoQuery && !add.videoChannel) void loadVideos(true);
     })
     : null;
+  // 검색어로 볼 때는 정렬·길이·기간만(검색어는 검색칸에 있다 — 비우고 검색하거나 위 버튼을 누르면 풀린다).
+  // 채널을 골랐을 때는 '채널: … 다시보기'와 지우기 버튼.
   function syncVideoScope() {
     const searching = Boolean(add.videoQuery) && !add.videoChannel;
-    const scope = add.videoChannel ? `채널: ${add.videoChannel.channelName || "채널"} 다시보기` : searching ? `검색: "${add.videoQuery}"` : "";
-    $("plVideoScope").hidden = !scope;
+    const scope = add.videoChannel ? `채널: ${add.videoChannel.channelName || "채널"} 다시보기` : "";
+    $("plVideoScope").hidden = !scope && !searching;
+    $("plVideoScope").classList.toggle("is-controls-only", searching);
     $("plVideoScopeText").textContent = scope;
+    $("plVideoScopeText").hidden = !scope;
+    $("plVideoScopeClear").hidden = !scope;
     $("plVideoRerank").hidden = !searching;
     rerankControls?.setPager(searching ? add.videoPager : null);
   }
@@ -1699,25 +1820,28 @@
     const popover = $("plVideoChannelPopover");
     popover.hidden = false;
     $("plVideoSearch").querySelector("input").setAttribute("aria-expanded", "true");
-    popover.innerHTML = '<div class="mv-video-channel-empty" aria-busy="true">채널을 찾는 중…</div>';
+    popover.innerHTML = `<div class="pl-suggest-head" role="presentation">채널</div><div aria-busy="true">${skeletonRowsHtml(3, "div")}</div>`;
     let rows = [];
     try {
       rows = (await SOURCES.searchChannelsPage(query, 0)).rows.slice(0, 8);
     } catch {}
     if (token !== channelSuggestToken) return;
     channelSuggestRows = rows;
-    // 검색어로 다시보기 찾기는 옆 '검색' 버튼·Enter 로 한다(제안 목록에는 채널만). 채널이 없으면 닫는다.
-    if (!rows.length) {
-      hideChannelSuggest();
-      return;
-    }
+    // 두 구역: 채널(고르면 그 채널 다시보기) / 다시보기 검색(검색어로 찾기 = Enter·검색 버튼과 같다)
     popover.innerHTML =
-      rows.map((row, index) =>
-        `<button type="button" class="mv-video-channel-option" role="option" data-pl-channel="${index}">` +
-        SOURCES.profileImg(row.channelImageUrl) +
-        `<span class="mv-video-channel-option-name">${esc(row.channelName || "채널")}</span>` +
-        (CheeseVerifiedMark.kind(row) ? `<span class="mv-card-verified pl-card-verified" data-cheese-mark="${CheeseVerifiedMark.kind(row)}" role="img" aria-label="${CheeseVerifiedMark.label(CheeseVerifiedMark.kind(row))} 채널"></span>` : "") +
-        `</button>`).join("");
+      (rows.length
+        ? `<div class="pl-suggest-head" role="presentation">채널</div>` +
+          rows.map((row, index) =>
+            `<button type="button" class="mv-video-channel-option" role="option" data-pl-channel="${index}">` +
+            SOURCES.profileImg(row.channelImageUrl) +
+            `<span class="mv-video-channel-option-name">${esc(row.channelName || "채널")}</span>` +
+            verifiedHtml(row).replace('class="pl-card-verified"', 'class="mv-card-verified pl-card-verified"') +
+            `</button>`).join("")
+        : "") +
+      `<div class="pl-suggest-head" role="presentation">다시보기 검색</div>` +
+      `<button type="button" class="mv-video-channel-option pl-suggest-keyword" role="option" data-pl-keyword>` +
+      `<span class="pl-suggest-keyword-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>` +
+      `<span class="mv-video-channel-option-name">"${esc(query)}" 다시보기 검색</span><kbd>Enter</kbd></button>`;
   }
   const videoSearchInput = $("plVideoSearch").querySelector("input");
   videoSearchInput.addEventListener("input", () => {
@@ -1733,6 +1857,10 @@
     if (event.key === "Escape") hideChannelSuggest();
   });
   $("plVideoChannelPopover").addEventListener("click", (event) => {
+    if (event.target.closest("[data-pl-keyword]")) {
+      $("plVideoSearch").requestSubmit();
+      return;
+    }
     const row = channelSuggestRows[Number(event.target.closest("[data-pl-channel]")?.dataset.plChannel)];
     if (!row) return;
     hideChannelSuggest();
@@ -1757,6 +1885,9 @@
     setSegment($("plClipSource"), "data-clip-source", add.clipSource);
     const channelMode = add.clipSource === "channel";
     $("plClipPopular").hidden = add.clipSource !== "popular";
+    $("plClipSearch").hidden = add.clipSource !== "search";
+    $("plClipSearchTools").hidden = add.clipSource !== "search";
+    if (add.clipSource === "search") $("plClipSearch").querySelector("input").focus();
     $("plClipChannelSearch").hidden = !channelMode;
     $("plClipChannels").hidden = !channelMode || !$("plClipChannels").children.length || Boolean(add.clipChannel);
     $("plClipChannelHead").hidden = !channelMode || !add.clipChannel;
@@ -1820,6 +1951,61 @@
     } catch {}
     void loadClips(true);
   }
+  // 클립 검색: 검색어는 검색 버튼·Enter 로, 정렬·기간은 기억하고 바꾸면 처음부터 다시 받는다.
+  const CLIP_SEARCH_KEY = "cheesePlaylistClipSearch";
+  try {
+    const saved = JSON.parse(localStorage.getItem(CLIP_SEARCH_KEY) || "{}");
+    if (["DATE_DESC", "PLAY_COUNT_DESC"].includes(saved.sort)) add.clipSearchSort = saved.sort;
+    if (CLIP_SEARCH_PERIODS.includes(saved.period) && saved.period !== "CUSTOM") add.clipSearchPeriod = saved.period;
+    if (saved.period === "CUSTOM" && DATE_RANGE?.isDay(saved.start) && DATE_RANGE.isDay(saved.end) && saved.start <= saved.end) {
+      Object.assign(add, { clipSearchPeriod: "CUSTOM", clipSearchStart: saved.start, clipSearchEnd: saved.end });
+    }
+  } catch {}
+  function syncClipSearchTools() {
+    setSegment($("plClipSearchSort"), "data-clip-search-sort", add.clipSearchSort);
+    setSegment($("plClipSearchPeriod"), "data-clip-search-period", add.clipSearchPeriod);
+    // 직접 고른 기간은 버튼에 날짜로
+    const custom = $("plClipSearchPeriod").querySelector("[data-clip-search-custom]");
+    custom.textContent = add.clipSearchPeriod === "CUSTOM" ? DATE_RANGE?.shortRange(add.clipSearchStart, add.clipSearchEnd) || "직접" : "직접";
+    custom.title = add.clipSearchPeriod === "CUSTOM" ? "기간 다시 고르기" : "기간 직접 고르기";
+  }
+  syncClipSearchTools();
+  function pickClipSearch(changes) {
+    Object.assign(add, changes);
+    if (add.clipSearchPeriod !== "CUSTOM") Object.assign(add, { clipSearchStart: "", clipSearchEnd: "" });
+    syncClipSearchTools();
+    try {
+      localStorage.setItem(CLIP_SEARCH_KEY, JSON.stringify({
+        sort: add.clipSearchSort,
+        period: add.clipSearchPeriod,
+        ...(add.clipSearchPeriod === "CUSTOM" ? { start: add.clipSearchStart, end: add.clipSearchEnd } : {}),
+      }));
+    } catch {}
+    if (add.clipSearchQuery) void loadClips(true);
+  }
+  $("plClipSearch").addEventListener("submit", (event) => {
+    event.preventDefault();
+    add.clipSearchQuery = $("plClipSearch").querySelector("input").value.trim().slice(0, 100);
+    void loadClips(true);
+  });
+  $("plClipSearchSort").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-clip-search-sort]");
+    if (button && button.dataset.clipSearchSort !== add.clipSearchSort) pickClipSearch({ clipSearchSort: button.dataset.clipSearchSort });
+  });
+  $("plClipSearchPeriod").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-clip-search-period]");
+    if (!button) return;
+    if (button.dataset.clipSearchPeriod === "CUSTOM") {
+      // 달력에서 적용해야 바뀐다(닫으면 그대로)
+      DATE_RANGE?.open(button, {
+        start: add.clipSearchStart,
+        end: add.clipSearchEnd,
+        onApply: (start, end) => pickClipSearch({ clipSearchPeriod: "CUSTOM", clipSearchStart: start, clipSearchEnd: end }),
+      });
+      return;
+    }
+    if (button.dataset.clipSearchPeriod !== add.clipSearchPeriod) pickClipSearch({ clipSearchPeriod: button.dataset.clipSearchPeriod });
+  });
   $("plClipPeriod").addEventListener("click", (event) => {
     const button = event.target.closest("[data-clip-period]");
     if (button && button.dataset.clipPeriod !== add.clipPeriod) pickPopularClips({ clipPeriod: button.dataset.clipPeriod });

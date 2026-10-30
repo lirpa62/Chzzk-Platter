@@ -186,7 +186,7 @@ check(/if \(isVod && isVodChatFoldedAway\(\)\) return true/.test(foldReconcile),
 check(/isVod\s*\?\s*getVodChatCloseButton\(aside\)\s*:\s*getChatFoldToggleBtn\(aside\)/.test(foldReconcile), "라이브 토글과 다시보기 닫기 버튼을 구분해 실행");
 check(/\.mv-card\.is-skeleton \.mv-card-text\s*\{\s*flex:\s*1;\s*\}/s.test(css), "기본 다시보기 스켈레톤에서 제목·채널명 줄이 프로필 옆 너비를 차지");
 check(/:root:not\(\[data-theme="dark"\]\)\s+\.mv-video-rerank-controls\s+\.cheese-search-control:hover[\s\S]*?background:\s*#e7ddfb;[\s\S]*?color:\s*#452b7d;/s.test(css), "라이트 모드 재정렬 버튼에 충분한 보라색 대비 적용");
-check(/:root:not\(\[data-theme="dark"\]\)\s+\.mv-video-rerank-controls\s+\.cheese-search-options-segments\s+button\.is-active[\s\S]*?background:\s*#d9cbf5;[\s\S]*?color:\s*#392267;/s.test(css), "라이트 모드 설정 패널 선택 버튼에 진한 보라색 적용");
+check(/:root:not\(\[data-theme="dark"\]\)\s+\.mv-video-rerank-controls\s+\.cheese-search-control\.is-filtered,[\s\S]*?background:\s*#e7ddfb;/s.test(css), "라이트 모드에서 기본값이 아닌 정렬·길이 고르기를 보라색으로 표시");
 check(/let quickVideoChannelKeyword = "";/.test(watch) && /let quickVideoRerankSearchKeyword = "";/.test(watch), "Quick 채널 검색과 재정렬 검색이 별도 상태를 사용");
 check(/const onQuickVideoChannelSearchInput = \(event\) => \{\s*quickVideoChannelKeyword = event\.target\.value;/.test(watch) && /const onQuickVideoRerankSearchInput = \(event\) => \{\s*quickVideoRerankSearchKeyword = event\.target\.value;/.test(watch), "각 Quick 검색 입력이 자기 검색어만 갱신");
 check(!watch.includes('$("mvQuickVideoRerankSearchInput").value = quickVideoChannelKeyword') && !watch.includes('$("mvQuickVideoChannelSearchInput").value = quickVideoRerankSearchKeyword'), "한 Quick 검색어가 다른 탭의 입력칸을 덮어쓰지 않음");
@@ -196,8 +196,7 @@ check(/\.mv-card-badge-row\s*\{[^}]*display:\s*flex/s.test(css), "다시보기 �
 check(/\.mv-card-live-pv,\s*\.mv-card-duration\s*\{[^}]*font-weight:\s*700/s.test(css), "livePv와 재생 시간 글꼴 굵기 700");
 check(/\.mv-video-rerank-controls\s*\{[^}]*justify-content:\s*flex-end/s.test(css), "재정렬 컨트롤을 오른쪽 끝에 배치");
 check(/#mvVideoRerankSearch,\s*#mvQuickVideoRerankSearch\s*\{[^}]*z-index:\s*120/s.test(css), "두 재정렬 영역을 썸네일 배지보다 위에 배치");
-check(/\.mv-video-rerank-controls \.cheese-search-sort-menu\s*\{[^}]*z-index:\s*1500/s.test(css) &&
-  /\.mv-video-rerank-controls \.cheese-search-options-popover\s*\{[^}]*z-index:\s*1501/s.test(css), "정렬·설정 팝오버의 높은 레이어");
+check(/\.mv-video-rerank-controls \.cheese-search-sort-menu\s*\{[^}]*z-index:\s*1500/s.test(css), "정렬·길이 메뉴의 높은 레이어");
 check(/class="mv-card-live is-replay"[\s\S]*?class="mv-card-live-pv"/.test(setupPage) &&
   /class="mv-card-live is-replay"[\s\S]*?class="mv-card-live-pv"/.test(watch), "setup·시청 양쪽 다시보기 카드에서 livePv가 배지 뒤에 위치");
 

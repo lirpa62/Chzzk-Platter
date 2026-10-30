@@ -237,6 +237,7 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
 .mv-video-rerank-controls {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
   margin-top: 6px;
@@ -248,8 +249,7 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
 #mvQuickVideoRerankSearch {
   z-index: 120;
 }
-.mv-video-rerank-controls .cheese-search-sort-picker,
-.mv-video-rerank-controls .cheese-search-options {
+.mv-video-rerank-controls .cheese-search-sort-picker {
   flex: none;
   position: relative;
 }
@@ -266,7 +266,7 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
   height: 30px;
 }
 .mv-video-rerank-controls .cheese-search-sort-trigger {
-  min-width: 130px;
+  min-width: 96px;
   padding: 0 28px 0 9px;
   position: relative;
   text-align: left;
@@ -283,7 +283,8 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
   width: 6px;
 }
 .mv-video-rerank-controls .cheese-search-control:hover,
-.mv-video-rerank-controls .cheese-search-control[aria-expanded="true"] {
+.mv-video-rerank-controls .cheese-search-control[aria-expanded="true"],
+.mv-video-rerank-controls .cheese-search-control.is-filtered {
   border-color: #a78be8;
   color: #c8b6ff;
 }
@@ -299,8 +300,12 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
   top: calc(100% + 5px);
   z-index: 1500;
 }
-.mv-video-rerank-controls .cheese-search-sort-menu[hidden],
-.mv-video-rerank-controls .cheese-search-options-popover[hidden] {
+/* 항목 사이를 조금 띄운다(선택한 항목과 그다음 항목에 올렸을 때 붙어 보이지 않게) */
+.mv-video-rerank-controls .cheese-search-sort-menu:not([hidden]) {
+  display: grid;
+  gap: 2px;
+}
+.mv-video-rerank-controls .cheese-search-sort-menu[hidden] {
   display: none;
 }
 .mv-video-rerank-controls .cheese-search-sort-menu button {
@@ -317,116 +322,16 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
   text-align: left;
   width: 100%;
 }
-.mv-video-rerank-controls .cheese-search-sort-menu button:hover,
+.mv-video-rerank-controls .cheese-search-sort-menu button:hover {
+  background: rgba(144, 111, 222, 0.12);
+}
 .mv-video-rerank-controls
   .cheese-search-sort-menu
   button[aria-selected="true"] {
   background: rgba(144, 111, 222, 0.22);
-}
-.mv-video-rerank-controls .cheese-search-options-trigger,
-.mv-video-rerank-controls .cheese-search-options-close {
-  align-items: center;
-  background: var(--popup-surface, #22252a);
-  border: 1px solid var(--popup-border, #34383d);
-  border-radius: 6px;
-  color: var(--popup-muted, #9aa1a9);
-  cursor: pointer;
-  display: inline-flex;
-  height: 30px;
-  justify-content: center;
-  padding: 0;
-  width: 30px;
-}
-.mv-video-rerank-controls .cheese-search-options-trigger:hover,
-.mv-video-rerank-controls .cheese-search-options-trigger[aria-expanded="true"],
-.mv-video-rerank-controls .cheese-search-options-close:hover {
-  border-color: #a78be8;
-  color: #c8b6ff;
-}
-.mv-video-rerank-controls .cheese-search-options-popover {
-  background: var(--popup-bg, #141517);
-  border: 1px solid var(--popup-border, #34383d);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-  color: var(--popup-text, #e9ecef);
-  left: auto;
-  max-height: min(560px, calc(100vh - 100px));
-  overflow: hidden;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  width: min(360px, calc(100vw - 48px));
-  z-index: 1501;
-}
-.mv-video-rerank-controls .cheese-search-options-head {
-  align-items: center;
-  border-bottom: 1px solid var(--popup-border, #34383d);
-  display: flex;
-  justify-content: space-between;
-  min-height: 42px;
-  padding: 5px 8px 5px 12px;
-}
-.mv-video-rerank-controls .cheese-search-options-head strong {
-  font-size: 13px;
-}
-.mv-video-rerank-controls .cheese-search-options-body {
-  max-height: min(510px, calc(100vh - 150px));
-  overflow: auto;
-  padding: 2px 12px 10px;
-}
-.mv-video-rerank-controls .cheese-search-options-group {
-  border-bottom: 1px solid var(--popup-border, #34383d);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 0;
-}
-.mv-video-rerank-controls .cheese-search-options-group:last-child {
-  border-bottom: 0;
-}
-.mv-video-rerank-controls .cheese-search-options-title,
-.mv-video-rerank-controls .cheese-search-options-title-row {
-  font-size: 11.5px;
   font-weight: 700;
 }
-.mv-video-rerank-controls .cheese-search-options-title-row {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-.mv-video-rerank-controls .cheese-search-options-reset {
-  background: transparent;
-  border: 0;
-  color: var(--popup-muted, #9aa1a9);
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-}
-.mv-video-rerank-controls .cheese-search-options-segments {
-  display: grid;
-  gap: 4px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-.mv-video-rerank-controls .cheese-search-options-segments button {
-  background: transparent;
-  border: 1px solid var(--popup-border, #34383d);
-  border-radius: 5px;
-  color: var(--popup-muted, #9aa1a9);
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 600;
-  height: 29px;
-  min-width: 0;
-  padding: 0 3px;
-  white-space: nowrap;
-}
-.mv-video-rerank-controls .cheese-search-options-segments button:hover,
-.mv-video-rerank-controls .cheese-search-options-segments button.is-active {
-  background: rgba(144, 111, 222, 0.22);
-  border-color: #a78be8;
-  color: #d2c4ff;
-}
+
 :root:not([data-theme="dark"])
   .mv-video-rerank-controls
   .cheese-search-control:hover,
@@ -435,75 +340,20 @@ html[data-cheese-multiview-host]:not([data-theme="dark"]) {
   .cheese-search-control[aria-expanded="true"],
 :root:not([data-theme="dark"])
   .mv-video-rerank-controls
+  .cheese-search-control.is-filtered,
+:root:not([data-theme="dark"])
+  .mv-video-rerank-controls
   .cheese-search-sort-menu
   button:hover,
 :root:not([data-theme="dark"])
   .mv-video-rerank-controls
   .cheese-search-sort-menu
-  button[aria-selected="true"],
-:root:not([data-theme="dark"])
-  .mv-video-rerank-controls
-  .cheese-search-options-trigger:hover,
-:root:not([data-theme="dark"])
-  .mv-video-rerank-controls
-  .cheese-search-options-trigger[aria-expanded="true"],
-:root:not([data-theme="dark"])
-  .mv-video-rerank-controls
-  .cheese-search-options-close:hover {
+  button[aria-selected="true"] {
   background: #e7ddfb;
   border-color: #8a6acb;
   color: #452b7d;
 }
-:root:not([data-theme="dark"])
-  .mv-video-rerank-controls
-  .cheese-search-options-segments
-  button:hover,
-:root:not([data-theme="dark"])
-  .mv-video-rerank-controls
-  .cheese-search-options-segments
-  button.is-active {
-  background: #d9cbf5;
-  border-color: #8060c2;
-  color: #392267;
-}
-.mv-video-rerank-controls .cheese-search-options-range {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 74px;
-}
-.mv-video-rerank-controls .cheese-search-options-range input[type="range"] {
-  accent-color: #9a7ce5;
-  min-width: 0;
-  width: 100%;
-}
-.mv-video-rerank-controls .cheese-search-options-range input[type="number"],
-.mv-video-rerank-controls .cheese-search-options-field input {
-  background: var(--popup-surface, #22252a);
-  border: 1px solid var(--popup-border, #34383d);
-  border-radius: 5px;
-  box-sizing: border-box;
-  color: var(--popup-text, #e9ecef);
-  font: inherit;
-  font-size: 11px;
-  height: 28px;
-  min-width: 0;
-  padding: 0 6px;
-  width: 100%;
-}
-.mv-video-rerank-controls .cheese-search-options-fields {
-  display: grid;
-  gap: 6px 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.mv-video-rerank-controls .cheese-search-options-field {
-  align-items: center;
-  color: var(--popup-muted, #9aa1a9);
-  display: grid;
-  font-size: 11px;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) 58px;
-}
+
 .mv-video-channel-popover {
   background: var(--popup-surface, #22252a);
   border: 1px solid var(--popup-border, #34383d);
@@ -6625,4 +6475,36 @@ input[type="checkbox"]:focus-visible {
 }
 :not(img)[data-cheese-mark="official"] {
   background-image: url("https://ssl.pstatic.net/static/nng/glive/image/icon_official_mark.png") !important;
+}
+
+/* 채널 찾기 창 스켈레톤 줄(받는 동안 글 대신) */
+.mv-channel-skeleton-row {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-height: 44px;
+  padding: 6px 10px;
+}
+.mv-sk-avatar,
+.mv-sk-line {
+  animation: mv-skeleton-pulse 1.2s ease-in-out infinite;
+  background: var(--popup-border, #34383d);
+  display: block;
+}
+.mv-sk-avatar {
+  border-radius: 50%;
+  flex: none;
+  height: 30px;
+  width: 30px;
+}
+.mv-sk-line {
+  border-radius: 4px;
+  height: 11px;
+  width: 45%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-sk-avatar,
+  .mv-sk-line {
+    animation: none;
+  }
 }

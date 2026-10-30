@@ -264,7 +264,7 @@
       <div class="mv-frames-fit" id="mvFramesFit">
         <!-- 격자 위아래 남는 자리에 뜬다. 여기서 바로 채널을 빼거나 바꿀 수 있어
              고르기 화면까지 가지 않아도 된다. -->
-        <div class="mv-quick" id="mvQuick" hidden>
+        <div class="mv-quick" id="mvQuick" data-date-range-bounds hidden>
           <div class="mv-quick-head">
             <strong>채널 관리</strong>
             <span class="mv-quick-hint mv-custom-tooltip" id="mvQuickHint"></span>
@@ -311,7 +311,7 @@
                   <span class="mv-video-channel-selected-label" data-tooltip-label>선택한 채널 목록</span>
                 </button>
               </div>
-              <button type="button" data-mv-quick-video-source="platter-search">치즈 플래터 재정렬</button>
+              <button type="button" data-mv-quick-video-source="platter-search">다시보기 검색</button>
             </div>
             <div
               class="mv-quick-folders"
@@ -509,6 +509,7 @@
     <script src="src/channelAffinity.js"></script>
     <script src="src/channelAffinityData.js"></script>
     <script src="src/multiviewSources.js"></script>
+    <script src="src/searchDateRange.js"></script>
     <script src="src/multiviewVideoSearchControls.js"></script>
     <script src="src/multiviewSort.js"></script>
     <script src="src/multiviewLayouts.js"></script>

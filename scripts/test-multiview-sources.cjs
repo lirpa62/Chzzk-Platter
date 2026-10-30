@@ -63,13 +63,14 @@ async function test(name, run) {
     assert.equal(SOURCES.getWatchTimelinePercent({ watchTimeline: 0, duration: 0 }), null);
   });
 
-  await test("재정렬 컨트롤은 기존 검색 클래스와 설정 항목을 제공한다", async () => {
+  await test("다시보기 검색 고르기는 치지직 검색과 같은 정렬 3가지·영상 길이 6가지", async () => {
     const markup = SOURCES.videoSearchControlsMarkup("setup");
     assert.match(markup, /cheese-search-control cheese-search-sort-trigger/);
-    assert.match(markup, /class="cheese-search-options"/);
-    assert.match(markup, /data-video-rerank-pool/);
-    assert.match(markup, /data-video-rerank-default-sort="score"/);
-    assert.match(markup, /라이브 시청자/);
+    for (const value of ["RELEVANCE_DESC", "DATE_DESC", "PLAY_COUNT_DESC"]) assert.match(markup, new RegExp(`data-video-search-sort="${value}"`));
+    for (const value of ["ALL", "UNDER_3_MINUTES", "MINUTES_3_TO_20", "MINUTES_20_TO_60", "HOURS_1_TO_3", "OVER_3_HOURS"]) {
+      assert.match(markup, new RegExp(`data-video-search-time="${value}"`));
+    }
+    assert.doesNotMatch(markup, /cheese-search-options|data-video-rerank-pool|라이브 시청자/, "예전 재정렬 설정(후보 수·점수 비중)은 없다");
   });
 
   await test("공용 정렬은 시청자·이름·시작 시각·원본 순서를 구분한다", async () => {
@@ -468,7 +469,7 @@ async function test(name, run) {
     }
   });
 
-  await test("치즈 플래터 재정렬은 기존 가중치 설정과 검색 페이지 API를 사용한다", async () => {
+  await test("다시보기 검색은 v2 API 의 서버 정렬·길이 필터를 쓰고 받은 순서 그대로 둔다", async () => {
     const previous = global.chrome;
     const requests = [];
     const stored = {};
@@ -476,40 +477,56 @@ async function test(name, run) {
       runtime: { sendMessage: async ({ url }) => {
         const parsed = new URL(url);
         requests.push(parsed);
-        return { ok: true, content: { data: [
-          { video: { videoNo: "801", videoTitle: "다른 게임", videoType: "UPLOAD", readCount: 900000 }, channel: row(8) },
-          { video: { videoNo: "802", videoTitle: "고양이 모험", videoType: "REPLAY", readCount: 1 }, channel: row(2) },
-        ] } };
+        const offset = Number(parsed.searchParams.get("offset"));
+        return { ok: true, content: offset === 0
+          ? { data: [
+              { video: { videoNo: "801", videoTitle: "다른 게임", videoType: "UPLOAD", readCount: 900000 }, channel: row(8) },
+              { video: { videoNo: "802", videoTitle: "고양이 모험", videoType: "REPLAY", readCount: 1 }, channel: row(2) },
+            ], page: { next: { offset: 50 } } }
+          : { data: [{ video: { videoNo: "803", videoTitle: "고양이 2" }, channel: row(3) }], page: { next: null } } };
       } },
       storage: { local: {
-        get: async () => ({
-          cheeseSearchRerankPoolMax: stored.cheeseSearchRerankPoolMax ?? 50,
-          cheeseSearchRerankWeights: stored.cheeseSearchRerankWeights ??
-            { rel: 100, channel: 0, read: 0, pv: 0, verified: 0, recent: 0 },
-          cheeseSearchRerankDefaultSort: stored.cheeseSearchRerankDefaultSort ?? "score",
-        }),
+        get: async () => ({ ...stored }),
         set: async (values) => Object.assign(stored, values),
       } },
     };
     try {
       const pager = SOURCES.createVideoSearchPager("고양이");
       await pager.loadFirst();
-      assert.equal(requests[0].pathname, "/service/v1/search/videos");
+      assert.equal(requests[0].pathname, "/service/v2/search/videos");
       assert.equal(requests[0].searchParams.get("keyword"), "고양이");
       assert.equal(requests[0].searchParams.get("offset"), "0");
       assert.equal(requests[0].searchParams.get("size"), "50");
-      assert.deepEqual(pager.rows.map((item) => item.videoNo), ["802", "801"]);
-      assert.equal(pager.rows[1].videoType, "UPLOAD");
+      assert.equal(requests[0].searchParams.get("sort"), "RELEVANCE_DESC");
+      assert.equal(requests[0].searchParams.get("playTime"), "ALL");
+      assert.deepEqual(pager.rows.map((item) => item.videoNo), ["801", "802"], "서버가 준 순서 그대로");
+      assert.equal(pager.rows[0].videoType, "UPLOAD");
+      assert.equal(pager.done, false);
+      await pager.loadNext();
+      assert.equal(requests[1].searchParams.get("offset"), "50");
+      assert.deepEqual(pager.rows.map((item) => item.videoNo), ["801", "802", "803"]);
       assert.equal(pager.done, true);
-      await pager.setSort("read");
-      assert.equal(pager.sort, "read");
-      assert.deepEqual(pager.rows.map((item) => item.videoNo), ["801", "802"]);
-      await pager.updateSettings({ weights: { rel: 0, channel: 100 } });
-      assert.equal(pager.settings.weights.channel, 100);
-      assert.equal(pager.sort, "read");
-      const saved = await SOURCES.saveVideoSearchSettings({ poolMax: 225, sort: "pv" });
-      assert.equal(saved.poolMax, 225);
-      assert.equal(stored.cheeseSearchRerankDefaultSort, "pv");
+      // 고른 값은 기억하고, 다음 pager 가 그 값으로 묻는다
+      const saved = await SOURCES.saveVideoSearchSettings({ sort: "PLAY_COUNT_DESC", playTime: "OVER_3_HOURS" });
+      assert.deepEqual(saved, { sort: "PLAY_COUNT_DESC", playTime: "OVER_3_HOURS", period: "ALL" });
+      assert.deepEqual(stored.cheeseVideoSearchOptions, saved);
+      const next = SOURCES.createVideoSearchPager("고양이");
+      await next.loadFirst();
+      assert.equal(requests.at(-1).searchParams.get("sort"), "PLAY_COUNT_DESC");
+      assert.equal(requests.at(-1).searchParams.get("playTime"), "OVER_3_HOURS");
+      assert.deepEqual(SOURCES.normalizeVideoSearchOptions({ sort: "score", playTime: "x" }), { sort: "RELEVANCE_DESC", playTime: "ALL", period: "ALL" }, "모르는 값은 기본값");
+      assert.equal(requests.at(-1).searchParams.has("startDate"), false, "전체 기간이면 날짜를 넘기지 않는다");
+      // 기간: 직접 고른 날짜는 그날 0시 ~ 끝(KST), 날짜가 없으면 전체 기간
+      require("../src/searchDateRange.js");
+      const custom = SOURCES.createVideoSearchPager("고양이", { period: "CUSTOM", start: "2026-09-01", end: "2026-09-30" });
+      await custom.loadFirst();
+      assert.equal(requests.at(-1).searchParams.get("startDate"), "2026-09-01 00:00:00");
+      assert.equal(requests.at(-1).searchParams.get("endDate"), "2026-09-30 23:59:59");
+      const week = SOURCES.createVideoSearchPager("고양이", { period: "WEEK" });
+      await week.loadFirst();
+      const span = Date.parse(requests.at(-1).searchParams.get("endDate").replace(" ", "T") + "Z") - Date.parse(requests.at(-1).searchParams.get("startDate").replace(" ", "T") + "Z");
+      assert.ok(Math.abs(span - 7 * 86400000) < 5000, "1주 = 지금부터 7일");
+      assert.deepEqual(SOURCES.normalizeVideoSearchOptions({ period: "CUSTOM", start: "2026-09-30", end: "2026-09-01" }).period, "ALL", "거꾸로 된 날짜는 전체 기간");
     } finally {
       global.chrome = previous;
     }
@@ -767,12 +784,29 @@ async function test(name, run) {
     assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=LATEST&unexpected=1")), false);
     assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=LATEST&videoNo=123&videoNo=124")), false);
     assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/home/videos?size=50&sortType=RECOMMEND")), false);
-    const videoSearch = "https://api.chzzk.naver.com/service/v1/search/videos?keyword=%EA%B3%A0%EC%96%91%EC%9D%B4&offset=0&size=50";
+    const videoSearch = "https://api.chzzk.naver.com/service/v2/search/videos?keyword=%EA%B3%A0%EC%96%91%EC%9D%B4&offset=0&size=50&sort=RELEVANCE_DESC&playTime=ALL";
     assert.equal(valid(new URL(videoSearch)), true);
+    assert.equal(valid(new URL(videoSearch.replace("sort=RELEVANCE_DESC", "sort=PLAY_COUNT_DESC").replace("playTime=ALL", "playTime=OVER_3_HOURS"))), true);
     assert.equal(valid(new URL(videoSearch.replace("size=50", "size=100"))), false);
     assert.equal(valid(new URL(videoSearch.replace("&offset=0", ""))), false);
+    assert.equal(valid(new URL(videoSearch.replace("sort=RELEVANCE_DESC", "sort=score"))), false);
+    assert.equal(valid(new URL(videoSearch.replace("playTime=ALL", "playTime=LONG"))), false);
+    assert.equal(valid(new URL(`${videoSearch}&startDate=2026-09-01%2000%3A00%3A00&endDate=2026-09-30%2023%3A59%3A59`)), true, "기간은 시작·끝을 함께");
+    assert.equal(valid(new URL(`${videoSearch}&startDate=2026-09-01%2000%3A00%3A00`)), false);
+    assert.equal(valid(new URL(`${videoSearch}&startDate=2026-09-01&endDate=2026-09-30`)), false);
     assert.equal(valid(new URL(`${videoSearch}&unexpected=1`)), false);
-    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/search/videos?keyword=&offset=0&size=50")), false);
+    assert.equal(valid(new URL(videoSearch.replace("keyword=%EA%B3%A0%EC%96%91%EC%9D%B4", "keyword="))), false);
+    assert.equal(valid(new URL("https://api.chzzk.naver.com/service/v1/search/videos?keyword=%EA%B3%A0&offset=0&size=50")), false, "예전 v1 다시보기 검색은 더 쓰지 않는다");
+    // 재생목록 '클립 검색'(치지직 검색 클립 탭과 같은 API): 기간은 시작·끝을 함께, 1,000개까지
+    const clipSearch = "https://api.chzzk.naver.com/service/v1/search/clips?keyword=%EC%B9%B4%EB%A6%B0&offset=0&size=30&sort=RELEVANCE_DESC";
+    assert.equal(valid(new URL(clipSearch)), true);
+    assert.equal(valid(new URL(`${clipSearch}&startDate=2026-10-28%2016%3A51%3A54&endDate=2026-10-29%2016%3A51%3A54`)), true);
+    assert.equal(valid(new URL(`${clipSearch}&startDate=2026-10-28%2016%3A51%3A54`)), false, "기간 한쪽만");
+    assert.equal(valid(new URL(`${clipSearch}&startDate=2026-10-28&endDate=2026-10-29`)), false, "날짜만(시각 없음)");
+    assert.equal(valid(new URL(clipSearch.replace("offset=0", "offset=1001"))), false);
+    assert.equal(valid(new URL(clipSearch.replace("size=30", "size=51"))), false);
+    assert.equal(valid(new URL(clipSearch.replace("sort=RELEVANCE_DESC", "sort=RECENT"))), false);
+    assert.equal(valid(new URL(`${clipSearch}&unexpected=1`)), false);
     const channelVideos = `https://api.chzzk.naver.com/service/v1/channels/${id(1)}/videos?sortType=LATEST&pagingType=PAGE&page=0&size=50&publishDateAt=&videoType=`;
     assert.equal(valid(new URL(channelVideos)), true);
     assert.equal(valid(new URL(`${channelVideos}&unexpected=1`)), false);

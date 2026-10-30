@@ -6359,7 +6359,10 @@ const MULTIVIEW_API_PATHS = new Set([
   // ⚠ 채널 검색은 search/channels 를 쓴다. search/lives 는 방송 제목만 훑는지
   //   지금 방송 중인 채널 이름을 정확히 넣어도 0건이 온다(실측).
   "/service/v1/search/channels",
-  "/service/v1/search/videos",
+  // 다시보기 검색(멀티뷰·재생목록): 치지직 검색 화면과 같은 v2(서버 정렬·길이 필터).
+  "/service/v2/search/videos",
+  // 재생목록 '클립 검색'(치지직 검색 화면의 클립 탭과 같은 API).
+  "/service/v1/search/clips",
   // 멀티뷰 '방제' 검색: 방송 제목으로 라이브를 찾는다.
   "/service/v1/search/lives",
   // 전용 팔로잉의 '구독' 자동 그룹을 멀티뷰에서도 보여 주려면 구독 목록이 필요하다.
@@ -6475,12 +6478,30 @@ function validMultiviewApiQuery(url) {
       url.searchParams.has("offset") && uint("offset", 0, 10000) &&
       url.searchParams.has("size") && uint("size", 1, 50);
   }
-  if (url.pathname === "/service/v1/search/videos") {
+  if (url.pathname === "/service/v2/search/videos") {
     const keyword = url.searchParams.get("keyword");
-    return only(new Set(["keyword", "offset", "size"])) &&
+    const date = (key) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(url.searchParams.get(key) || "");
+    const hasStart = url.searchParams.has("startDate");
+    return only(new Set(["keyword", "offset", "size", "sort", "playTime", "startDate", "endDate"])) &&
+      hasStart === url.searchParams.has("endDate") && (!hasStart || (date("startDate") && date("endDate"))) &&
       typeof keyword === "string" && keyword.trim().length > 0 && keyword.length <= 100 &&
       url.searchParams.has("offset") && uint("offset", 0, 10000) &&
-      url.searchParams.has("size") && uint("size", 1, 50);
+      url.searchParams.has("size") && uint("size", 1, 50) &&
+      ["RELEVANCE_DESC", "DATE_DESC", "PLAY_COUNT_DESC"].includes(url.searchParams.get("sort")) &&
+      ["ALL", "UNDER_3_MINUTES", "MINUTES_3_TO_20", "MINUTES_20_TO_60", "HOURS_1_TO_3", "OVER_3_HOURS"]
+        .includes(url.searchParams.get("playTime"));
+  }
+  if (url.pathname === "/service/v1/search/clips") {
+    // 기간은 시작·끝을 함께(KST "YYYY-MM-DD HH:mm:ss"), 전체 기간이면 둘 다 뺀다. 치지직은 1,000개까지 준다.
+    const keyword = url.searchParams.get("keyword");
+    const date = (key) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(url.searchParams.get(key) || "");
+    const hasStart = url.searchParams.has("startDate");
+    return only(new Set(["keyword", "offset", "size", "sort", "startDate", "endDate"])) &&
+      typeof keyword === "string" && keyword.trim().length > 0 && keyword.length <= 100 &&
+      url.searchParams.has("offset") && uint("offset", 0, 1000) &&
+      url.searchParams.has("size") && uint("size", 1, 50) &&
+      ["RELEVANCE_DESC", "DATE_DESC", "PLAY_COUNT_DESC"].includes(url.searchParams.get("sort")) &&
+      hasStart === url.searchParams.has("endDate") && (!hasStart || (date("startDate") && date("endDate")));
   }
   if (url.pathname === "/commercial/v1/subscribe/channels") {
     return only(new Set(["page", "size"])) && uint("page", 0, 10000) && uint("size", 1, 100);
@@ -6605,6 +6626,7 @@ const MULTIVIEW_SETUP_PAGE = "multiview.html";
 const MULTIVIEW_HOST_SCRIPTS = [
   "src/multiviewTheme.js",
   "src/multiviewSources.js",
+  "src/searchDateRange.js",
   "src/multiviewVideoSearchControls.js",
   "src/multiviewSort.js",
   "src/multiviewLayouts.js",

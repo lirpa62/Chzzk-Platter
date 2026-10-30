@@ -106,7 +106,7 @@
                 </button>
               </div>
             </div>
-            <!-- 입력하면 채널을 제안하고(고르면 그 채널 다시보기), Enter 는 다시보기 검색(치즈 플래터 재정렬). 멀티뷰 고르기 화면과 같다. -->
+            <!-- 입력하면 채널을 제안하고(고르면 그 채널 다시보기), Enter 는 다시보기 검색(치지직 검색과 같은 정렬·길이). 멀티뷰 고르기 화면과 같다. -->
             <div class="pl-video-search-wrap">
               <form class="pl-search" id="plVideoSearch">
                 <input type="search" maxlength="100" placeholder="다시보기·채널 검색" aria-label="다시보기·채널 검색"
@@ -132,6 +132,7 @@
               <div class="pl-segmented" role="radiogroup" aria-label="클립 목록" id="plClipSource">
                 <button type="button" role="radio" data-clip-source="vault" aria-checked="true">클립 보관함</button>
                 <button type="button" role="radio" data-clip-source="popular" aria-checked="false">인기 클립</button>
+                <button type="button" role="radio" data-clip-source="search" aria-checked="false">클립 검색</button>
                 <button type="button" role="radio" data-clip-source="channel" aria-checked="false">채널 클립</button>
               </div>
             </div>
@@ -144,6 +145,26 @@
               <div class="pl-segmented" role="radiogroup" aria-label="인기 클립 정렬" id="plClipRank">
                 <button type="button" role="radio" data-clip-rank="RECOMMEND" aria-checked="true">추천순</button>
                 <button type="button" role="radio" data-clip-rank="POPULAR" aria-checked="false">인기순</button>
+              </div>
+            </div>
+            <!-- 치지직 검색 화면의 클립 탭과 같은 검색(정렬·기간). 결과에는 채널 이름만 온다. -->
+            <form class="pl-search" id="plClipSearch" hidden>
+              <input type="search" maxlength="100" placeholder="클립 검색어" aria-label="클립 검색어" autocomplete="off" />
+              <button type="submit" class="pl-button">검색</button>
+            </form>
+            <div class="pl-tab-tools pl-clip-popular pl-clip-search-tools" id="plClipSearchTools" hidden>
+              <div class="pl-segmented" role="radiogroup" aria-label="클립 검색 정렬" id="plClipSearchSort">
+                <button type="button" role="radio" data-clip-search-sort="RELEVANCE_DESC" aria-checked="true">관련순</button>
+                <button type="button" role="radio" data-clip-search-sort="DATE_DESC" aria-checked="false">최신순</button>
+                <button type="button" role="radio" data-clip-search-sort="PLAY_COUNT_DESC" aria-checked="false">재생수순</button>
+              </div>
+              <div class="pl-segmented" role="radiogroup" aria-label="클립 검색 기간" id="plClipSearchPeriod">
+                <button type="button" role="radio" data-clip-search-period="ALL" aria-checked="true">전체</button>
+                <button type="button" role="radio" data-clip-search-period="DAY" aria-checked="false">1일</button>
+                <button type="button" role="radio" data-clip-search-period="WEEK" aria-checked="false">1주</button>
+                <button type="button" role="radio" data-clip-search-period="MONTH" aria-checked="false">1개월</button>
+                <button type="button" role="radio" data-clip-search-period="HALF_YEAR" aria-checked="false">6개월</button>
+                <button type="button" role="radio" data-clip-search-period="CUSTOM" aria-checked="false" aria-haspopup="dialog" data-clip-search-custom>직접</button>
               </div>
             </div>
             <form class="pl-search" id="plClipChannelSearch" hidden>
@@ -171,6 +192,7 @@
     <script src="src/recordManage.js"></script>
     <script src="src/playlistStore.js"></script>
     <script src="src/multiviewSources.js"></script>
+    <script src="src/searchDateRange.js"></script>
     <script src="src/multiviewVideoSearchControls.js"></script>
     <script src="src/playlist.js"></script>
   </body>
