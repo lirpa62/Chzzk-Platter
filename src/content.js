@@ -28259,9 +28259,15 @@ html.cheese-sidebar-resizing div#layout-body {
     //   와 svg mask(내 통나무 파워)를 가진 버튼이 있어 아래 폴백에 걸린다. 그러면
     //   라운지 버튼이 수신함 옆이 아니라 팝오버 안으로 들어간다.
     //   → 메뉴 항목(role=menuitem)과 팝오버 내부 버튼은 후보에서 뺀다.
+    // ⚠ 확장이 넣은 버튼(재생목록·라운지 소식 등, id 나 래퍼 클래스가 cheese-)은 후보에서 뺀다. 알림을 읽어
+    //   수신함의 'New'·mask 가 사라지면 아래 '캐시 링크와 같은 묶음의 첫 버튼' 규칙이 우리 재생목록 버튼을
+    //   집어, 라운지 소식이 재생목록 뒤(수신함 앞)로 옮겨 갔다(2026-10-31 실측: 점이 있을 때와 위치가 바뀜).
+    const isOurs = (button) =>
+      /^cheese-/.test(button.id || "") ||
+      Array.from(button.closest('[class*="_item_"]')?.classList || []).some((name) => name.startsWith("cheese-"));
     const buttons = Array.from(header.querySelectorAll("button")).filter(
       (button) =>
-        button.id !== LOUNGE_BUTTON_ID &&
+        !isOurs(button) &&
         button.getAttribute("role") !== "menuitem" &&
         // 팝오버 판정은 해시 클래스가 아니라 구조로 한다(해시는 배포마다 바뀐다).
         // 프로필 메뉴는 role=menubar 목록이고, 그 조상에 프로필 버튼이 있다.
@@ -28282,11 +28288,9 @@ html.cheese-sidebar-resizing div#layout-body {
       ]
         .filter(Boolean)
         .join(" ");
-    return (
-      // 커뮤니티 붉은 점을 붙였던 버튼이면 이미 수신함으로 확인된 대상이다.
-      buttons.find((button) =>
-        button.classList.contains("cheese-inbox-community-header-target"),
-      ) ||
+    // 확실한 표식(이름·'New'·mask)으로 찾은 버튼에는 표시를 남긴다. 알림을 읽어 'New'·mask 가 사라져도 같은
+    // 버튼이면 계속 수신함으로 쓴다.
+    const sure =
       // 접근성 이름은 SVG 내부 구조보다 UI 업데이트에 덜 민감하다.
       buttons.find((button) =>
         /수신함|알림|inbox/i.test(accessibleName(button)),
@@ -28297,7 +28301,15 @@ html.cheese-sidebar-resizing div#layout-body {
           button.querySelector(".blind")?.textContent?.trim() === "New",
       ) ||
       // 수신함 아이콘 SVG 안에 있던 <mask>. 접근성 정보가 없는 UI의 폴백이다.
-      buttons.find((button) => button.querySelector("svg mask")) ||
+      buttons.find((button) => button.querySelector("svg mask"));
+    if (sure && sure.dataset.cheeseInboxButton !== "1") sure.dataset.cheeseInboxButton = "1";
+    return (
+      // 커뮤니티 붉은 점을 붙였던 버튼이면 이미 수신함으로 확인된 대상이다.
+      buttons.find((button) =>
+        button.classList.contains("cheese-inbox-community-header-target"),
+      ) ||
+      sure ||
+      buttons.find((button) => button.dataset.cheeseInboxButton === "1") ||
       // 캐시(#cash) 링크와 같은 묶음에 있는 버튼
       (() => {
         const cash = header.querySelector('a[href*="game.naver.com/profile"]');
