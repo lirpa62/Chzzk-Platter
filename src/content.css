@@ -6762,6 +6762,74 @@ ul[data-cheese-channel-view] > li[data-cheese-channel-hidden] {
   pointer-events: none !important;
   clip-path: inset(50%) !important;
 }
+/* 정렬·필터가 켜져 있으면 다 불러와 정렬을 마칠 때까지 채널 목록을 가리고 스켈레톤을 보인다(탭을 오가면 치지직이
+   기본 순서로 먼저 그리고 묶음마다 다시 정렬돼 깜빡였다). 루트 표시는 content.js 가 /following 에서 건다. */
+html[data-cheese-channel-view-active]
+  #layout-body
+  ul[class*="_type_channel_"]:not([data-cheese-channel-ready]):not(
+    [data-cheese-channel-skeleton]
+  ) {
+  display: none !important;
+}
+ul[data-cheese-channel-skeleton] > li {
+  pointer-events: none;
+}
+/* 치지직 채널 카드 모양(2026-10-31 실측 화면): 프로필 60px 원 · 이름·팔로워 두 줄 · 오른쪽 버튼(팔로잉 알약 ·
+   알림 원 · 구독 알약, 높이 34px) */
+.cheese-following-channel-skeleton-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 60px;
+  padding: 15px 0;
+}
+.cheese-following-channel-skeleton-avatar {
+  flex: none;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+}
+.cheese-following-channel-skeleton-lines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+.cheese-following-channel-skeleton-name {
+  width: 96px;
+  max-width: 100%;
+  height: 16px;
+  border-radius: 5px;
+}
+.cheese-following-channel-skeleton-follower {
+  width: 74px;
+  max-width: 80%;
+  height: 13px;
+  border-radius: 5px;
+}
+.cheese-following-channel-skeleton-buttons {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+.cheese-following-channel-skeleton-follow,
+.cheese-following-channel-skeleton-subscribe {
+  height: 34px;
+  border-radius: 17px;
+}
+.cheese-following-channel-skeleton-follow {
+  width: 90px;
+}
+.cheese-following-channel-skeleton-subscribe {
+  width: 77px;
+}
+.cheese-following-channel-skeleton-alarm {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
 /* 남은 묶음을 모두 불러오는 동안 다음 묶음 감지 지점(목록 뒤 빈 div)을 화면 가운데 1px 에 붙여 둔다. */
 [data-cheese-channel-loadall] {
   position: fixed !important;

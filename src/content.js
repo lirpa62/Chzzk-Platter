@@ -32738,6 +32738,14 @@ html.cheese-sidebar-resizing div#layout-body {
   const FOLLOWING_CHANNEL_HIDDEN_ATTR = "data-cheese-channel-hidden";
   const FOLLOWING_CHANNEL_LIST_ATTR = "data-cheese-channel-view";
   const FOLLOWING_CHANNEL_LOAD_ATTR = "data-cheese-channel-loadall";
+  // 정렬·필터가 켜져 있으면 다 불러와 정렬을 마칠 때까지 목록 대신 스켈레톤을 보인다. 탭을 오가면 치지직이 처음
+  // 30개를 기본 순서로 먼저 그리고, 묶음이 붙을 때마다 다시 정렬해 순서가 여러 번 바뀌며 깜빡였다.
+  // 목록 감춤은 CSS 가 맡는다(루트 표시) — 치지직이 새 목록을 그리는 첫 순간부터 가려진다.
+  const FOLLOWING_CHANNEL_ACTIVE_ROOT_ATTR = "data-cheese-channel-view-active";
+  const FOLLOWING_CHANNEL_READY_ATTR = "data-cheese-channel-ready";
+  const FOLLOWING_CHANNEL_SKELETON_ATTR = "data-cheese-channel-skeleton";
+  const FOLLOWING_CHANNEL_SKELETON_COUNT = 12;
+  const FOLLOWING_CHANNEL_REVEAL_MAX_MS = 12000; // 다 불러오지 못해도 이만큼 지나면 보인다
   let followingChannelToolsOn = true;
   let followingChannelView = { sort: "recent", sub: "", alarm: "" };
   let followingChannelCountText = "";
@@ -32769,7 +32777,18 @@ html.cheese-sidebar-resizing div#layout-body {
     leaveFollowingChannelCard(followingChannelHoverCard);
     followingChannelHoverCard = null;
   });
-  const followingChannelLoad = { list: null, count: 0, lastGrowAt: 0, retries: 0, done: false, timer: 0 };
+  const followingChannelLoad = {
+    list: null, count: 0, lastGrowAt: 0, startedAt: 0, retries: 0, done: false, paused: false, timer: 0,
+  };
+  // 전체 팔로잉 수(channels/followings 의 totalCount). 화면 카드 수가 이 수에 닿으면 바로 다 불러온 것으로 본다 —
+  // 모르면 '3초 동안 안 늘고, 한 번 더 알려도 3초 동안 안 늘면 끝'으로 판단해 마지막 묶음 뒤에도 스켈레톤이 6초쯤 남았다.
+  const FOLLOWING_CHANNEL_TOTAL_TTL_MS = 60000;
+  let followingChannelTotal = { value: 0, at: 0, pending: null };
+  // 저장해 둔 값에서는 정렬만 쓴다. 상태 필터(구독·알림)는 이 화면에서만 기억해, 새로고침하면 아무것도 고르지
+  // 않은 상태로 시작한다(탭을 오갈 때는 그대로).
+  function savedFollowingChannelView(value) {
+    return { ...normalizeFollowingChannelView(value), sub: "", alarm: "" };
+  }
   function normalizeFollowingChannelView(value) {
     const v = value && typeof value === "object" ? value : {};
     return {
@@ -32779,7 +32798,8 @@ html.cheese-sidebar-resizing div#layout-body {
     };
   }
   function findFollowingChannelList() {
-    return document.querySelector('#layout-body ul[class*="_type_channel_"]');
+    // ⚠ 스켈레톤(같은 클래스를 빌려 목록 앞에 둔다)은 빼고 찾는다.
+    return document.querySelector('#layout-body ul[class*="_type_channel_"]:not([data-cheese-channel-skeleton])');
   }
   function followingChannelCardInfo(card, index) {
     const nameEl = card.querySelector('[class*="_channel_"] [class*="_text_"]') ||
@@ -32820,6 +32840,8 @@ html.cheese-sidebar-resizing div#layout-body {
   }
   function clearFollowingChannelView(list) {
     if (!list) return;
+    removeFollowingChannelSkeleton(list);
+    list.removeAttribute(FOLLOWING_CHANNEL_READY_ATTR);
     list.removeAttribute(FOLLOWING_CHANNEL_LIST_ATTR);
     for (const card of list.children) {
       if (card.style.order) card.style.removeProperty("order");
@@ -32827,8 +32849,52 @@ html.cheese-sidebar-resizing div#layout-body {
       delete card.dataset.cheeseChannelState;
     }
   }
+  // 치지직 채널 카드 모양: 프로필(원) · 이름·팔로워 두 줄 · 오른쪽에 팔로잉(알약)·알림(원)·구독(알약) 버튼.
+  function followingChannelSkeletonHtml(itemClass) {
+    const bone = (kind) => `<span class="cheese-search-skeleton-shimmer cheese-following-channel-skeleton-${kind}"></span>`;
+    const card =
+      `<li class="${escapeAttribute(itemClass)}"><div class="cheese-following-channel-skeleton-card">` +
+      bone("avatar") +
+      `<span class="cheese-following-channel-skeleton-lines">${bone("name")}${bone("follower")}</span>` +
+      `<span class="cheese-following-channel-skeleton-buttons">${bone("follow")}${bone("alarm")}${bone("subscribe")}</span>` +
+      `</div></li>`;
+    return card.repeat(FOLLOWING_CHANNEL_SKELETON_COUNT);
+  }
+  function removeFollowingChannelSkeleton(list) {
+    const prev = list?.previousElementSibling;
+    if (prev?.hasAttribute?.(FOLLOWING_CHANNEL_SKELETON_ATTR)) prev.remove();
+  }
+  // 목록 대신 스켈레톤(치지직 목록·항목 클래스를 그대로 써 칸 수·폭이 같다) ↔ 정렬을 마친 목록.
+  function setFollowingChannelReady(list, ready) {
+    if (list.hasAttribute(FOLLOWING_CHANNEL_READY_ATTR) !== ready) list.toggleAttribute(FOLLOWING_CHANNEL_READY_ATTR, ready);
+    if (ready) {
+      removeFollowingChannelSkeleton(list);
+      return;
+    }
+    if (list.previousElementSibling?.hasAttribute?.(FOLLOWING_CHANNEL_SKELETON_ATTR)) return;
+    const skeleton = document.createElement("ul");
+    skeleton.className = list.className;
+    skeleton.setAttribute(FOLLOWING_CHANNEL_SKELETON_ATTR, "");
+    skeleton.setAttribute("aria-busy", "true");
+    skeleton.setAttribute("aria-label", "채널 목록을 불러오는 중");
+    skeleton.innerHTML = followingChannelSkeletonHtml(list.firstElementChild?.className || "");
+    list.before(skeleton);
+  }
   function applyFollowingChannelView() {
+    const groupSelected = followingChannelToolsOn && isFollowingPage() ? followingGroupSelectedIds() : null;
+    const rootActive = followingChannelToolsOn && isFollowingPage() &&
+      (followingChannelView.sort !== "recent" || Boolean(followingChannelView.sub) ||
+        Boolean(followingChannelView.alarm) || Boolean(groupSelected));
+    const root = document.documentElement;
+    if (root.hasAttribute(FOLLOWING_CHANNEL_ACTIVE_ROOT_ATTR) !== rootActive) {
+      root.toggleAttribute(FOLLOWING_CHANNEL_ACTIVE_ROOT_ATTR, rootActive);
+    }
     const list = followingChannelToolsOn && isFollowingChannelPage() ? findFollowingChannelList() : null;
+    // 채널 탭이 아닌 곳의 같은 종류 목록(정렬 대상 아님)은 가리지 않는다.
+    if (rootActive && !list) {
+      document.querySelectorAll(`#layout-body ul[class*="_type_channel_"]:not([${FOLLOWING_CHANNEL_READY_ATTR}]):not([${FOLLOWING_CHANNEL_SKELETON_ATTR}])`)
+        .forEach((other) => other.setAttribute(FOLLOWING_CHANNEL_READY_ATTR, ""));
+    }
     // 다른 목록(탭을 오갔다)이면 예전 목록 표시를 걷는다.
     document.querySelectorAll(`ul[${FOLLOWING_CHANNEL_LIST_ATTR}]`).forEach((other) => {
       if (other !== list) clearFollowingChannelView(other);
@@ -32838,7 +32904,8 @@ html.cheese-sidebar-resizing div#layout-body {
     const active = Boolean(list) && (view.sort !== "recent" || view.sub || view.alarm || groupIds);
     if (!active) {
       clearFollowingChannelView(list);
-      stopFollowingChannelLoadAll();
+      if (list && followingChannelLoad.list === list) pauseFollowingChannelLoadAll();
+      else stopFollowingChannelLoadAll();
       setFollowingChannelCount("");
       return;
     }
@@ -32861,6 +32928,7 @@ html.cheese-sidebar-resizing div#layout-body {
       }
     }
     const loading = ensureFollowingChannelLoadAll(list, infos.length);
+    setFollowingChannelReady(list, !loading || Date.now() - followingChannelLoad.startedAt > FOLLOWING_CHANNEL_REVEAL_MAX_MS);
     setFollowingChannelCount(loading
       ? `모두 불러오는 중… ${infos.length}개`
       : `${infos.length}개 중 ${shown.length}개`);
@@ -32878,6 +32946,33 @@ html.cheese-sidebar-resizing div#layout-body {
     const el = list.nextElementSibling;
     return el && el.tagName === "DIV" && !el.firstElementChild && !(el.textContent || "").trim() ? el : null;
   }
+  function requestFollowingChannelTotal() {
+    const total = followingChannelTotal;
+    if (total.pending || (total.at && Date.now() - total.at < FOLLOWING_CHANNEL_TOTAL_TTL_MS)) return;
+    total.pending = fetchCustomFollowResponse(
+      `${FOLLOW_CLEANUP_API_BASE}/service/v1/channels/followings?page=0&size=1&sortType=FOLLOW`,
+      { credentials: "include", headers: { accept: "application/json" } },
+    )
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        const n = Number(json?.content?.totalCount);
+        total.value = Number.isFinite(n) && n > 0 ? n : 0;
+      })
+      .catch(() => {})
+      .finally(() => {
+        total.at = Date.now();
+        total.pending = null;
+        applyFollowingChannelView();
+      });
+  }
+  // 기본(최근 팔로우·필터 없음)으로 돌아갈 때: 붙여 둔 감지 지점만 풀고, 이 목록을 어디까지 불러왔는지는 남긴다.
+  // 예전엔 기록까지 지워, 다시 정렬을 고르면 이미 다 불러온 목록도 스켈레톤을 띄우고 처음부터 다시 판단했다.
+  function pauseFollowingChannelLoadAll() {
+    clearTimeout(followingChannelLoad.timer);
+    followingChannelLoad.timer = 0;
+    followingChannelLoad.paused = true;
+    document.querySelectorAll(`[${FOLLOWING_CHANNEL_LOAD_ATTR}]`).forEach((el) => el.removeAttribute(FOLLOWING_CHANNEL_LOAD_ATTR));
+  }
   function stopFollowingChannelLoadAll() {
     clearTimeout(followingChannelLoad.timer);
     followingChannelLoad.timer = 0;
@@ -32888,9 +32983,24 @@ html.cheese-sidebar-resizing div#layout-body {
     const state = followingChannelLoad;
     if (state.list !== list) {
       stopFollowingChannelLoadAll();
-      Object.assign(state, { list, count, lastGrowAt: Date.now(), retries: 0, done: false });
+      Object.assign(state, {
+        list, count, lastGrowAt: Date.now(), startedAt: Date.now(), retries: 0, done: false, paused: false,
+      });
+    } else if (state.paused) {
+      // 다시 고름: 다 불러온 목록이면 그대로 끝, 아니면 이어서 부른다.
+      state.paused = false;
+      if (!state.done) Object.assign(state, { lastGrowAt: Date.now(), startedAt: Date.now(), retries: 0 });
     }
     if (state.done) return false;
+    requestFollowingChannelTotal();
+    if (followingChannelTotal.value && count >= followingChannelTotal.value) {
+      state.done = true;
+      state.count = count;
+      clearTimeout(state.timer);
+      state.timer = 0;
+      followingChannelSentinel(list)?.removeAttribute(FOLLOWING_CHANNEL_LOAD_ATTR);
+      return false;
+    }
     const sentinel = followingChannelSentinel(list);
     if (!sentinel) {
       // 마지막 묶음까지 받으면 치지직이 감지 지점을 없앤다.
@@ -32942,7 +33052,7 @@ html.cheese-sidebar-resizing div#layout-body {
   function setFollowingChannelView(next) {
     followingChannelView = normalizeFollowingChannelView(next);
     try {
-      chrome.storage?.local?.set({ [FOLLOWING_CHANNEL_VIEW_KEY]: followingChannelView });
+      chrome.storage?.local?.set({ [FOLLOWING_CHANNEL_VIEW_KEY]: { sort: followingChannelView.sort } });
     } catch {}
     ensureFollowingGroupBar();
     applyFollowingChannelView();
@@ -32965,7 +33075,7 @@ html.cheese-sidebar-resizing div#layout-body {
     chrome.storage?.local
       ?.get([FOLLOWING_CHANNEL_VIEW_KEY, FOLLOWING_CHANNEL_TOOLS_KEY])
       .then((data) => {
-        followingChannelView = normalizeFollowingChannelView(data?.[FOLLOWING_CHANNEL_VIEW_KEY]);
+        followingChannelView = savedFollowingChannelView(data?.[FOLLOWING_CHANNEL_VIEW_KEY]);
         followingChannelToolsOn = data?.[FOLLOWING_CHANNEL_TOOLS_KEY] !== false;
         ensureFollowingGroupBar();
         applyFollowingChannelView();
@@ -32973,12 +33083,20 @@ html.cheese-sidebar-resizing div#layout-body {
       .catch(() => {});
     chrome.storage?.onChanged?.addListener((changes, area) => {
       if (area !== "local" || (!changes[FOLLOWING_CHANNEL_VIEW_KEY] && !changes[FOLLOWING_CHANNEL_TOOLS_KEY])) return;
+      // 정렬만 받는다(이 탭에서 저장해도 알림이 오는데, 그때 상태 필터를 지우면 안 된다).
+      let changed = false;
       if (changes[FOLLOWING_CHANNEL_VIEW_KEY]) {
-        followingChannelView = normalizeFollowingChannelView(changes[FOLLOWING_CHANNEL_VIEW_KEY].newValue);
+        const sort = savedFollowingChannelView(changes[FOLLOWING_CHANNEL_VIEW_KEY].newValue).sort;
+        if (sort !== followingChannelView.sort) {
+          followingChannelView = { ...followingChannelView, sort };
+          changed = true;
+        }
       }
       if (changes[FOLLOWING_CHANNEL_TOOLS_KEY]) {
         followingChannelToolsOn = changes[FOLLOWING_CHANNEL_TOOLS_KEY].newValue !== false;
+        changed = true;
       }
+      if (!changed) return;
       ensureFollowingGroupBar();
       applyFollowingChannelView();
     });

@@ -37,6 +37,20 @@ check(content.includes("applyFollowingChannelView(); // 팔로잉 채널 탭 정
 check(settingsHtml.includes("data-following-channel-tools") &&
   settingsJs.includes('["[data-following-channel-tools]", "cheeseFollowingChannelTools", true]') &&
   settingsJs.includes('    "cheeseFollowingChannelView",'), "설정 스위치(기본 켬)·백업 키");
+// 정렬은 저장, 상태 필터(구독·알림)는 이 화면에서만 — 새로고침하면 풀린다.
+{
+  const vm = require("node:vm");
+  const ctx = vm.createContext({});
+  vm.runInContext(sliceConsts() + sliceFn("savedFollowingChannelView") + sliceFn("normalizeFollowingChannelView") +
+    "\nthis.saved = savedFollowingChannelView;", Object.assign(ctx, { document: { addEventListener() {} } }));
+  check(JSON.stringify(ctx.saved({ sort: "name-asc", sub: "on", alarm: "off" })) === '{"sort":"name-asc","sub":"","alarm":""}',
+    "저장값에서 정렬만 읽고 상태 필터는 버린다(새로고침하면 아무 필터도 없이)");
+  check(content.includes("chrome.storage?.local?.set({ [FOLLOWING_CHANNEL_VIEW_KEY]: { sort: followingChannelView.sort } });") &&
+    /followingChannelView = savedFollowingChannelView\(data\?\.\[FOLLOWING_CHANNEL_VIEW_KEY\]\);/.test(content),
+    "정렬만 저장하고, 시작할 때 저장값에서 정렬만 쓴다");
+  check(/const sort = savedFollowingChannelView\(changes\[FOLLOWING_CHANNEL_VIEW_KEY\]\.newValue\)\.sort;\s*if \(sort !== followingChannelView\.sort\) \{\s*followingChannelView = \{ \.\.\.followingChannelView, sort \};/.test(content),
+    "저장 알림(이 탭이 저장해도 온다)은 정렬만 받아 상태 필터를 지우지 않는다");
+}
 
 const card = (id, name, { alarm = false, sub = null } = {}) =>
   `<li class="_item_x"><div class="_container_c"><a class="_thumbnail_c" href="/${id}"><img width="60" height="60"><span class="blind">${name} 채널로 이동</span></a>` +
@@ -58,7 +72,7 @@ const CHANNELS = [
 const FIXTURE = `<style>._list_x{display:flex;flex-wrap:wrap;gap:10px;width:900px;margin:0;padding:0;list-style:none}._item_x{width:280px;height:60px}
 ._container_c{display:flex;align-items:center;gap:4px;height:60px;overflow:hidden;font-size:11px}._container_c img{width:20px;height:20px}
 ._wrapper_c p{display:none}._control_c,._follow_c{display:flex;gap:2px}._control_c button{font-size:10px;padding:0 2px}</style>
-<div id="layout-body"><section><ul class="_list_x _flex_wrap_x _type_channel_x">${CHANNELS.map(([n, name, o]) => card(hex(n), name, o)).join("")}</ul><div></div></section>
+<div id="layout-body"><section><ul class="_list_x _flex_wrap_x _type_channel_x">${CHANNELS.map(([n, name, o]) => card(hex(n), name, o)).join("")}</ul></section>
 <span data-cf-channel-count></span></div>`;
 
 (async () => {
@@ -102,16 +116,29 @@ const FIXTURE = `<style>._list_x{display:flex;flex-wrap:wrap;gap:10px;width:900p
       document.body.innerHTML = ${JSON.stringify(FIXTURE)};
       window.__groupIds = null;
       const isFollowingChannelPage = () => true;
+      const isFollowingPage = () => true;
       const followingGroupSelectedIds = () => window.__groupIds;
+      const escapeAttribute = (v) => String(v).replace(/"/g, '&quot;');
+      // 전체 팔로잉 수 요청(가짜). 0 이면 모르는 것으로 본다.
+      window.__total = 0;
+      window.__totalRequests = 0;
+      const FOLLOW_CLEANUP_API_BASE = 'https://api.example';
+      const fetchCustomFollowResponse = async () => {
+        window.__totalRequests += 1;
+        return { ok: true, json: async () => ({ content: { totalCount: window.__total } }) };
+      };
       ${sliceConsts()}
       ${["followingCardChannelId", "normalizeFollowingChannelView", "findFollowingChannelList", "followingChannelCardInfo",
         "sortFollowingChannelInfos", "matchFollowingChannel", "clearFollowingChannelView", "applyFollowingChannelView",
         "setFollowingChannelCount", "followingChannelSentinel", "stopFollowingChannelLoadAll",
-        "ensureFollowingChannelLoadAll"].map(sliceFn).join("\n")}
+        "ensureFollowingChannelLoadAll", "followingChannelSkeletonHtml", "removeFollowingChannelSkeleton",
+        "setFollowingChannelReady", "requestFollowingChannelTotal", "pauseFollowingChannelLoadAll"].map(sliceFn).join("\n")}
       window.api = {
         set(view) { followingChannelView = normalizeFollowingChannelView(view); applyFollowingChannelView(); },
         apply: applyFollowingChannelView,
         state: () => followingChannelLoad,
+        resetTotal() { followingChannelTotal = { value: 0, at: 0, pending: null }; },
+        stop: () => stopFollowingChannelLoadAll(),
       };
       return true;
     })()`);
@@ -217,33 +244,120 @@ const FIXTURE = `<style>._list_x{display:flex;flex-wrap:wrap;gap:10px;width:900p
     check(writes === 0, "같은 상태로 다시 적용해도 카드 속성을 고치지 않는다 " + writes);
 
     // 남은 묶음 불러오기: 감지 지점을 화면 가운데 1px 에 붙이고, 목록이 늘면 떼었다 다시 붙인다. 감지 지점이 사라지면 끝.
+    // 다 불러와 정렬을 마칠 때까지는 목록 대신 스켈레톤(같은 목록·항목 클래스)을 보인다.
+    const visibleNames = `(list) => [...list.children].filter((li) => !li.hasAttribute('data-cheese-channel-hidden'))
+        .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top || a.getBoundingClientRect().left - b.getBoundingClientRect().left)
+        .map((li) => li.querySelector('._text_e').textContent).join(',')`;
     const load = await ev(`(async () => {
+      const names = ${visibleNames};
       const list = document.querySelector('ul._list_x');
-      const sentinel = list.nextElementSibling;
       window.__groupIds = null;
+      api.set({}); ${frames}
+      api.stop(); // 앞 검사(감지 지점 없이 시작)의 '다 불러옴' 기록을 지우고 처음 들어온 목록처럼
+      list.insertAdjacentHTML('afterend', '<div></div>'); // 다음 묶음 감지 지점
+      const sentinel = list.nextElementSibling;
       api.set({ sort: 'name-asc' }); ${frames}
       const pinned = sentinel.hasAttribute('data-cheese-channel-loadall') && getComputedStyle(sentinel).position === 'fixed';
       const loading = document.querySelector('[data-cf-channel-count]').textContent;
+      const skeleton = list.previousElementSibling;
+      const box = (kind) => { const r = skeleton.querySelector('.cheese-following-channel-skeleton-' + kind).getBoundingClientRect();
+        return Math.round(r.width) + 'x' + Math.round(r.height); };
+      const bones = ['avatar', 'follow', 'alarm', 'subscribe'].map(box).join(',') + '|' +
+        getComputedStyle(skeleton.querySelector('.cheese-following-channel-skeleton-avatar')).borderRadius;
+      const skeletonShown = Boolean(skeleton?.hasAttribute('data-cheese-channel-skeleton')) && skeleton.className === list.className &&
+        skeleton.children.length === 12 && skeleton.firstElementChild.className === list.firstElementChild.className &&
+        getComputedStyle(skeleton).display !== 'none' && getComputedStyle(list).display === 'none';
       list.insertAdjacentHTML('beforeend', ${JSON.stringify(card(hex(7), "바다", { sub: true }))});
       api.apply();
       const detached = !sentinel.hasAttribute('data-cheese-channel-loadall');
       ${frames}
       const repinned = sentinel.hasAttribute('data-cheese-channel-loadall');
-      const names = [...list.children].filter((li) => !li.hasAttribute('data-cheese-channel-hidden'))
-        .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top || a.getBoundingClientRect().left - b.getBoundingClientRect().left)
-        .map((li) => li.querySelector('._text_e').textContent).join(',');
       sentinel.remove(); // 마지막 묶음 뒤 치지직이 감지 지점을 없앤다
-      api.apply();
+      api.apply(); ${frames}
       const done = document.querySelector('[data-cf-channel-count]').textContent;
+      const revealed = getComputedStyle(list).display !== 'none' && !list.previousElementSibling?.hasAttribute('data-cheese-channel-skeleton');
+      const sorted = names(list);
+      // 탭을 오갔다: 치지직이 새 목록을 기본 순서로 그린다 → 우리 처리 전부터 가려져 있어야 한다.
+      const section = list.parentElement;
+      const fresh = list.cloneNode(true);
+      fresh.removeAttribute('data-cheese-channel-view'); fresh.removeAttribute('data-cheese-channel-ready');
+      [...fresh.children].forEach((li) => { li.removeAttribute('style'); li.removeAttribute('data-cheese-channel-hidden'); delete li.dataset.cheeseChannelState; });
+      list.remove();
+      section.append(fresh);
+      fresh.insertAdjacentHTML('afterend', '<div></div>');
+      const hiddenBeforeApply = getComputedStyle(fresh).display === 'none';
+      api.apply();
+      const skeletonOnReturn = Boolean(fresh.previousElementSibling?.hasAttribute('data-cheese-channel-skeleton'));
+      fresh.nextElementSibling.remove();
+      api.apply(); ${frames}
+      const returned = getComputedStyle(fresh).display !== 'none' && names(fresh);
       api.set({}); ${frames}
-      const cleared = !list.hasAttribute('data-cheese-channel-view') && [...list.children].every((li) => !li.style.order && !li.hasAttribute('data-cheese-channel-hidden'));
-      return { pinned, loading, detached, repinned, names, done, cleared };
+      const cleared = !fresh.hasAttribute('data-cheese-channel-view') && !document.documentElement.hasAttribute('data-cheese-channel-view-active') &&
+        [...fresh.children].every((li) => !li.style.order && !li.hasAttribute('data-cheese-channel-hidden')) &&
+        getComputedStyle(fresh).display !== 'none';
+      return { bones, pinned, loading, skeletonShown, detached, repinned, done, revealed, sorted, hiddenBeforeApply, skeletonOnReturn, returned, cleared };
     })()`);
     check(load.pinned && /모두 불러오는 중… 6개/.test(load.loading), "정렬을 고르면 감지 지점을 화면에 붙여 남은 묶음을 부른다 " + JSON.stringify(load));
-    check(load.detached && load.repinned, "새 묶음이 붙으면 떼었다 두 프레임 뒤 다시 붙인다(같은 요소가 남는 감지 지점)");
-    check(load.names === "가람,나비,다온,라온,바다,apple,Zed", "새로 붙은 카드도 정렬에 들어간다 " + load.names);
-    check(load.done === "7개 중 7개", "감지 지점이 사라지면 다 불러온 것으로 본다 " + load.done);
-    check(load.cleared, "기본으로 돌리면 순서·숨김 표시를 모두 걷는다");
+    check(load.skeletonShown, "다 불러올 때까지 목록 대신 같은 모양의 스켈레톤을 보인다");
+    check(load.bones === "60x60,90x34,34x34,77x34|50%", "스켈레톤은 치지직 카드 모양(프로필 원 · 팔로잉 알약 · 알림 원 · 구독 알약) " + load.bones);
+    check(load.detached && load.repinned, "새 묶음이 붙으면 떼었다 두 프레임 뒤 다시 붙인다(같은 요소가 남는 감지 지점) " + JSON.stringify(load));
+    check(load.done === "7개 중 7개" && load.revealed, "감지 지점이 사라지면 다 불러온 것으로 보고 목록을 보인다 " + load.done);
+    check(load.sorted === "가람,나비,다온,라온,바다,apple,Zed", "새로 붙은 카드도 정렬에 들어간다 " + load.sorted);
+    check(load.hiddenBeforeApply && load.skeletonOnReturn && load.returned === "가람,나비,다온,라온,바다,apple,Zed",
+      "탭을 오가 치지직이 기본 순서로 다시 그려도 처리 전부터 가리고 스켈레톤 뒤 정렬된 목록을 보인다 " + JSON.stringify(load));
+    check(load.cleared, "기본으로 돌리면 순서·숨김·가림 표시를 모두 걷는다");
+
+    // 다 불러온 뒤 '최근 팔로우'로 돌아갔다가 다시 정렬을 고르면, 다시 불러오지 않고 바로 보인다(스켈레톤 없음).
+    // 전체 팔로잉 수를 알면 카드 수가 그 수에 닿는 순간 끝으로 본다(감지 지점이 남아 있어도).
+    const again = await ev(`(async () => {
+      const names = ${visibleNames};
+      const list = document.querySelector('ul._list_x:not([data-cheese-channel-skeleton])');
+      api.set({ sort: 'oldest' }); ${frames}
+      const instant = !list.previousElementSibling?.hasAttribute('data-cheese-channel-skeleton') &&
+        getComputedStyle(list).display !== 'none' && names(list).startsWith('바다');
+      api.set({}); ${frames}
+      // 탭을 오감: 새 목록(카드 7개) + 감지 지점, 전체 팔로잉 8명
+      api.resetTotal();
+      window.__total = 8;
+      const section = list.parentElement;
+      const fresh = list.cloneNode(true);
+      [...fresh.children].forEach((li) => { li.removeAttribute('style'); li.removeAttribute('data-cheese-channel-hidden'); delete li.dataset.cheeseChannelState; });
+      list.remove();
+      section.append(fresh);
+      fresh.insertAdjacentHTML('afterend', '<div></div>');
+      const sentinel = fresh.nextElementSibling;
+      api.set({ sort: 'name-asc' }); ${frames}
+      const loadingWhileShort = Boolean(fresh.previousElementSibling?.hasAttribute('data-cheese-channel-skeleton'));
+      fresh.insertAdjacentHTML('beforeend', ${JSON.stringify(card(hex(8), "사과", {}))});
+      api.apply(); ${frames}
+      const readyAtTotal = getComputedStyle(fresh).display !== 'none' && !fresh.previousElementSibling?.hasAttribute('data-cheese-channel-skeleton') &&
+        document.querySelector('[data-cf-channel-count]').textContent === '8개 중 8개' && !sentinel.hasAttribute('data-cheese-channel-loadall');
+      api.set({}); ${frames}
+      api.set({ sort: 'name-desc' }); ${frames}
+      const instantAgain = getComputedStyle(fresh).display !== 'none' && !fresh.previousElementSibling?.hasAttribute('data-cheese-channel-skeleton') &&
+        !sentinel.hasAttribute('data-cheese-channel-loadall');
+      const requests = window.__totalRequests;
+      api.set({}); ${frames}
+      // 수를 모르고 감지 지점도 남은 채, 시간으로 '다 불러옴'을 판단한 목록(실기기에서 겪은 경우)
+      api.resetTotal();
+      window.__total = 0;
+      api.stop();
+      api.set({ sort: 'oldest' }); ${frames}
+      api.state().done = true; // 3초+3초 동안 늘지 않아 끝으로 본 상태
+      api.apply(); ${frames}
+      api.set({}); ${frames}
+      api.set({ sort: 'name-asc' }); ${frames}
+      const instantAfterTimeout = !fresh.previousElementSibling?.hasAttribute('data-cheese-channel-skeleton') &&
+        getComputedStyle(fresh).display !== 'none' && !sentinel.hasAttribute('data-cheese-channel-loadall');
+      api.set({}); ${frames}
+      return { instant, loadingWhileShort, readyAtTotal, instantAgain, requests, instantAfterTimeout };
+    })()`);
+    check(again.instant, "다 불러온 뒤 기본으로 돌아갔다가 다시 정렬을 고르면 스켈레톤 없이 바로 보인다 " + JSON.stringify(again));
+    check(again.loadingWhileShort && again.readyAtTotal,
+      "전체 팔로잉 수에 못 미치면 스켈레톤, 닿으면 감지 지점이 남아 있어도 바로 다 불러온 것으로 본다 " + JSON.stringify(again));
+    check(again.instantAgain, "수에 닿아 끝난 목록도 기본으로 돌아갔다 다시 고르면 바로 보인다");
+    check(again.requests <= 2, "전체 수는 1분 동안 기억해 틱마다 묻지 않는다 " + again.requests);
+    check(again.instantAfterTimeout, "시간으로 끝을 본 목록도(감지 지점이 남아 있어도) 기본으로 돌아갔다 다시 고르면 다시 불러오지 않는다");
   } finally {
     browser.kill();
     try { rmSync(dir, { recursive: true, force: true }); } catch {}
