@@ -67,7 +67,7 @@ const FIXTURE = `
       if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails));
       return r.result.value;
     };
-    const result = await ev(`(() => {
+    const result = await ev(`(async () => {
       const st = document.createElement('style'); st.textContent = ${JSON.stringify(css)}; document.head.append(st);
       document.body.innerHTML = ${JSON.stringify(FIXTURE)};
       const IS_TOP_FRAME = true;
@@ -103,8 +103,11 @@ const FIXTURE = `
       const applyFollowingChannelView = () => {};
       ${["isFollowingPage", "followingGroupFilterChoices", "followingGroupSelectedIds", "followingGroupFilterChannelIds", "followingCardChannelId",
         "findFollowingFilterCards", "findLiveTagFilterTablist", "ensureFollowingGroupBar", "setFollowingGroupFilter",
-        "clearHiddenLiveTagFilterCards", "hideLiveTagFilterCard", "isLivePaginationSentinel",
-        "preserveLiveTagFilterPaginationAnchors", "scheduleLiveTagFilterPaginationCheck", "applyLiveTagFilters"].map(sliceFn).join("\n")}
+        "hiddenLiveTagFilterCards", "clearHiddenLiveTagFilterCards", "unhideLiveTagFilterCard", "isLiveTagFilterCardHidden",
+        "hideLiveTagFilterCard", "isLivePaginationSentinel", "preserveLiveTagFilterPaginationAnchors",
+        "scheduleLiveTagFilterPaginationCheck", "ensureLiveTagFilterObserver", "applyLiveTagFilters",
+        "applyLiveTagFiltersNow"].map(sliceFn).join("\n")}
+      let liveTagFilterObserver = null, liveTagFilterObserved = null, liveTagFilterApplying = false;
       // 숨김 클래스가 없는 카드의 이름(라이브=채널 글자, 다시보기·채널=링크 글자).
       const label = (card) => card.querySelector('a[href^="/live/"]')?.getAttribute('href').slice(6, 7) ||
         [...card.querySelectorAll('a')].at(-1).textContent;
@@ -127,11 +130,29 @@ const FIXTURE = `
       out.favAnchor = document.querySelector('#lives li:nth-child(2)').classList.contains('cheese-live-tag-filter-pagination-anchor');
       setFollowingGroupFilter('');
       out.all = shown();
+      // 다시 적용해도 숨긴 카드의 속성을 건드리지 않는다(예전엔 틱마다 모두 풀었다 다시 숨겨 속성 변경이 쏟아지고
+      // 그 변경이 다시 틱을 불렀다).
+      setFollowingGroupFilter('custom:g1');
+      let writes = 0;
+      const mo = new MutationObserver((records) => { writes += records.length; });
+      mo.observe(document.querySelector('#layout-body'), { attributes: true, subtree: true });
+      for (let i = 0; i < 5; i += 1) applyLiveTagFilters();
+      await new Promise((r) => setTimeout(r, 0));
+      mo.disconnect();
+      out.writes = writes;
+      // 새 카드가 붙으면 화면을 그리기 전(MutationObserver)에 바로 거른다 — 틱을 기다리지 않는다.
+      const list = document.querySelector('#lives');
+      list.insertAdjacentHTML('beforeend', '<li class="_item_x"><div class="_container_x"><a href="/live/${D}" class="_thumbnail_x">썸네일</a><a href="/${D}">채널</a></div></li>');
+      const fresh = list.lastElementChild;
+      const beforeMicrotask = fresh.classList.contains(LIVE_TAG_FILTER_HIDDEN_CLASS);
+      await Promise.resolve();
+      out.instantHide = !beforeMicrotask + '|' + fresh.classList.contains(LIVE_TAG_FILTER_HIDDEN_CLASS);
       setFollowingGroupFilter('custom:g1');
       customFollowGroups = [];
       ensureFollowingGroupBar();
       applyLiveTagFilters();
       out.removed = followingGroupFilterSelected + '|' + shown().length;
+      out.observerOff = liveTagFilterObserver === null;
       return out;
     })()`);
     assert.equal(result.bar, ":true,fav:false,custom:g1:false", "탭 막대 바로 아래 칩: 전체·즐겨찾기·그룹(빈 그룹 제외) " + result.bar);
@@ -143,8 +164,11 @@ const FIXTURE = `
     assert.equal(result.pressed, "true");
     assert.deepEqual(result.fav.sort(), ["c", "영상(채널 없음)", "이름C"].sort(), "즐겨찾기: " + JSON.stringify(result.fav));
     assert.equal(result.all.length, 9, "전체: 모두 보인다 " + JSON.stringify(result.all));
+    assert.equal(result.writes, 0, "다시 적용해도 숨긴 카드의 속성을 바꾸지 않는다(바뀐 카드만 고친다) " + result.writes);
+    assert.equal(result.instantHide, "true|true", "새로 붙은 카드는 틱을 기다리지 않고 그리기 전에 거른다");
+    assert.equal(result.observerOff, true, "필터를 끄면 카드 감시를 멈춘다");
     assert.equal(result.removed.split("|")[0], "", "고른 그룹이 사라지면 전체로");
-    assert.equal(Number(result.removed.split("|")[1]), 9, "그룹이 사라지면 다시 모두 보인다");
+    assert.equal(Number(result.removed.split("|")[1]), 10, "그룹이 사라지면 다시 모두 보인다(새로 붙인 카드 포함)");
   } finally {
     browser.kill();
     try { rmSync(dir, { recursive: true, force: true }); } catch {}

@@ -81,6 +81,7 @@ const HIDDEN = [0, 1, 2, 4, 7, 10, 11, 13, 23, 29, 30, 31, 32, 38];
       const LIVE_TAG_FILTER_HIDDEN_CLASS = "cheese-live-tag-filter-hidden";
       const LIVE_TAG_FILTER_PAGINATION_CLASS = "cheese-live-tag-filter-pagination-anchor";
       const LIVE_TAG_FILTER_ANCHOR_LIST_CLASS = "cheese-live-tag-filter-anchor-list";
+      ${sliceFn("isLiveTagFilterCardHidden")}
       ${sliceFn("hideLiveTagFilterCard")}
       ${sliceFn("isLivePaginationSentinel")}
       ${sliceFn("preserveLiveTagFilterPaginationAnchors")}

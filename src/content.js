@@ -33613,15 +33613,18 @@ html.cheese-sidebar-resizing div#layout-body {
     button.click();
   }
 
+  function hiddenLiveTagFilterCards() {
+    return document.querySelectorAll(
+      `.${LIVE_TAG_FILTER_HIDDEN_CLASS}, [data-cheese-live-tag-filter-hidden]`,
+    );
+  }
   function clearHiddenLiveTagFilterCards() {
     document
       .querySelectorAll(`.${LIVE_TAG_FILTER_ANCHOR_LIST_CLASS}`)
       .forEach((list) => list.classList.remove(LIVE_TAG_FILTER_ANCHOR_LIST_CLASS));
-    document
-      .querySelectorAll(
-        `.${LIVE_TAG_FILTER_HIDDEN_CLASS}, [data-cheese-live-tag-filter-hidden]`,
-      )
-      .forEach((card) => {
+    hiddenLiveTagFilterCards().forEach(unhideLiveTagFilterCard);
+  }
+  function unhideLiveTagFilterCard(card) {
         card.classList.remove(
           LIVE_TAG_FILTER_HIDDEN_CLASS,
           LIVE_TAG_FILTER_PAGINATION_CLASS,
@@ -33651,10 +33654,16 @@ html.cheese-sidebar-resizing div#layout-body {
           delete card.dataset.cheeseLiveTagFilterAriaHidden;
           delete card.dataset.cheeseLiveTagFilterWasInert;
         }
-      });
   }
 
+  function isLiveTagFilterCardHidden(card) {
+    return card.dataset.cheeseLiveTagFilterHidden === "1" &&
+      card.classList.contains(LIVE_TAG_FILTER_HIDDEN_CLASS) &&
+      card.getAttribute("aria-hidden") === "true" && card.hasAttribute("inert") && !card.hasAttribute("hidden");
+  }
   function hideLiveTagFilterCard(card) {
+    // ⚠ 이미 숨긴 카드는 건드리지 않는다(같은 값을 다시 써도 속성 변경이 일어나 틱이 다시 돈다).
+    if (isLiveTagFilterCardHidden(card)) return;
     if (card.dataset.cheeseLiveTagFilterHidden !== "1") {
       card.dataset.cheeseLiveTagFilterWasHidden = card.hidden ? "1" : "0";
       card.dataset.cheeseLiveTagFilterHadAriaHidden = card.hasAttribute(
@@ -33696,6 +33705,8 @@ html.cheese-sidebar-resizing div#layout-body {
   function preserveLiveTagFilterPaginationAnchors(hiddenCards) {
     const lastCards = new Map();
     let lastAnchor = null;
+    const anchors = new Set();
+    const lists = new Set();
     for (const card of hiddenCards) {
       const parent = card.parentElement;
       if (!parent) continue;
@@ -33708,10 +33719,23 @@ html.cheese-sidebar-resizing div#layout-body {
       }
       const sentinel = [...card.children].some(isLivePaginationSentinel);
       if (!sentinel && lastCards.get(parent) !== card) continue;
-      card.classList.add(LIVE_TAG_FILTER_PAGINATION_CLASS);
-      parent.classList.add(LIVE_TAG_FILTER_ANCHOR_LIST_CLASS);
+      anchors.add(card);
+      lists.add(parent);
       lastAnchor = card;
     }
+    // 바뀐 것만 고친다.
+    document.querySelectorAll(`.${LIVE_TAG_FILTER_PAGINATION_CLASS}`).forEach((card) => {
+      if (!anchors.has(card)) card.classList.remove(LIVE_TAG_FILTER_PAGINATION_CLASS);
+    });
+    document.querySelectorAll(`.${LIVE_TAG_FILTER_ANCHOR_LIST_CLASS}`).forEach((list) => {
+      if (!lists.has(list)) list.classList.remove(LIVE_TAG_FILTER_ANCHOR_LIST_CLASS);
+    });
+    anchors.forEach((card) => {
+      if (!card.classList.contains(LIVE_TAG_FILTER_PAGINATION_CLASS)) card.classList.add(LIVE_TAG_FILTER_PAGINATION_CLASS);
+    });
+    lists.forEach((list) => {
+      if (!list.classList.contains(LIVE_TAG_FILTER_ANCHOR_LIST_CLASS)) list.classList.add(LIVE_TAG_FILTER_ANCHOR_LIST_CLASS);
+    });
     return lastAnchor;
   }
 
@@ -33749,26 +33773,67 @@ html.cheese-sidebar-resizing div#layout-body {
     });
   }
 
+  // ⚠ 바뀐 카드만 고친다. 예전엔 틱마다 숨긴 카드를 모두 풀었다 다시 숨겨(속성 7개씩), 팔로잉 동영상 탭에서
+  //   그룹을 고르면 5초에 속성 변경이 2만 번 넘게 일어나며 그 변경이 다시 틱을 불렀다(2026-10-31 실측).
+  // ⚠ 필터가 켜져 있으면 목록에 카드가 붙는 즉시(화면을 그리기 전, MutationObserver) 거른다. 숨긴 카드가
+  //   많으면 치지직이 다음 묶음을 계속 불러오는데, 틱을 기다리면 새 카드가 잠깐 보였다 사라지기를 되풀이했다.
+  let liveTagFilterObserver = null;
+  let liveTagFilterObserved = null;
+  let liveTagFilterApplying = false;
+  function ensureLiveTagFilterObserver(scope, on) {
+    if (!on || !scope) {
+      liveTagFilterObserver?.disconnect();
+      liveTagFilterObserver = null;
+      liveTagFilterObserved = null;
+      return;
+    }
+    if (liveTagFilterObserver && liveTagFilterObserved === scope) return;
+    liveTagFilterObserver?.disconnect();
+    liveTagFilterObserved = scope;
+    liveTagFilterObserver = new MutationObserver((records) => {
+      const cardAdded = records.some((record) =>
+        [...record.addedNodes].some((node) => node.nodeType === 1 &&
+          (node.tagName === "LI" || node.querySelector?.("li"))));
+      if (cardAdded && !liveTagFilterApplying) applyLiveTagFilters();
+    });
+    // 자식 추가만 본다(우리가 바꾸는 속성에는 반응하지 않는다).
+    liveTagFilterObserver.observe(scope, { childList: true, subtree: true });
+  }
+
   function applyLiveTagFilters() {
+    if (liveTagFilterApplying) return;
+    liveTagFilterApplying = true;
+    try {
+      applyLiveTagFiltersNow();
+    } finally {
+      liveTagFilterApplying = false;
+    }
+  }
+
+  function applyLiveTagFiltersNow() {
     const kind = getLiveTagFilterPageKind();
-    clearHiddenLiveTagFilterCards();
     const active = kind ? activeLiveTagFilters(kind) : [];
     // 팔로잉 화면 그룹 필터(모든 탭). 제외 필터와 같은 숨김·관찰 지점 처리를 함께 쓴다.
     const groupIds = followingGroupFilterChannelIds();
-    if (!active.length && !groupIds) return;
-    const filterSet = new Set(active.map(normalizeLiveTagFilter));
     const scope =
       document.querySelector("#layout-body") ||
       document.querySelector("main") ||
       document.body;
-    if (!scope) return;
+    const on = Boolean(scope) && (active.length > 0 || Boolean(groupIds));
+    ensureLiveTagFilterObserver(scope, on);
+    if (!on) {
+      if (hiddenLiveTagFilterCards().length || document.querySelector(`.${LIVE_TAG_FILTER_ANCHOR_LIST_CLASS}`)) {
+        clearHiddenLiveTagFilterCards();
+      }
+      return;
+    }
+    const filterSet = new Set(active.map(normalizeLiveTagFilter));
     const hiddenCards = new Set();
     if (groupIds) {
       for (const card of findFollowingFilterCards(scope)) {
         const channelId = followingCardChannelId(card);
         // 채널을 알 수 없는 카드(광고·추천 등)는 그대로 둔다.
         if (!channelId || groupIds.has(channelId)) continue;
-        hideLiveTagFilterCard(card);
         hiddenCards.add(card);
       }
     }
@@ -33788,10 +33853,14 @@ html.cheese-sidebar-resizing div#layout-body {
       }
       const card = node.closest("li");
       if (card?.querySelector('a[href^="/live/"]')) {
-        hideLiveTagFilterCard(card);
         hiddenCards.add(card);
       }
     }
+    // 더는 숨기지 않을 카드만 풀고, 새로 숨길 카드만 숨긴다.
+    hiddenLiveTagFilterCards().forEach((card) => {
+      if (!hiddenCards.has(card)) unhideLiveTagFilterCard(card);
+    });
+    hiddenCards.forEach(hideLiveTagFilterCard);
     scheduleLiveTagFilterPaginationCheck(
       preserveLiveTagFilterPaginationAnchors(hiddenCards),
     );

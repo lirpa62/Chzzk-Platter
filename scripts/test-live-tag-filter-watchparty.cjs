@@ -21,7 +21,7 @@ const sliceFn = (name) => {
   assert.ok(at >= 0, `${name} 를 찾지 못했다`);
   return content.slice(at, content.indexOf("\n  }\n", at) + 4);
 };
-const apply = sliceFn("applyLiveTagFilters");
+const apply = sliceFn("applyLiveTagFiltersNow");
 const selector = apply.match(/scope\.querySelectorAll\(\s*'([^']+)'/)[1];
 check(selector.includes('a[href*="/watchparty/"]'), "제외 필터가 같이보기 링크(/watchparty/)도 훑는다");
 
