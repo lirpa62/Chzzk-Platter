@@ -168,6 +168,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseSyncAdaptive:false,
         cheeseSidebarMultiviewPosition:'top',
         cheeseSidebarTopMenuOrder:['multiview','lives','clips','category','schedule','following','cheezefarm'],
+        cheeseFollowingChannelTools:false,
+        cheeseFollowingChannelView:{sort:'oldest'},
         cheesePlaylists:{v:1,lists:[{id:'playlist01',name:'테스트 목록',items:[{
           id:'item0001',type:'video',videoNo:'123456',start:12,title:'테스트 영상',
           thumb:'https://example.com/tracker.png',channelId:'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
@@ -631,6 +633,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         check(exported.settings.cheeseVideoSearchOptions?.sort==='DATE_DESC'&&exported.settings.cheeseSyncAdaptive===false&&
           Object.hasOwn(exported.settings,'cheeseSidebarMultiviewPosition')&&Array.isArray(exported.settings.cheeseSidebarTopMenuOrder),
           '1.64.0 settings missing from export');
+        check(exported.settings.cheeseFollowingChannelTools===false&&exported.settings.cheeseFollowingChannelView?.sort==='oldest',
+          'following channel tab settings missing from export');
         check(exported.settings.cheeseFeatureHidden?.chatHideInputPlaceholder===true,'placeholder option missing from backup');
         check(exported.settings.cheeseFeatureHidden?.vodLocalChat===true,'local replay chat option missing from backup');
         check(exported.settings.cheeseMultiviewQuickPosition?.width===640,'multiview panel geometry missing from export');
@@ -673,6 +677,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
         cheeseSyncAdaptive:true,
         cheeseSidebarMultiviewPosition:'services',
         cheeseSidebarTopMenuOrder:['clips','lives','category','schedule','following','cheezefarm','multiview'],
+        cheeseFollowingChannelTools:true,
+        cheeseFollowingChannelView:{sort:'name-desc'},
         cheeseMultiviewSetupSortBySource:{following:'name-asc'},cheeseMultiviewRememberSetupSort:false,
         cheeseMultiviewSetupOptions:{mainHighQuality:false,startWithoutChat:true,startMainMuted:false,startMainVolume:0.62},
         cheeseMultiviewLiveCatchUpLimit:4},appearance:{multiviewChatSize:{w:720,h:180,topH:210}}};
@@ -731,6 +737,8 @@ const deadline = setTimeout(() => browser.kill('SIGTERM'), 45000);
       check(saved.cheeseVideoSearchOptions?.sort==='PLAY_COUNT_DESC'&&saved.cheeseSyncAdaptive===true&&
         saved.cheeseSidebarMultiviewPosition==='services'&&saved.cheeseSidebarTopMenuOrder?.[0]==='clips',
         '1.64.0 settings were not imported');
+      check(saved.cheeseFollowingChannelTools===true&&saved.cheeseFollowingChannelView?.sort==='name-desc',
+        'following channel tab settings were not imported');
       check(localStorage.getItem('cheeseWatchTimeChartType')===null,
         'removed watch-time chart preference was imported');
       check(saved.cheeseLiveTagFiltersDisabled?.[0]==='game'&&saved.cheeseFollowingLiveAutoExpand===false,
