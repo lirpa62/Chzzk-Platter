@@ -32602,10 +32602,15 @@ html.cheese-sidebar-resizing div#layout-body {
     }
     return choices;
   }
-  // 지금 걸러야 할 채널 id(고른 그룹이 있을 때만). 아니면 null.
-  function followingGroupFilterChannelIds() {
+  // 고른 그룹의 채널 id(고른 그룹이 있을 때만). 아니면 null.
+  function followingGroupSelectedIds() {
     if (!followingGroupFilterOn || !followingGroupFilterSelected || !isFollowingPage()) return null;
     return followingGroupFilterChoices().find((c) => c.key === followingGroupFilterSelected)?.ids || null;
+  }
+  // 제외 필터와 함께 카드를 숨길 채널 id. 채널 탭은 정렬·상태 필터와 함께 applyFollowingChannelView 가 맡는다.
+  function followingGroupFilterChannelIds() {
+    if (isFollowingChannelPage()) return null;
+    return followingGroupSelectedIds();
   }
   // 카드의 채널: 라이브 링크(/live/<id>) 또는 채널 홈 링크(/<id>).
   function followingCardChannelId(card) {
@@ -32645,7 +32650,8 @@ html.cheese-sidebar-resizing div#layout-body {
   function ensureFollowingGroupBar() {
     const bars = [...document.querySelectorAll(`.${FOLLOWING_GROUP_BAR_CLASS}`)];
     const choices = followingGroupFilterOn && isFollowingPage() ? followingGroupFilterChoices() : [];
-    const filterBar = choices.length
+    const channelTools = followingChannelToolsOn && isFollowingChannelPage();
+    const filterBar = choices.length || channelTools
       ? findLiveTagFilterTablist("following")?.closest('div[class*="_filter_"]')
       : null;
     if (!filterBar) {
@@ -32675,17 +32681,308 @@ html.cheese-sidebar-resizing div#layout-body {
       `<button type="button" data-cf-follow-filter="${escapeAttribute(key)}" aria-pressed="${followingGroupFilterSelected === key}"` +
       `${color ? ` style="--cheese-cf-group-color:${escapeAttribute(color)}"` : ""} title="${escapeAttribute(name)}">` +
       `${inner}<span>${escapeHtml(name)}</span>${count ? `<small>${count}</small>` : ""}</button>`;
-    const html =
-      `<span class="cheese-following-group-bar-label">그룹</span>` +
-      chip("", "전체", "", "", 0) +
-      choices.map((c) => chip(c.key, c.name,
-        `<span class="cheese-following-group-bar-icon" aria-hidden="true">${customFollowLucideIcon(c.icon, 14)}</span>`,
-        c.color, c.ids.size)).join("");
+    const groupHtml = choices.length
+      ? `<span class="cheese-following-group-bar-label">그룹</span>` +
+        chip("", "전체", "", "", 0) +
+        choices.map((c) => chip(c.key, c.name,
+          `<span class="cheese-following-group-bar-icon" aria-hidden="true">${customFollowLucideIcon(c.icon, 14)}</span>`,
+          c.color, c.ids.size)).join("")
+      : "";
+    // 채널 탭: 정렬·상태(구독·알림) 칩. 그룹 칩이 있으면 다음 줄에 둔다.
+    const toolChip = (attr, value, name, pressed) =>
+      `<button type="button" ${attr}="${escapeAttribute(value)}" aria-pressed="${pressed}">` +
+      `<span>${escapeHtml(name)}</span></button>`;
+    const toolsHtml = channelTools
+      ? (groupHtml ? `<span class="cheese-following-group-bar-break" aria-hidden="true"></span>` : "") +
+        `<span class="cheese-following-group-bar-label">정렬</span>` +
+        FOLLOWING_CHANNEL_SORTS.map(([value, name]) =>
+          toolChip("data-cf-channel-sort", value, name, followingChannelView.sort === value)).join("") +
+        `<span class="cheese-following-group-bar-label cheese-following-group-bar-gap">상태</span>` +
+        FOLLOWING_CHANNEL_STATES.map(([value, name]) => {
+          const [field, want] = value.split(":");
+          return toolChip("data-cf-channel-state", value, name, followingChannelView[field] === want);
+        }).join("") +
+        `<span class="cheese-following-channel-count" data-cf-channel-count aria-live="polite"></span>`
+      : "";
+    const html = groupHtml + toolsHtml;
     if (bar.dataset.html !== html) {
       bar.dataset.html = html;
       bar.innerHTML = html;
+      followingChannelCountText = "";
     }
   }
+
+  // ── 팔로잉 채널 탭(?tab=CHANNEL) 정렬·상태 필터 ────────────────────────────────
+  // 치지직 목록은 최근 팔로우한 순으로 30개씩(스크롤하면 다음 묶음) 그린다(2026-10-30 실측:
+  // ul._type_channel_ > li._item_, 다음 묶음 감지 지점 = 목록 바로 뒤 높이 0 빈 div). 카드에 다 있다:
+  // 이름, 알림 버튼(숨김 글자 '알림 끄기' = 켜져 있음 / '알림 켜기' = 꺼져 있음), 구독 버튼('구독중' / '구독',
+  // 구독을 열지 않은 채널은 버튼 없음). 화면에서 읽으므로 이 화면에서 바꾼 알림·구독도 바로 반영된다.
+  // ⚠ 치지직 카드(li)는 옮기지 않는다 — order(보이는 순서)와 숨김 표시만 바꿔 팔로잉·알림·구독 버튼이 그대로 동작한다.
+  // ⚠ 정렬·필터를 고르면 남은 묶음을 모두 불러온다(이름순은 다 있어야 맞다). 아무것도 고르지 않으면 치지직 그대로.
+  // ⚠ 바뀐 카드만 고친다. 제외 필터(applyLiveTagFilters)처럼 매번 모두 풀었다 다시 숨기면 카드가 많을 때
+  //   틱마다 목록 전체 스타일을 다시 계산해 버벅였다.
+  const FOLLOWING_CHANNEL_VIEW_KEY = "cheeseFollowingChannelView";
+  const FOLLOWING_CHANNEL_TOOLS_KEY = "cheeseFollowingChannelTools"; // 정렬·상태 칩 표시(기본 켬)
+  const FOLLOWING_CHANNEL_SORTS = [
+    ["recent", "최근 팔로우"],
+    ["oldest", "오래된 팔로우"],
+    ["name-asc", "이름 오름차순"],
+    ["name-desc", "이름 내림차순"],
+  ];
+  const FOLLOWING_CHANNEL_STATES = [
+    ["sub:on", "구독 중"],
+    ["sub:off", "구독 안 함"],
+    ["alarm:on", "알림 켬"],
+    ["alarm:off", "알림 끔"],
+  ];
+  const FOLLOWING_CHANNEL_HIDDEN_ATTR = "data-cheese-channel-hidden";
+  const FOLLOWING_CHANNEL_LIST_ATTR = "data-cheese-channel-view";
+  const FOLLOWING_CHANNEL_LOAD_ATTR = "data-cheese-channel-loadall";
+  let followingChannelToolsOn = true;
+  let followingChannelView = { sort: "recent", sub: "", alarm: "" };
+  let followingChannelCountText = "";
+  let followingChannelCollator = null;
+  // 마우스가 올라가 있는 채널 카드(그 카드는 버튼 글자가 바뀌어도 마지막 상태를 쓴다).
+  // ⚠ 떠난 카드도 잠시(FOLLOWING_CHANNEL_LEAVE_HOLD_MS) 마지막 상태를 쓴다. 포인터 이벤트(pointerover)가 마우스
+  //   이벤트보다 먼저 와서, 떠나는 순간에는 치지직(React)이 아직 버튼을 호버 글자로 둔 채다 — 그때 다시 읽으면
+  //   '구독중' 버튼에 올렸다가 옆으로 옮길 때 그 카드가 숨겨져 뒤 카드가 당겨 올라오며 깜빡였다.
+  const FOLLOWING_CHANNEL_LEAVE_HOLD_MS = 400;
+  let followingChannelHoverCard = null;
+  const followingChannelHoldUntil = new WeakMap();
+  let followingChannelLeaveTimer = 0;
+  function leaveFollowingChannelCard(card) {
+    if (!card) return;
+    followingChannelHoldUntil.set(card, Date.now() + FOLLOWING_CHANNEL_LEAVE_HOLD_MS);
+    clearTimeout(followingChannelLeaveTimer);
+    followingChannelLeaveTimer = setTimeout(() => {
+      followingChannelLeaveTimer = 0;
+      applyFollowingChannelView();
+    }, FOLLOWING_CHANNEL_LEAVE_HOLD_MS + 50);
+  }
+  document.addEventListener("pointerover", (event) => {
+    const card = event.target?.closest?.(`ul[${FOLLOWING_CHANNEL_LIST_ATTR}] > li`) || null;
+    if (card === followingChannelHoverCard) return;
+    leaveFollowingChannelCard(followingChannelHoverCard);
+    followingChannelHoverCard = card;
+  }, true);
+  document.addEventListener("pointerleave", () => {
+    leaveFollowingChannelCard(followingChannelHoverCard);
+    followingChannelHoverCard = null;
+  });
+  const followingChannelLoad = { list: null, count: 0, lastGrowAt: 0, retries: 0, done: false, timer: 0 };
+  function normalizeFollowingChannelView(value) {
+    const v = value && typeof value === "object" ? value : {};
+    return {
+      sort: FOLLOWING_CHANNEL_SORTS.some(([key]) => key === v.sort) ? v.sort : "recent",
+      sub: v.sub === "on" || v.sub === "off" ? v.sub : "",
+      alarm: v.alarm === "on" || v.alarm === "off" ? v.alarm : "",
+    };
+  }
+  function findFollowingChannelList() {
+    return document.querySelector('#layout-body ul[class*="_type_channel_"]');
+  }
+  function followingChannelCardInfo(card, index) {
+    const nameEl = card.querySelector('[class*="_channel_"] [class*="_text_"]') ||
+      card.querySelector('[class*="_channel_"]');
+    const info = { card, index, id: followingCardChannelId(card), name: (nameEl?.textContent || "").trim() };
+    // ⚠ 마우스를 올린 카드는 마지막으로 읽은 상태를 쓴다. '구독중' 버튼은 마우스를 올리면 글자가 바뀌어
+    //   '구독 중' 필터에서 그 카드가 숨겨졌고, 뒤 카드가 당겨져 올라와 다시 마우스 아래 → 숨김을 되풀이하며
+    //   목록이 깜빡였다. 마우스가 떠나면(버튼 글자가 돌아오며 다음 틱) 다시 읽는다.
+    const cached = card.dataset.cheeseChannelState;
+    if (cached && (card === followingChannelHoverCard || (followingChannelHoldUntil.get(card) || 0) > Date.now())) {
+      info.sub = cached[0] === "1";
+      info.alarm = cached[1] === "1";
+      return info;
+    }
+    const alarmText = card.querySelector('button[class*="_alarm_"] .blind')?.textContent.trim() || "";
+    const subText = [...card.querySelectorAll("button")]
+      .map((button) => button.textContent.replace(/\s+/g, "")).find((text) => /^구독/.test(text)) || "";
+    info.alarm = alarmText === "알림 끄기";
+    info.sub = subText === "구독중";
+    const state = `${info.sub ? 1 : 0}${info.alarm ? 1 : 0}`;
+    if (cached !== state) card.dataset.cheeseChannelState = state;
+    return info;
+  }
+  function sortFollowingChannelInfos(infos, sort) {
+    if (sort === "oldest") return [...infos].reverse();
+    if (sort === "name-asc" || sort === "name-desc") {
+      followingChannelCollator ||= new Intl.Collator("ko", { numeric: true, sensitivity: "base" });
+      const sorted = [...infos].sort((a, b) => followingChannelCollator.compare(a.name, b.name) || a.index - b.index);
+      return sort === "name-desc" ? sorted.reverse() : sorted;
+    }
+    return infos;
+  }
+  function matchFollowingChannel(info, view, groupIds) {
+    if (groupIds && (!info.id || !groupIds.has(info.id))) return false;
+    if (view.sub && info.sub !== (view.sub === "on")) return false;
+    if (view.alarm && info.alarm !== (view.alarm === "on")) return false;
+    return true;
+  }
+  function clearFollowingChannelView(list) {
+    if (!list) return;
+    list.removeAttribute(FOLLOWING_CHANNEL_LIST_ATTR);
+    for (const card of list.children) {
+      if (card.style.order) card.style.removeProperty("order");
+      card.removeAttribute(FOLLOWING_CHANNEL_HIDDEN_ATTR);
+      delete card.dataset.cheeseChannelState;
+    }
+  }
+  function applyFollowingChannelView() {
+    const list = followingChannelToolsOn && isFollowingChannelPage() ? findFollowingChannelList() : null;
+    // 다른 목록(탭을 오갔다)이면 예전 목록 표시를 걷는다.
+    document.querySelectorAll(`ul[${FOLLOWING_CHANNEL_LIST_ATTR}]`).forEach((other) => {
+      if (other !== list) clearFollowingChannelView(other);
+    });
+    const groupIds = list ? followingGroupSelectedIds() : null;
+    const view = followingChannelView;
+    const active = Boolean(list) && (view.sort !== "recent" || view.sub || view.alarm || groupIds);
+    if (!active) {
+      clearFollowingChannelView(list);
+      stopFollowingChannelLoadAll();
+      setFollowingChannelCount("");
+      return;
+    }
+    list.setAttribute(FOLLOWING_CHANNEL_LIST_ATTR, "");
+    const infos = [...list.children]
+      .filter((card) => card.tagName === "LI")
+      .map((card, index) => followingChannelCardInfo(card, index));
+    const shown = sortFollowingChannelInfos(infos.filter((info) => matchFollowingChannel(info, view, groupIds)), view.sort);
+    const position = new Map(shown.map((info, index) => [info.card, index]));
+    for (const info of infos) {
+      const at = position.get(info.card);
+      const order = at === undefined ? "" : String(at);
+      if (info.card.style.order !== order) {
+        if (order) info.card.style.order = order;
+        else info.card.style.removeProperty("order");
+      }
+      const hidden = at === undefined;
+      if (info.card.hasAttribute(FOLLOWING_CHANNEL_HIDDEN_ATTR) !== hidden) {
+        info.card.toggleAttribute(FOLLOWING_CHANNEL_HIDDEN_ATTR, hidden);
+      }
+    }
+    const loading = ensureFollowingChannelLoadAll(list, infos.length);
+    setFollowingChannelCount(loading
+      ? `모두 불러오는 중… ${infos.length}개`
+      : `${infos.length}개 중 ${shown.length}개`);
+  }
+  function setFollowingChannelCount(text) {
+    if (followingChannelCountText === text) return;
+    followingChannelCountText = text;
+    const el = document.querySelector("[data-cf-channel-count]");
+    if (el) el.textContent = text;
+  }
+  // 다음 묶음 감지 지점: 목록 바로 뒤의 빈 div(높이 0). 화면 가운데에 1px 로 붙여 두면 치지직이 다음 묶음을
+  // 부른다. 같은 요소가 계속 남으므로, 목록이 늘 때마다 한 번 떼었다 두 프레임 뒤 다시 붙여 '새로 들어옴'을 만든다.
+  // 3초 넘게 늘지 않으면 스크롤 이벤트로 한 번 더 알리고, 그래도 그대로면 다 불러온 것으로 본다.
+  function followingChannelSentinel(list) {
+    const el = list.nextElementSibling;
+    return el && el.tagName === "DIV" && !el.firstElementChild && !(el.textContent || "").trim() ? el : null;
+  }
+  function stopFollowingChannelLoadAll() {
+    clearTimeout(followingChannelLoad.timer);
+    followingChannelLoad.timer = 0;
+    document.querySelectorAll(`[${FOLLOWING_CHANNEL_LOAD_ATTR}]`).forEach((el) => el.removeAttribute(FOLLOWING_CHANNEL_LOAD_ATTR));
+    followingChannelLoad.list = null;
+  }
+  function ensureFollowingChannelLoadAll(list, count) {
+    const state = followingChannelLoad;
+    if (state.list !== list) {
+      stopFollowingChannelLoadAll();
+      Object.assign(state, { list, count, lastGrowAt: Date.now(), retries: 0, done: false });
+    }
+    if (state.done) return false;
+    const sentinel = followingChannelSentinel(list);
+    if (!sentinel) {
+      // 마지막 묶음까지 받으면 치지직이 감지 지점을 없앤다.
+      state.done = true;
+      stopFollowingChannelLoadAll();
+      state.list = list;
+      return false;
+    }
+    if (count > state.count) {
+      state.count = count;
+      state.lastGrowAt = Date.now();
+      state.retries = 0;
+      sentinel.removeAttribute(FOLLOWING_CHANNEL_LOAD_ATTR);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (state.list === list && !state.done && sentinel.isConnected) sentinel.setAttribute(FOLLOWING_CHANNEL_LOAD_ATTR, "");
+      }));
+    } else if (!sentinel.hasAttribute(FOLLOWING_CHANNEL_LOAD_ATTR)) {
+      sentinel.setAttribute(FOLLOWING_CHANNEL_LOAD_ATTR, "");
+    }
+    // ⚠ 틱마다 타이머를 다시 걸지 않는다 — 화면이 계속 바뀌면(시청자 수 등) 영영 끝을 판단하지 못한다.
+    if (!state.timer) {
+      const check = () => {
+        state.timer = 0;
+        if (state.list !== list || state.done) return;
+        const idle = Date.now() - state.lastGrowAt;
+        if (idle < 3000) {
+          state.timer = setTimeout(check, 3000 - idle + 100);
+          return;
+        }
+        if (state.retries < 1) {
+          state.retries += 1;
+          state.lastGrowAt = Date.now();
+          sentinel.removeAttribute(FOLLOWING_CHANNEL_LOAD_ATTR);
+          [window, document, document.scrollingElement].forEach((target) => target?.dispatchEvent(new Event("scroll")));
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (state.list === list && !state.done) sentinel.setAttribute(FOLLOWING_CHANNEL_LOAD_ATTR, "");
+          }));
+          state.timer = setTimeout(check, 3100);
+          return;
+        }
+        state.done = true;
+        sentinel.removeAttribute(FOLLOWING_CHANNEL_LOAD_ATTR);
+        applyFollowingChannelView();
+      };
+      state.timer = setTimeout(check, 3100);
+    }
+    return true;
+  }
+  function setFollowingChannelView(next) {
+    followingChannelView = normalizeFollowingChannelView(next);
+    try {
+      chrome.storage?.local?.set({ [FOLLOWING_CHANNEL_VIEW_KEY]: followingChannelView });
+    } catch {}
+    ensureFollowingGroupBar();
+    applyFollowingChannelView();
+  }
+  document.addEventListener("click", (event) => {
+    const sortChip = event.target?.closest?.(`.${FOLLOWING_GROUP_BAR_CLASS} [data-cf-channel-sort]`);
+    const stateChip = event.target?.closest?.(`.${FOLLOWING_GROUP_BAR_CLASS} [data-cf-channel-state]`);
+    if (!sortChip && !stateChip) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (sortChip) {
+      setFollowingChannelView({ ...followingChannelView, sort: sortChip.dataset.cfChannelSort });
+      return;
+    }
+    // 같은 줄(구독·알림)은 하나만. 다시 누르면 끈다.
+    const [field, want] = String(stateChip.dataset.cfChannelState).split(":");
+    setFollowingChannelView({ ...followingChannelView, [field]: followingChannelView[field] === want ? "" : want });
+  }, true);
+  try {
+    chrome.storage?.local
+      ?.get([FOLLOWING_CHANNEL_VIEW_KEY, FOLLOWING_CHANNEL_TOOLS_KEY])
+      .then((data) => {
+        followingChannelView = normalizeFollowingChannelView(data?.[FOLLOWING_CHANNEL_VIEW_KEY]);
+        followingChannelToolsOn = data?.[FOLLOWING_CHANNEL_TOOLS_KEY] !== false;
+        ensureFollowingGroupBar();
+        applyFollowingChannelView();
+      })
+      .catch(() => {});
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area !== "local" || (!changes[FOLLOWING_CHANNEL_VIEW_KEY] && !changes[FOLLOWING_CHANNEL_TOOLS_KEY])) return;
+      if (changes[FOLLOWING_CHANNEL_VIEW_KEY]) {
+        followingChannelView = normalizeFollowingChannelView(changes[FOLLOWING_CHANNEL_VIEW_KEY].newValue);
+      }
+      if (changes[FOLLOWING_CHANNEL_TOOLS_KEY]) {
+        followingChannelToolsOn = changes[FOLLOWING_CHANNEL_TOOLS_KEY].newValue !== false;
+      }
+      ensureFollowingGroupBar();
+      applyFollowingChannelView();
+    });
+  } catch {}
   // ── 한 줄당 방송 개수(전체 방송·팔로잉 탭·카테고리 라이브/동영상) ─────────────
   // 치지직 목록은 ul(flex-wrap, 가로 간격 14px) 안 li 의 폭으로 한 줄 개수가 정해진다(2026-10-20
   // 실측: 1287px 에 li 420px × 3, transform·가상 목록 없음 — 카드는 모두 그려진다). 그래서 li 폭만
@@ -32839,6 +33136,7 @@ html.cheese-sidebar-resizing div#layout-body {
     } catch {}
     ensureFollowingGroupBar();
     applyLiveTagFilters();
+    applyFollowingChannelView();
   }
   document.addEventListener("click", (event) => {
     const chip = event.target?.closest?.(`.${FOLLOWING_GROUP_BAR_CLASS} [data-cf-follow-filter]`);
@@ -32856,6 +33154,7 @@ html.cheese-sidebar-resizing div#layout-body {
         followingGroupFilterSelected = typeof selected === "string" ? selected.slice(0, 80) : "";
         ensureFollowingGroupBar();
         applyLiveTagFilters();
+        applyFollowingChannelView();
       })
       .catch(() => {});
     chrome.storage?.onChanged?.addListener((changes, area) => {
@@ -32872,6 +33171,7 @@ html.cheese-sidebar-resizing div#layout-body {
       setTimeout(() => {
         ensureFollowingGroupBar();
         applyLiveTagFilters();
+        applyFollowingChannelView();
       }, 0);
     });
   } catch {}
@@ -56756,6 +57056,7 @@ html.cheese-sidebar-resizing div#layout-body {
       ensureChzzkPlaylistPanel(); // 재생목록으로 보는 다시보기: 채팅창 안 재생목록을 떠 있는 패널로
       ensureLiveTagFilterUi(); // 전체 방송·팔로잉의 제외 필터 관리 버튼 보장
       ensureFollowingGroupBar(); // 팔로잉 화면 그룹 필터 칩(전용 팔로잉 그룹·즐겨찾기)
+      applyFollowingChannelView(); // 팔로잉 채널 탭 정렬·상태 필터(바뀐 카드만)
       applyCardsPerRow(); // 한 줄당 방송 개수(페이지가 바뀌면 켜고 끈다)
       applyLiveTagFilters(); // 새로 렌더된 라이브 카드에도 제외 필터 즉시 적용
       expandFollowingLiveSection(); // 팔로잉 전체 탭 '라이브' 더보기 자동 펼치기(옵션 시)

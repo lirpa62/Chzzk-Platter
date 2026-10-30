@@ -96,7 +96,12 @@ const FIXTURE = `
       ${sliceConst("FOLLOWING_CARD_HREF")}
       let followingGroupFilterOn = true;
       let followingGroupFilterSelected = '';
-      ${["isFollowingPage", "followingGroupFilterChoices", "followingGroupFilterChannelIds", "followingCardChannelId",
+      // 채널 탭 정렬·상태 필터는 test-following-channel-view.cjs 가 본다(여기는 라이브 탭).
+      let followingChannelToolsOn = true;
+      let followingChannelCountText = '';
+      const isFollowingChannelPage = () => false;
+      const applyFollowingChannelView = () => {};
+      ${["isFollowingPage", "followingGroupFilterChoices", "followingGroupSelectedIds", "followingGroupFilterChannelIds", "followingCardChannelId",
         "findFollowingFilterCards", "findLiveTagFilterTablist", "ensureFollowingGroupBar", "setFollowingGroupFilter",
         "clearHiddenLiveTagFilterCards", "hideLiveTagFilterCard", "isLivePaginationSentinel",
         "preserveLiveTagFilterPaginationAnchors", "scheduleLiveTagFilterPaginationCheck", "applyLiveTagFilters"].map(sliceFn).join("\n")}

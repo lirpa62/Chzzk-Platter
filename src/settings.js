@@ -307,6 +307,8 @@
     "cheeseLiveTagFiltersFollowingDisabled",
     "cheeseFollowingLiveAutoExpand",
     "cheeseFollowingGroupFilter",
+    "cheeseFollowingChannelTools",
+    "cheeseFollowingChannelView",
     "cheeseFollowingGroupFilterSelected",
     "cheeseCardsPerRow",
     "cheeseLogPowerClickAction",
@@ -5576,6 +5578,8 @@
     ["[data-following-live-auto-expand]", "cheeseFollowingLiveAutoExpand", false],
     // 팔로잉 화면 그룹 필터 칩(기본 켬). 고른 칩(cheeseFollowingGroupFilterSelected)은 content.js 가 저장.
     ["[data-following-group-filter]", "cheeseFollowingGroupFilter", true],
+    // 팔로잉 채널 탭 정렬·상태(구독·알림) 칩(기본 켬).
+    ["[data-following-channel-tools]", "cheeseFollowingChannelTools", true],
     // 채팅 프로필 팝업 다듬기. 접힘 상태(cheeseChatProfileMenuFolded)는 팝업의 머리 버튼이 저장한다.
     ["[data-chat-profile-follow-days]", "cheeseChatProfileFollowDays", false],
     ["[data-chat-profile-menu-fold]", "cheeseChatProfileMenuFold", false],
